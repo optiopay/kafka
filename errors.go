@@ -6,6 +6,7 @@ import (
 
 var errnoToErr = map[int16]error{
 	-1: &KafkaError{-1, "unknown"},
+	0:  &KafkaError{0, "no error"},
 	1:  &KafkaError{1, "offset out of range"},
 	2:  &KafkaError{2, "invalid message"},
 	3:  &KafkaError{3, "unknown topic or partition"},

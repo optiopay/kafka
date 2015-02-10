@@ -17,8 +17,8 @@ type decoder struct {
 
 func newDecoder(r io.Reader) *decoder {
 	return &decoder{
-		r:   r,
 		buf: make([]byte, 1024),
+		r:   r,
 	}
 }
 
