@@ -7,14 +7,24 @@ import (
 	"io"
 )
 
-var ErrNotEnoughData = errors.New("not enough data")
+var (
+	ErrNotEnoughData = errors.New("not enough data")
+)
 
+// decoder holds the currently decoded information.
 type decoder struct {
 	buf []byte
 	r   io.Reader
 	err error
 }
 
+// encoder holds the writer instance to encode new bytes to.
+type encoder struct {
+	w   io.Writer
+	err error
+}
+
+// newDecoder returns a default new instance of decoder.
 func newDecoder(r io.Reader) *decoder {
 	return &decoder{
 		buf: make([]byte, 1024),
@@ -22,6 +32,12 @@ func newDecoder(r io.Reader) *decoder {
 	}
 }
 
+// newEncoder returns a default new instance of encoder.
+func newEncoder(w io.Writer) *encoder {
+	return &encoder{w: w}
+}
+
+// DecodeInt8 reads an int8 to the decoder instance.
 func (d *decoder) DecodeInt8() int8 {
 	if d.err != nil {
 		return 0
@@ -40,6 +56,7 @@ func (d *decoder) DecodeInt8() int8 {
 	return int8(b[0])
 }
 
+// DecodeInt16 reads an int16 to the decoder instance.
 func (d *decoder) DecodeInt16() int16 {
 	if d.err != nil {
 		return 0
@@ -57,6 +74,7 @@ func (d *decoder) DecodeInt16() int16 {
 	return int16(binary.BigEndian.Uint16(b))
 }
 
+// DecodeInt32 reads an int32 to the decoder instance.
 func (d *decoder) DecodeInt32() int32 {
 	if d.err != nil {
 		return 0
@@ -74,7 +92,7 @@ func (d *decoder) DecodeInt32() int32 {
 	return int32(binary.BigEndian.Uint32(b))
 }
 
-// XXX
+// DecodeUint32 reads an uint32 to the decoder instance.
 func (d *decoder) DecodeUint32() uint32 {
 	if d.err != nil {
 		return 0
@@ -92,6 +110,7 @@ func (d *decoder) DecodeUint32() uint32 {
 	return binary.BigEndian.Uint32(b)
 }
 
+// DecodeUint64 reads an uint64 to the decoder instance.
 func (d *decoder) DecodeInt64() int64 {
 	if d.err != nil {
 		return 0
@@ -109,6 +128,8 @@ func (d *decoder) DecodeInt64() int64 {
 	return int64(binary.BigEndian.Uint64(b))
 }
 
+// DecodeString reads a string to the decoder instance, where the first two
+// bytes give the string length.
 func (d *decoder) DecodeString() string {
 	if d.err != nil {
 		return ""
@@ -139,10 +160,12 @@ func (d *decoder) DecodeString() string {
 	return string(b)
 }
 
+// DecodeArrayLen delegates to DecodeInt32.
 func (d *decoder) DecodeArrayLen() int {
 	return int(d.DecodeInt32())
 }
 
+// DecodeBytes reads in a number of bytes defined in the first 4 bytes.
 func (d *decoder) DecodeBytes() []byte {
 	if d.err != nil {
 		return nil
@@ -168,19 +191,12 @@ func (d *decoder) DecodeBytes() []byte {
 	return b
 }
 
+// Err returns the current decoder error status.
 func (d *decoder) Err() error {
 	return d.err
 }
 
-type encoder struct {
-	w   io.Writer
-	err error
-}
-
-func newEncoder(w io.Writer) *encoder {
-	return &encoder{w: w}
-}
-
+// Encode writes to encoder by delegating to an appropriate type handler.
 func (e *encoder) Encode(value interface{}) {
 	if e.err != nil {
 		return
@@ -210,10 +226,12 @@ func (e *encoder) Encode(value interface{}) {
 	}
 }
 
+// EncodeArrayLen delegates to the Encode function with an int32 data type.
 func (e *encoder) EncodeArrayLen(length int) {
 	e.Encode(int32(length))
 }
 
+// Err returns the current encoder error status.
 func (e *encoder) Err() error {
 	return e.err
 }
