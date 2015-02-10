@@ -4,7 +4,24 @@ import (
 	"fmt"
 )
 
-var errnoToErr = map[int16]error{
+const (
+	reqProduce      = 0
+	reqFetch        = 1
+	reqOffset       = 2
+	reqMetadata     = 3
+	reqOffsetCommit = 8
+	reqOffsetFetch  = 9
+	reqConsumerMeta = 10
+
+	compressNone   = 0
+	compressGZIP   = 1
+	compressSnappy = 2
+
+	offsetLatest   = -1
+	offsetEarliest = -2
+)
+
+var apiErrors = map[int16]error{
 	-1: &KafkaError{-1, "unknown"},
 	0:  &KafkaError{0, "no error"},
 	1:  &KafkaError{1, "offset out of range"},
@@ -41,7 +58,7 @@ func errFromNo(errno int16) error {
 	if errno == 0 {
 		return nil
 	}
-	err, ok := errnoToErr[errno]
+	err, ok := apiErrors[errno]
 	if !ok {
 		return fmt.Errorf("unknown kafka error %d", errno)
 	}

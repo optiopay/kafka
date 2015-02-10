@@ -8,23 +8,6 @@ import (
 	"io"
 )
 
-const (
-	reqProduce      = 0
-	reqFetch        = 1
-	reqOffset       = 2
-	reqMetadata     = 3
-	reqOffsetCommit = 8
-	reqOffsetFetch  = 9
-	reqConsumerMeta = 10
-
-	compressNone   = 0
-	compressGZIP   = 1
-	compressSnappy = 2
-
-	offsetLatest   = -1
-	offsetEarliest = -2
-)
-
 // Message encapsualtes a Kafka message.
 type Message struct {
 	Offset int64
