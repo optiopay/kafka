@@ -26,6 +26,8 @@ type BrokerConfig struct {
 	ClientID string
 }
 
+// Broker is abstrac connection to kafka cluster, managing connections to all
+// kafka nodes.
 type Broker struct {
 	config BrokerConfig
 
@@ -34,6 +36,9 @@ type Broker struct {
 	conns    map[int32]*connection
 }
 
+// Dial connects to any node from given list of kafka addresses and after
+// successful metadata fetch, returns broker.
+// Returned broker is not initially connected to any kafka node.
 func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 	broker := &Broker{
 		config: config,
@@ -50,6 +55,7 @@ func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 			log.Printf("could not connect to %s: %s", addr, err)
 			continue
 		}
+		defer conn.Close()
 		resp, err := conn.Metadata(&MetadataReq{
 			ClientID: broker.config.ClientID,
 			Topics:   nil,
@@ -71,6 +77,9 @@ func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 	return nil, errors.New("could not connect")
 }
 
+// leaderConnection returns connection to leader for given partition. If
+// connection does not exist, broker will try to connect first and add store
+// connection for any further use.
 func (b *Broker) leaderConnection(topic string, partition int32) (conn *connection, err error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -109,8 +118,8 @@ func NewProducerConfig() ProducerConfig {
 	}
 }
 
+// Producer is link to broker with extra configuration.
 type Producer struct {
-	// TODO(husio) configuration
 	config ProducerConfig
 	broker *Broker
 }
@@ -126,6 +135,8 @@ func (p *Producer) Config() ProducerConfig {
 	return p.config
 }
 
+// Produce writes messages to given destination. Write within single Produce
+// call are atomic, meaning either all or none of them are written to kafka.
 func (p *Producer) Produce(topic string, partition int32, messages ...*Message) (offset int64, err error) {
 	conn, err := p.broker.leaderConnection(topic, partition)
 	if err != nil {
@@ -206,6 +217,7 @@ func NewConsumerConfig(topic string, partition int32) ConsumerConfig {
 	}
 }
 
+// Consumer is representing single partition reading buffer.
 type Consumer struct {
 	broker *Broker
 	conn   *connection
@@ -214,6 +226,7 @@ type Consumer struct {
 	msgbuf []*Message
 }
 
+// Consumer creates cursor capable of reading messages from given source.
 func (b *Broker) Consumer(config ConsumerConfig) (consumer *Consumer, err error) {
 	conn, err := b.leaderConnection(config.Topic, config.Partition)
 	if err != nil {
@@ -233,6 +246,7 @@ func (c *Consumer) Config() ConsumerConfig {
 	return c.config
 }
 
+// Fetch is returning single message from consumed partition.
 func (c *Consumer) Fetch() (*Message, error) {
 	var retry int
 
