@@ -205,9 +205,27 @@ func (e *encoder) Encode(value interface{}) {
 		if e.err == nil {
 			e.err = binary.Write(e.w, binary.BigEndian, val)
 		}
+	case []int32:
+		e.EncodeArrayLen(len(val))
+		for _, v := range val {
+			e.Encode(v)
+		}
 	default:
 		e.err = fmt.Errorf("cannot encode type %T", value)
 	}
+}
+
+func (e *encoder) EncodeError(err error) {
+	if err == nil {
+		e.err = binary.Write(e.w, binary.BigEndian, int16(0))
+		return
+	}
+	kerr, ok := err.(*KafkaError)
+	if !ok {
+		e.err = fmt.Errorf("cannot encode error of type %T", err)
+	}
+
+	e.err = binary.Write(e.w, binary.BigEndian, int16(kerr.errno))
 }
 
 func (e *encoder) EncodeArrayLen(length int) {

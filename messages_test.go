@@ -106,6 +106,14 @@ func TestMetadataResponse(t *testing.T) {
 	if !reflect.DeepEqual(resp, expected) {
 		t.Fatalf("expected different message: %#v", resp)
 	}
+
+	if b, err := resp.Bytes(); err != nil {
+		t.Fatalf("cannot serialize response: %s", err)
+	} else {
+		if !bytes.Equal(b, msgb) {
+			t.Fatalf("serialized representation different from expected: %#v", b)
+		}
+	}
 }
 
 func TestProduceRequest(t *testing.T) {
@@ -167,6 +175,14 @@ func TestProduceResponse(t *testing.T) {
 		t.Fatalf("expected different message: %#v", resp1)
 	}
 
+	if b, err := resp1.Bytes(); err != nil {
+		t.Fatalf("cannot serialize response: %s", err)
+	} else {
+		if !bytes.Equal(b, msgb1) {
+			t.Fatalf("serialized representation different from expected: %#v", b)
+		}
+	}
+
 	msgb2 := []byte{0x0, 0x0, 0x0, 0x1f, 0x0, 0x0, 0x0, 0xf1, 0x0, 0x0, 0x0, 0x1, 0x0, 0x3, 0x66, 0x6f, 0x6f, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}
 	resp2, err := ReadProduceResp(bytes.NewBuffer(msgb2))
 	if err != nil {
@@ -189,6 +205,13 @@ func TestProduceResponse(t *testing.T) {
 	}
 	if !reflect.DeepEqual(resp2, expected2) {
 		t.Fatalf("expected different message: %#v", resp2)
+	}
+	if b, err := resp2.Bytes(); err != nil {
+		t.Fatalf("cannot serialize response: %s", err)
+	} else {
+		if !bytes.Equal(b, msgb2) {
+			t.Fatalf("serialized representation different from expected: %#v", b)
+		}
 	}
 }
 
@@ -250,5 +273,12 @@ func TestFetchResponse(t *testing.T) {
 	}
 	if !reflect.DeepEqual(resp, expected) {
 		t.Fatalf("expected different message: %#v", resp)
+	}
+	if b, err := resp.Bytes(); err != nil {
+		t.Fatalf("cannot serialize response: %s", err)
+	} else {
+		if !bytes.Equal(b, msgb) {
+			t.Fatalf("serialized representation different from expected: %#v", b)
+		}
 	}
 }

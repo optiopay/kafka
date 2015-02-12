@@ -61,6 +61,31 @@ type Message struct {
 	Value  []byte
 }
 
+func writeMessageSet(w io.Writer, messages []*Message) error {
+	var buf bytes.Buffer
+	enc := newEncoder(&buf)
+
+	enc.Encode(int32(0)) // placeholder for full message size
+	for _, message := range messages {
+		enc.Encode(int64(message.Offset))
+		messageSize := 14 + len(message.Key) + len(message.Value)
+		enc.Encode(int32(messageSize))
+		enc.Encode(message.Crc)
+		enc.Encode(int8(0)) // magic byte
+		enc.Encode(int8(0)) // attributes
+		enc.Encode(message.Key)
+		enc.Encode(message.Value)
+	}
+	if err := enc.Err(); err != nil {
+		return err
+	}
+
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+	_, err := w.Write(b)
+	return err
+}
+
 func readMessageSet(r io.Reader) ([]*Message, error) {
 	set := make([]*Message, 0, 32)
 	dec := newDecoder(r)
@@ -182,6 +207,44 @@ type MetadataRespPartition struct {
 	Leader   int32
 	Replicas []int32
 	Isrs     []int32
+}
+
+func (r *MetadataResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := newEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeArrayLen(len(r.Brokers))
+	for _, broker := range r.Brokers {
+		enc.Encode(broker.NodeID)
+		enc.Encode(broker.Host)
+		enc.Encode(broker.Port)
+	}
+	enc.EncodeArrayLen(len(r.Topics))
+	for _, topic := range r.Topics {
+		enc.EncodeError(topic.Err)
+		enc.Encode(topic.Name)
+		enc.EncodeArrayLen(len(topic.Partitions))
+		for _, part := range topic.Partitions {
+			enc.EncodeError(part.Err)
+			enc.Encode(part.ID)
+			enc.Encode(part.Leader)
+			enc.Encode(part.Replicas)
+			enc.Encode(part.Isrs)
+		}
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
 }
 
 func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
@@ -312,6 +375,36 @@ type FetchRespPartition struct {
 	Err       error
 	TipOffset int64
 	Messages  []*Message
+}
+
+func (r *FetchResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := newEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeArrayLen(len(r.Topics))
+	for _, topic := range r.Topics {
+		enc.Encode(topic.Name)
+		enc.EncodeArrayLen(len(topic.Partitions))
+		for _, part := range topic.Partitions {
+			enc.Encode(part.ID)
+			enc.EncodeError(part.Err)
+			enc.Encode(part.TipOffset)
+			writeMessageSet(&buf, part.Messages)
+		}
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
 }
 
 func ReadFetchResp(r io.Reader) (*FetchResp, error) {
@@ -710,6 +803,35 @@ type ProduceRespPartition struct {
 	ID     int32
 	Err    error
 	Offset int64
+}
+
+func (r *ProduceResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := newEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeArrayLen(len(r.Topics))
+	for _, topic := range r.Topics {
+		enc.Encode(topic.Name)
+		enc.EncodeArrayLen(len(topic.Partitions))
+		for _, part := range topic.Partitions {
+			enc.Encode(part.ID)
+			enc.EncodeError(part.Err)
+			enc.Encode(part.Offset)
+		}
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
 }
 
 func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
