@@ -73,31 +73,31 @@ func TestMetadataResponse(t *testing.T) {
 	}
 	expected := &MetadataResp{
 		CorrelationID: 123,
-		Brokers: []BrokerMetadata{
-			BrokerMetadata{NodeID: 49168, Host: "172.17.42.1", Port: 49168},
-			BrokerMetadata{NodeID: 49170, Host: "172.17.42.1", Port: 49170},
-			BrokerMetadata{NodeID: 49169, Host: "172.17.42.1", Port: 49169},
-			BrokerMetadata{NodeID: 49171, Host: "172.17.42.1", Port: 49171},
+		Brokers: []MetadataRespBroker{
+			MetadataRespBroker{NodeID: 49168, Host: "172.17.42.1", Port: 49168},
+			MetadataRespBroker{NodeID: 49170, Host: "172.17.42.1", Port: 49170},
+			MetadataRespBroker{NodeID: 49169, Host: "172.17.42.1", Port: 49169},
+			MetadataRespBroker{NodeID: 49171, Host: "172.17.42.1", Port: 49171},
 		},
-		Topics: []TopicMetadata{
-			TopicMetadata{
+		Topics: []MetadataRespTopic{
+			MetadataRespTopic{
 				Name: "foo",
 				Err:  error(nil),
-				Partitions: []PartitionMetadata{
-					PartitionMetadata{Err: error(nil), ID: 2, Leader: 49171, Replicas: []int32{49171, 49168, 49169}, Isrs: []int32{49171, 49168, 49169}},
-					PartitionMetadata{Err: error(nil), ID: 5, Leader: 49170, Replicas: []int32{49170, 49168, 49169}, Isrs: []int32{49170, 49168, 49169}},
-					PartitionMetadata{Err: error(nil), ID: 4, Leader: 49169, Replicas: []int32{49169, 49171, 49168}, Isrs: []int32{49169, 49171, 49168}},
-					PartitionMetadata{Err: error(nil), ID: 1, Leader: 49170, Replicas: []int32{49170, 49171, 49168}, Isrs: []int32{49170, 49171, 49168}},
-					PartitionMetadata{Err: error(nil), ID: 3, Leader: 49168, Replicas: []int32{49168, 49169, 49170}, Isrs: []int32{49168, 49169, 49170}},
-					PartitionMetadata{Err: error(nil), ID: 0, Leader: 49169, Replicas: []int32{49169, 49170, 49171}, Isrs: []int32{49169, 49170, 49171}},
+				Partitions: []MetadataRespPartition{
+					MetadataRespPartition{Err: error(nil), ID: 2, Leader: 49171, Replicas: []int32{49171, 49168, 49169}, Isrs: []int32{49171, 49168, 49169}},
+					MetadataRespPartition{Err: error(nil), ID: 5, Leader: 49170, Replicas: []int32{49170, 49168, 49169}, Isrs: []int32{49170, 49168, 49169}},
+					MetadataRespPartition{Err: error(nil), ID: 4, Leader: 49169, Replicas: []int32{49169, 49171, 49168}, Isrs: []int32{49169, 49171, 49168}},
+					MetadataRespPartition{Err: error(nil), ID: 1, Leader: 49170, Replicas: []int32{49170, 49171, 49168}, Isrs: []int32{49170, 49171, 49168}},
+					MetadataRespPartition{Err: error(nil), ID: 3, Leader: 49168, Replicas: []int32{49168, 49169, 49170}, Isrs: []int32{49168, 49169, 49170}},
+					MetadataRespPartition{Err: error(nil), ID: 0, Leader: 49169, Replicas: []int32{49169, 49170, 49171}, Isrs: []int32{49169, 49170, 49171}},
 				},
 			},
-			TopicMetadata{
+			MetadataRespTopic{
 				Name: "test",
 				Err:  error(nil),
-				Partitions: []PartitionMetadata{
-					PartitionMetadata{Err: error(nil), ID: 1, Leader: 49169, Replicas: []int32{49169, 49170, 49171}, Isrs: []int32{49169, 49170, 49171}},
-					PartitionMetadata{Err: error(nil), ID: 0, Leader: 49168, Replicas: []int32{49168, 49169, 49170}, Isrs: []int32{49168, 49169, 49170}},
+				Partitions: []MetadataRespPartition{
+					MetadataRespPartition{Err: error(nil), ID: 1, Leader: 49169, Replicas: []int32{49169, 49170, 49171}, Isrs: []int32{49169, 49170, 49171}},
+					MetadataRespPartition{Err: error(nil), ID: 0, Leader: 49168, Replicas: []int32{49168, 49169, 49170}, Isrs: []int32{49168, 49169, 49170}},
 				},
 			},
 		},
@@ -119,7 +119,7 @@ func TestProduceRequest(t *testing.T) {
 				Name: "foo",
 				Partitions: []ProduceReqPartition{
 					ProduceReqPartition{
-						Partition: 0,
+						ID: 0,
 						Messages: []*Message{
 							&Message{
 								Offset: 53,
@@ -155,9 +155,9 @@ func TestProduceResponse(t *testing.T) {
 				Name: "fruits",
 				Partitions: []ProduceRespPartition{
 					ProduceRespPartition{
-						Partition: 93,
-						Err:       ErrUnknownTopicOrPartition,
-						Offset:    -1,
+						ID:     93,
+						Err:    ErrUnknownTopicOrPartition,
+						Offset: -1,
 					},
 				},
 			},
@@ -179,9 +179,9 @@ func TestProduceResponse(t *testing.T) {
 				Name: "foo",
 				Partitions: []ProduceRespPartition{
 					ProduceRespPartition{
-						Partition: 0,
-						Err:       error(nil),
-						Offset:    1,
+						ID:     0,
+						Err:    error(nil),
+						Offset: 1,
 					},
 				},
 			},
@@ -198,12 +198,12 @@ func TestFetchRequest(t *testing.T) {
 		ClientID:      "test",
 		MaxWaitTime:   time.Second * 2,
 		MinBytes:      12454,
-		Sources: []FetchReqTopic{
+		Topics: []FetchReqTopic{
 			FetchReqTopic{
-				Topic: "foo",
+				Name: "foo",
 				Partitions: []FetchReqPartition{
-					FetchReqPartition{Partition: 421, FetchOffset: 529, MaxBytes: 4921},
-					FetchReqPartition{Partition: 0, FetchOffset: 11, MaxBytes: 92},
+					FetchReqPartition{ID: 421, FetchOffset: 529, MaxBytes: 4921},
+					FetchReqPartition{ID: 0, FetchOffset: 11, MaxBytes: 92},
 				},
 			},
 		},
@@ -225,12 +225,12 @@ func TestFetchResponse(t *testing.T) {
 	}
 	expected := &FetchResp{
 		CorrelationID: 241,
-		Sources: []FetchRespTopic{
+		Topics: []FetchRespTopic{
 			FetchRespTopic{
-				Topic: "foo",
+				Name: "foo",
 				Partitions: []FetchRespPartition{
 					FetchRespPartition{
-						Partition: 0,
+						ID:        0,
 						Err:       error(nil),
 						TipOffset: 4,
 						Messages: []*Message{
@@ -239,7 +239,7 @@ func TestFetchResponse(t *testing.T) {
 						},
 					},
 					FetchRespPartition{
-						Partition: 1,
+						ID:        1,
 						Err:       ErrUnknownTopicOrPartition,
 						TipOffset: -1,
 						Messages:  []*Message{},

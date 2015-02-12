@@ -140,8 +140,8 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 				Name: topic,
 				Partitions: []ProduceReqPartition{
 					ProduceReqPartition{
-						Partition: partition,
-						Messages:  messages,
+						ID:       partition,
+						Messages: messages,
 					},
 				},
 			},
@@ -161,8 +161,8 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 			continue
 		}
 		for _, part := range t.Partitions {
-			if part.Partition != partition {
-				log.Printf("unexpected partition information received: %s:%d", t.Name, part.Partition)
+			if part.ID != partition {
+				log.Printf("unexpected partition information received: %s:%d", t.Name, part.ID)
 				continue
 			}
 			found = true
@@ -241,12 +241,12 @@ func (c *Consumer) Fetch() (*Message, error) {
 			ClientID:    c.broker.config.ClientID,
 			MaxWaitTime: c.config.FetchTimeout,
 			MinBytes:    c.config.MinFetchSize,
-			Sources: []FetchReqTopic{
+			Topics: []FetchReqTopic{
 				FetchReqTopic{
-					Topic: c.config.Topic,
+					Name: c.config.Topic,
 					Partitions: []FetchReqPartition{
 						FetchReqPartition{
-							Partition:   c.config.Partition,
+							ID:          c.config.Partition,
 							FetchOffset: c.offset + 1,
 							MaxBytes:    c.config.MaxFetchSize,
 						},
@@ -261,14 +261,14 @@ func (c *Consumer) Fetch() (*Message, error) {
 		}
 
 		found := false
-		for _, topic := range resp.Sources {
-			if topic.Topic != c.config.Topic {
-				log.Printf("unexpected topic information received: %s (expecting %s)", topic.Topic)
+		for _, topic := range resp.Topics {
+			if topic.Name != c.config.Topic {
+				log.Printf("unexpected topic information received: %s (expecting %s)", topic.Name)
 				continue
 			}
 			for _, part := range topic.Partitions {
-				if part.Partition != c.config.Partition {
-					log.Printf("unexpected partition information received: %s:%d", topic.Topic, part.Partition)
+				if part.ID != c.config.Partition {
+					log.Printf("unexpected partition information received: %s:%d", topic.Name, part.ID)
 					continue
 				}
 

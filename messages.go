@@ -160,25 +160,25 @@ func (r *MetadataReq) WriteTo(w io.Writer) (int64, error) {
 
 type MetadataResp struct {
 	CorrelationID int32
-	Brokers       []BrokerMetadata
-	Topics        []TopicMetadata
+	Brokers       []MetadataRespBroker
+	Topics        []MetadataRespTopic
 }
 
-type BrokerMetadata struct {
+type MetadataRespBroker struct {
 	NodeID int32
 	Host   string
 	Port   int32
 }
 
-type TopicMetadata struct {
+type MetadataRespTopic struct {
 	Name       string
 	Err        error
-	Partitions []PartitionMetadata
+	Partitions []MetadataRespPartition
 }
 
-type PartitionMetadata struct {
-	Err      error
+type MetadataRespPartition struct {
 	ID       int32
+	Err      error
 	Leader   int32
 	Replicas []int32
 	Isrs     []int32
@@ -192,7 +192,7 @@ func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 	_ = dec.DecodeInt32()
 	resp.CorrelationID = dec.DecodeInt32()
 
-	resp.Brokers = make([]BrokerMetadata, dec.DecodeArrayLen())
+	resp.Brokers = make([]MetadataRespBroker, dec.DecodeArrayLen())
 	for i := range resp.Brokers {
 		var b = &resp.Brokers[i]
 		b.NodeID = dec.DecodeInt32()
@@ -200,12 +200,12 @@ func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 		b.Port = dec.DecodeInt32()
 	}
 
-	resp.Topics = make([]TopicMetadata, dec.DecodeArrayLen())
+	resp.Topics = make([]MetadataRespTopic, dec.DecodeArrayLen())
 	for ti := range resp.Topics {
 		var t = &resp.Topics[ti]
 		t.Err = errFromNo(dec.DecodeInt16())
 		t.Name = dec.DecodeString()
-		t.Partitions = make([]PartitionMetadata, dec.DecodeArrayLen())
+		t.Partitions = make([]MetadataRespPartition, dec.DecodeArrayLen())
 		for pi := range t.Partitions {
 			var p = &t.Partitions[pi]
 			p.Err = errFromNo(dec.DecodeInt16())
@@ -236,16 +236,16 @@ type FetchReq struct {
 	MaxWaitTime   time.Duration
 	MinBytes      int32
 
-	Sources []FetchReqTopic
+	Topics []FetchReqTopic
 }
 
 type FetchReqTopic struct {
-	Topic      string
+	Name       string
 	Partitions []FetchReqPartition
 }
 
 type FetchReqPartition struct {
-	Partition   int32
+	ID          int32
 	FetchOffset int64
 	MaxBytes    int32
 }
@@ -266,12 +266,12 @@ func (r *FetchReq) Bytes() ([]byte, error) {
 	enc.Encode(int32(r.MaxWaitTime / time.Millisecond))
 	enc.Encode(r.MinBytes)
 
-	enc.EncodeArrayLen(len(r.Sources))
-	for _, source := range r.Sources {
-		enc.Encode(source.Topic)
-		enc.EncodeArrayLen(len(source.Partitions))
-		for _, part := range source.Partitions {
-			enc.Encode(part.Partition)
+	enc.EncodeArrayLen(len(r.Topics))
+	for _, topic := range r.Topics {
+		enc.Encode(topic.Name)
+		enc.EncodeArrayLen(len(topic.Partitions))
+		for _, part := range topic.Partitions {
+			enc.Encode(part.ID)
 			enc.Encode(part.FetchOffset)
 			enc.Encode(part.MaxBytes)
 		}
@@ -299,16 +299,16 @@ func (r *FetchReq) WriteTo(w io.Writer) (int64, error) {
 
 type FetchResp struct {
 	CorrelationID int32
-	Sources       []FetchRespTopic
+	Topics        []FetchRespTopic
 }
 
 type FetchRespTopic struct {
-	Topic      string
+	Name       string
 	Partitions []FetchRespPartition
 }
 
 type FetchRespPartition struct {
-	Partition int32
+	ID        int32
 	Err       error
 	TipOffset int64
 	Messages  []*Message
@@ -324,15 +324,14 @@ func ReadFetchResp(r io.Reader) (*FetchResp, error) {
 	_ = dec.DecodeInt32()
 	resp.CorrelationID = dec.DecodeInt32()
 
-	resp.Sources = make([]FetchRespTopic, dec.DecodeArrayLen())
-	for si := range resp.Sources {
-		var source = &resp.Sources[si]
-		source.Topic = dec.DecodeString()
-		source.Partitions = make([]FetchRespPartition, dec.DecodeArrayLen())
-		for pi := range source.Partitions {
-			var part = &source.Partitions[pi]
-
-			part.Partition = dec.DecodeInt32()
+	resp.Topics = make([]FetchRespTopic, dec.DecodeArrayLen())
+	for ti := range resp.Topics {
+		var topic = &resp.Topics[ti]
+		topic.Name = dec.DecodeString()
+		topic.Partitions = make([]FetchRespPartition, dec.DecodeArrayLen())
+		for pi := range topic.Partitions {
+			var part = &topic.Partitions[pi]
+			part.ID = dec.DecodeInt32()
 			part.Err = errFromNo(dec.DecodeInt16())
 			part.TipOffset = dec.DecodeInt64()
 			messagesSetSize := dec.DecodeInt32()
@@ -430,7 +429,7 @@ type OffsetCommitReqTopic struct {
 }
 
 type OffsetCommitReqPartition struct {
-	Partition int32
+	ID        int32
 	Offset    int64
 	TimeStamp time.Time
 	Metadata  string
@@ -454,7 +453,7 @@ func (r *OffsetCommitReq) Bytes() ([]byte, error) {
 		enc.Encode(topic.Name)
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
-			enc.Encode(part.Partition)
+			enc.Encode(part.ID)
 			enc.Encode(part.Offset)
 			// TODO(husio) is this really in milliseconds?
 			enc.Encode(part.TimeStamp.UnixNano() / int64(time.Millisecond))
@@ -493,8 +492,8 @@ type OffsetCommitRespTopic struct {
 }
 
 type OffsetCommitRespPartition struct {
-	Partition int32
-	Err       error
+	ID  int32
+	Err error
 }
 
 func ReadOffsetCommitResp(r io.Reader) (*OffsetCommitResp, error) {
@@ -511,7 +510,7 @@ func ReadOffsetCommitResp(r io.Reader) (*OffsetCommitResp, error) {
 		t.Partitions = make([]OffsetCommitRespPartition, dec.DecodeArrayLen())
 		for pi := range t.Partitions {
 			var p = &t.Partitions[pi]
-			p.Partition = dec.DecodeInt32()
+			p.ID = dec.DecodeInt32()
 			p.Err = errFromNo(dec.DecodeInt16())
 		}
 	}
@@ -586,10 +585,10 @@ type OffsetFetchRespTopic struct {
 }
 
 type OffsetFetchRespPartition struct {
-	Partition int32
-	Offset    int64
-	Metadata  string
-	Err       error
+	ID       int32
+	Offset   int64
+	Metadata string
+	Err      error
 }
 
 func ReadOffsetFetchResp(r io.Reader) (*OffsetFetchResp, error) {
@@ -606,7 +605,7 @@ func ReadOffsetFetchResp(r io.Reader) (*OffsetFetchResp, error) {
 		t.Partitions = make([]OffsetFetchRespPartition, dec.DecodeArrayLen())
 		for pi := range t.Partitions {
 			var p = &t.Partitions[pi]
-			p.Partition = dec.DecodeInt32()
+			p.ID = dec.DecodeInt32()
 			p.Offset = dec.DecodeInt64()
 			p.Metadata = dec.DecodeString()
 			p.Err = errFromNo(dec.DecodeInt16())
@@ -633,8 +632,8 @@ type ProduceReqTopic struct {
 }
 
 type ProduceReqPartition struct {
-	Partition int32
-	Messages  []*Message
+	ID       int32
+	Messages []*Message
 }
 
 func (r *ProduceReq) Bytes() ([]byte, error) {
@@ -655,7 +654,7 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 		enc.Encode(t.Name)
 		enc.EncodeArrayLen(len(t.Partitions))
 		for _, p := range t.Partitions {
-			enc.Encode(p.Partition)
+			enc.Encode(p.ID)
 
 			var msgSetSize int32
 			var messageBytes = make([][]byte, len(p.Messages))
@@ -708,9 +707,9 @@ type ProduceRespTopic struct {
 }
 
 type ProduceRespPartition struct {
-	Partition int32
-	Err       error
-	Offset    int64
+	ID     int32
+	Err    error
+	Offset int64
 }
 
 func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
@@ -727,7 +726,7 @@ func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
 		t.Partitions = make([]ProduceRespPartition, dec.DecodeArrayLen())
 		for pi := range t.Partitions {
 			var p = &t.Partitions[pi]
-			p.Partition = dec.DecodeInt32()
+			p.ID = dec.DecodeInt32()
 			p.Err = errFromNo(dec.DecodeInt16())
 			p.Offset = dec.DecodeInt64()
 		}
@@ -752,7 +751,7 @@ type OffsetReqTopic struct {
 }
 
 type OffsetReqPartition struct {
-	Partition  int32
+	ID         int32
 	TimeMs     int64 // cannot be time.Time because of negative values
 	MaxOffsets int32
 }
@@ -774,7 +773,7 @@ func (r *OffsetReq) Bytes() ([]byte, error) {
 		enc.Encode(topic.Name)
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
-			enc.Encode(part.Partition)
+			enc.Encode(part.ID)
 			enc.Encode(part.TimeMs)
 			enc.Encode(part.MaxOffsets)
 		}
@@ -811,9 +810,9 @@ type OffsetRespTopic struct {
 }
 
 type OffsetRespPartition struct {
-	Partition int32
-	Err       error
-	Offsets   []int64
+	ID      int32
+	Err     error
+	Offsets []int64
 }
 
 func ReadOffsetResp(r io.Reader) (*OffsetResp, error) {
@@ -830,7 +829,7 @@ func ReadOffsetResp(r io.Reader) (*OffsetResp, error) {
 		t.Partitions = make([]OffsetRespPartition, dec.DecodeArrayLen())
 		for pi := range t.Partitions {
 			var p = &t.Partitions[pi]
-			p.Partition = dec.DecodeInt32()
+			p.ID = dec.DecodeInt32()
 			p.Err = errFromNo(dec.DecodeInt16())
 			p.Offsets = make([]int64, dec.DecodeArrayLen())
 			for oi := range p.Offsets {
