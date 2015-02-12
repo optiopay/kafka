@@ -28,7 +28,31 @@ const (
 	// pulled in descending order, asking for the earliest offset will always
 	// return you a single element
 	OffsetReqTimeEarliest = -2
+
+	RequiredAcksNone  = 0
+	RequiredAcksAll   = -1
+	RequiredAcksLocal = 1
 )
+
+// ReadResp returns message correlation ID and byte representation of the whole
+// message in wire protocol that is returned when reading from given stream,
+// including 4 bytes of message size itself.
+// Byte representation returned by ReadResp can be parsed by all response
+// reeaders to transform it into specialized response structure.
+func ReadResp(r io.Reader) (correlationID int32, b []byte, err error) {
+	dec := newDecoder(r)
+	msgSize := dec.DecodeInt32()
+	correlationID = dec.DecodeInt32()
+	if err := dec.Err(); err != nil {
+		return 0, nil, err
+	}
+	// size of the message + size of the message itself
+	b = make([]byte, msgSize+4)
+	binary.BigEndian.PutUint32(b, uint32(msgSize))
+	binary.BigEndian.PutUint32(b[4:], uint32(correlationID))
+	_, err = io.ReadFull(r, b[8:])
+	return correlationID, b, err
+}
 
 type Message struct {
 	Offset int64
