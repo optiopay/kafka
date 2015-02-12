@@ -9,11 +9,19 @@ import (
 )
 
 const (
+	// Size of request-response mapping array for every connection instance.
+	//
+	// Because client is responsible for setting up message correlation ID, we
+	// can use lock free array instead of lock protected map. The only
+	// requirement is that number of unanswered requests at any time has to be
+	// smalled than the response buffer size.
 	responseBufferSize int32 = 256
 )
 
+// ErrClosed is returned as result of any request made using closed connection.
 var ErrClosed = errors.New("closed")
 
+// Low level abstraction over TCP connection to one of kafka nodes.
 type connection struct {
 	conn    net.Conn
 	stopErr error
@@ -22,6 +30,7 @@ type connection struct {
 	respc   [responseBufferSize]chan []byte
 }
 
+// newConnection returns new, initialized connection or error
 func newConnection(address string) (*connection, error) {
 	conn, err := net.DialTimeout("tcp", address, time.Second*10)
 	if err != nil {
@@ -37,6 +46,8 @@ func newConnection(address string) (*connection, error) {
 	return c, nil
 }
 
+// nextIDLoop generates correlation IDs, making sure they are always in order
+// and within the scope of request-response mapping array.
 func (c *connection) nextIDLoop() {
 	var id int32 = 1
 	for {
@@ -53,6 +64,9 @@ func (c *connection) nextIDLoop() {
 	}
 }
 
+// readRespLoop constantly reading response messages from the socket and after
+// partial parsing, sends byte representation of the whole message to request
+// sending process.
 func (c *connection) readRespLoop() {
 	for i := range c.respc {
 		c.respc[i] = make(chan []byte, 1)
@@ -84,6 +98,9 @@ func (c *connection) Close() error {
 	return c.conn.Close()
 }
 
+// Metadata sends given metadata request to kafka node and returns related
+// metadata response.
+// Calling this method on closed connection will always return ErrClosed.
 func (c *connection) Metadata(req *MetadataReq) (*MetadataResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
@@ -100,6 +117,9 @@ func (c *connection) Metadata(req *MetadataReq) (*MetadataResp, error) {
 	return ReadMetadataResp(bytes.NewReader(b))
 }
 
+// Produce sends given produce request to kafka node and returns related
+// response.
+// Calling this method on closed connection will always return ErrClosed.
 func (c *connection) Produce(req *ProduceReq) (*ProduceResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
@@ -116,6 +136,8 @@ func (c *connection) Produce(req *ProduceReq) (*ProduceResp, error) {
 	return ReadProduceResp(bytes.NewReader(b))
 }
 
+// Fetch sends given fetch request to kafka node and returns related response.
+// Calling this method on closed connection will always return ErrClosed.
 func (c *connection) Fetch(req *FetchReq) (*FetchResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
