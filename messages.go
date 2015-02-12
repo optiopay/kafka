@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+/*
+
+Kafka wire protocol implemented as described in
+https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-Messagesets
+
+*/
+
 const (
 	produceReq          = 0
 	fetchReq            = 1
@@ -29,8 +36,13 @@ const (
 	// return you a single element
 	OffsetReqTimeEarliest = -2
 
-	RequiredAcksNone  = 0
-	RequiredAcksAll   = -1
+	// Server will not send any response
+	RequiredAcksNone = 0
+	// Server will block until the message is committed by all in sync replicas
+	// before sending a response
+	RequiredAcksAll = -1
+	// Server will wait the data is written to the local log before sending a
+	// response
 	RequiredAcksLocal = 1
 )
 
