@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net"
 	"time"
+
+	"github.com/optiopay/kafka/proto"
 )
 
 const (
@@ -31,8 +33,8 @@ type connection struct {
 }
 
 // newConnection returns new, initialized connection or error
-func newConnection(address string) (*connection, error) {
-	conn, err := net.DialTimeout("tcp", address, time.Second*10)
+func newConnection(address string, timeout time.Duration) (*connection, error) {
+	conn, err := net.DialTimeout("tcp", address, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +81,7 @@ func (c *connection) readRespLoop() {
 
 	rd := bufio.NewReader(c.conn)
 	for {
-		correlationID, b, err := ReadResp(rd)
+		correlationID, b, err := proto.ReadResp(rd)
 		if err != nil {
 			c.stopErr = err
 			return
@@ -101,7 +103,7 @@ func (c *connection) Close() error {
 // Metadata sends given metadata request to kafka node and returns related
 // metadata response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Metadata(req *MetadataReq) (*MetadataResp, error) {
+func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -114,13 +116,13 @@ func (c *connection) Metadata(req *MetadataReq) (*MetadataResp, error) {
 	if !ok {
 		return nil, c.stopErr
 	}
-	return ReadMetadataResp(bytes.NewReader(b))
+	return proto.ReadMetadataResp(bytes.NewReader(b))
 }
 
 // Produce sends given produce request to kafka node and returns related
 // response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Produce(req *ProduceReq) (*ProduceResp, error) {
+func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -133,12 +135,12 @@ func (c *connection) Produce(req *ProduceReq) (*ProduceResp, error) {
 	if !ok {
 		return nil, c.stopErr
 	}
-	return ReadProduceResp(bytes.NewReader(b))
+	return proto.ReadProduceResp(bytes.NewReader(b))
 }
 
 // Fetch sends given fetch request to kafka node and returns related response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Fetch(req *FetchReq) (*FetchResp, error) {
+func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -151,5 +153,5 @@ func (c *connection) Fetch(req *FetchReq) (*FetchResp, error) {
 	if !ok {
 		return nil, c.stopErr
 	}
-	return ReadFetchResp(bytes.NewReader(b))
+	return proto.ReadFetchResp(bytes.NewReader(b))
 }

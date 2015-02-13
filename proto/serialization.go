@@ -1,4 +1,4 @@
-package kafka
+package proto
 
 import (
 	"encoding/binary"
@@ -15,7 +15,7 @@ type decoder struct {
 	err error
 }
 
-func newDecoder(r io.Reader) *decoder {
+func NewDecoder(r io.Reader) *decoder {
 	return &decoder{
 		r:   r,
 		buf: make([]byte, 1024),
@@ -74,7 +74,6 @@ func (d *decoder) DecodeInt32() int32 {
 	return int32(binary.BigEndian.Uint32(b))
 }
 
-// XXX
 func (d *decoder) DecodeUint32() uint32 {
 	if d.err != nil {
 		return 0
@@ -177,7 +176,7 @@ type encoder struct {
 	err error
 }
 
-func newEncoder(w io.Writer) *encoder {
+func NewEncoder(w io.Writer) *encoder {
 	return &encoder{w: w}
 }
 

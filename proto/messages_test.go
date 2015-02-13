@@ -1,4 +1,4 @@
-package kafka
+package proto
 
 import (
 	"bytes"
@@ -62,6 +62,11 @@ func TestMetadataRequest(t *testing.T) {
 
 	if !bytes.Equal(b, expected) {
 		t.Fatalf("expected different bytes representation: %v", b)
+	}
+
+	r, _ := ReadMetadataReq(bytes.NewBuffer(expected))
+	if !reflect.DeepEqual(r, req2) {
+		t.Fatalf("malformed request: %#v", r)
 	}
 }
 
@@ -130,8 +135,8 @@ func TestProduceRequest(t *testing.T) {
 						ID: 0,
 						Messages: []*Message{
 							&Message{
-								Offset: 53,
-								Crc:    92,
+								Offset: 0,
+								Crc:    3099221847,
 								Key:    []byte("foo"),
 								Value:  []byte("bar"),
 							},
@@ -147,6 +152,11 @@ func TestProduceRequest(t *testing.T) {
 
 	if !bytes.Equal(b, expected) {
 		t.Fatalf("expected different bytes representation: %#v", b)
+	}
+
+	r, _ := ReadProduceReq(bytes.NewBuffer(expected))
+	if !reflect.DeepEqual(r, req) {
+		t.Fatalf("malformed request: %#v", r)
 	}
 }
 
@@ -238,6 +248,11 @@ func TestFetchRequest(t *testing.T) {
 	if !bytes.Equal(b, expected) {
 		t.Fatalf("expected different bytes representation: %#v", b)
 	}
+
+	r, _ := ReadFetchReq(bytes.NewBuffer(expected))
+	if !reflect.DeepEqual(r, req) {
+		t.Fatalf("malformed request: %#v", r)
+	}
 }
 
 func TestFetchResponse(t *testing.T) {
@@ -257,8 +272,8 @@ func TestFetchResponse(t *testing.T) {
 						Err:       error(nil),
 						TipOffset: 4,
 						Messages: []*Message{
-							&Message{Offset: 2, Crc: 0xb8ba5f57, Key: []uint8{0x66, 0x6f, 0x6f}, Value: []uint8{0x62, 0x61, 0x72}},
-							&Message{Offset: 3, Crc: 0xb8ba5f57, Key: []uint8{0x66, 0x6f, 0x6f}, Value: []uint8{0x62, 0x61, 0x72}},
+							&Message{Offset: 2, Crc: 0xb8ba5f57, Key: []byte("foo"), Value: []byte("bar")},
+							&Message{Offset: 3, Crc: 0xb8ba5f57, Key: []byte("foo"), Value: []byte("bar")},
 						},
 					},
 					FetchRespPartition{

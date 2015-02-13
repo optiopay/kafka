@@ -5,42 +5,62 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/optiopay/kafka/proto"
 )
 
-func testServer(responses [][]byte) (net.Listener, error) {
+type serializableMessage interface {
+	Bytes() ([]byte, error)
+}
+
+func testServer(messages ...serializableMessage) (net.Listener, error) {
 	ln, err := net.Listen("tcp", "")
 	if err != nil {
 		return nil, err
 	}
+
+	responses := make([][]byte, len(messages))
+	for i, m := range messages {
+		b, err := m.Bytes()
+		if err != nil {
+			ln.Close()
+			return nil, err
+		}
+		responses[i] = b
+	}
+
 	go func() {
 		for {
 			cli, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			for _, resp := range responses {
-				cli.Write(resp)
-			}
+
+			go func(conn net.Conn) {
+				for _, resp := range responses {
+					cli.Write(resp)
+				}
+			}(cli)
 		}
 	}()
 	return ln, nil
 }
 
 func TestConnectionMetadata(t *testing.T) {
-	resp1 := &MetadataResp{
+	resp1 := &proto.MetadataResp{
 		CorrelationID: 1,
-		Brokers: []MetadataRespBroker{
-			MetadataRespBroker{
+		Brokers: []proto.MetadataRespBroker{
+			proto.MetadataRespBroker{
 				NodeID: 666,
 				Host:   "example.com",
 				Port:   999,
 			},
 		},
-		Topics: []MetadataRespTopic{
-			MetadataRespTopic{
+		Topics: []proto.MetadataRespTopic{
+			proto.MetadataRespTopic{
 				Name: "foo",
-				Partitions: []MetadataRespPartition{
-					MetadataRespPartition{
+				Partitions: []proto.MetadataRespPartition{
+					proto.MetadataRespPartition{
 						ID:       7,
 						Leader:   7,
 						Replicas: []int32{7},
@@ -50,19 +70,15 @@ func TestConnectionMetadata(t *testing.T) {
 			},
 		},
 	}
-	resp1b, err := resp1.Bytes()
-	if err != nil {
-		t.Fatalf("could not create response message: %s", err)
-	}
-	ln, err := testServer([][]byte{resp1b})
+	ln, err := testServer(resp1)
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newConnection(ln.Addr().String())
+	conn, err := newConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
-	resp, err := conn.Metadata(&MetadataReq{
+	resp, err := conn.Metadata(&proto.MetadataReq{
 		ClientID: "tester",
 		Topics:   []string{"first", "second"},
 	})
@@ -81,13 +97,13 @@ func TestConnectionMetadata(t *testing.T) {
 }
 
 func TestConnectionProduce(t *testing.T) {
-	resp1 := &ProduceResp{
+	resp1 := &proto.ProduceResp{
 		CorrelationID: 1,
-		Topics: []ProduceRespTopic{
-			ProduceRespTopic{
+		Topics: []proto.ProduceRespTopic{
+			proto.ProduceRespTopic{
 				Name: "first",
-				Partitions: []ProduceRespPartition{
-					ProduceRespPartition{
+				Partitions: []proto.ProduceRespPartition{
+					proto.ProduceRespPartition{
 						ID:     0,
 						Err:    nil,
 						Offset: 4,
@@ -96,52 +112,44 @@ func TestConnectionProduce(t *testing.T) {
 			},
 		},
 	}
-	resp1b, err := resp1.Bytes()
-	if err != nil {
-		t.Fatalf("could not create response message: %s", err)
-	}
-	resp2 := &ProduceResp{
+	resp2 := &proto.ProduceResp{
 		CorrelationID: 2,
-		Topics: []ProduceRespTopic{
-			ProduceRespTopic{
+		Topics: []proto.ProduceRespTopic{
+			proto.ProduceRespTopic{
 				Name: "first",
-				Partitions: []ProduceRespPartition{
-					ProduceRespPartition{
+				Partitions: []proto.ProduceRespPartition{
+					proto.ProduceRespPartition{
 						ID:     0,
-						Err:    ErrLeaderNotAvailable,
+						Err:    proto.ErrLeaderNotAvailable,
 						Offset: -1,
 					},
 				},
 			},
 		},
 	}
-	resp2b, err := resp2.Bytes()
-	if err != nil {
-		t.Fatalf("could not create response message: %s", err)
-	}
 
 	// sending in random order should work as well
-	ln, err := testServer([][]byte{resp2b, resp1b})
+	ln, err := testServer(resp2, resp1)
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newConnection(ln.Addr().String())
+	conn, err := newConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
-	resp, err := conn.Produce(&ProduceReq{
+	resp, err := conn.Produce(&proto.ProduceReq{
 		ClientID:     "tester",
-		RequiredAcks: RequiredAcksAll,
+		RequiredAcks: proto.RequiredAcksAll,
 		Timeout:      time.Second,
-		Topics: []ProduceReqTopic{
-			ProduceReqTopic{
+		Topics: []proto.ProduceReqTopic{
+			proto.ProduceReqTopic{
 				Name: "first",
-				Partitions: []ProduceReqPartition{
-					ProduceReqPartition{
+				Partitions: []proto.ProduceReqPartition{
+					proto.ProduceReqPartition{
 						ID: 0,
-						Messages: []*Message{
-							&Message{Key: []byte("key 1"), Value: []byte("value 1")},
-							&Message{Key: []byte("key 2"), Value: []byte("value 2")},
+						Messages: []*proto.Message{
+							&proto.Message{Key: []byte("key 1"), Value: []byte("value 1")},
+							&proto.Message{Key: []byte("key 2"), Value: []byte("value 2")},
 						},
 					},
 				},
@@ -154,18 +162,18 @@ func TestConnectionProduce(t *testing.T) {
 	if !reflect.DeepEqual(resp, resp1) {
 		t.Fatal("expected different response %#v", resp)
 	}
-	resp, err = conn.Produce(&ProduceReq{
+	resp, err = conn.Produce(&proto.ProduceReq{
 		ClientID:     "tester",
-		RequiredAcks: RequiredAcksAll,
+		RequiredAcks: proto.RequiredAcksAll,
 		Timeout:      time.Second,
-		Topics: []ProduceReqTopic{
-			ProduceReqTopic{
+		Topics: []proto.ProduceReqTopic{
+			proto.ProduceReqTopic{
 				Name: "first",
-				Partitions: []ProduceReqPartition{
-					ProduceReqPartition{
+				Partitions: []proto.ProduceReqPartition{
+					proto.ProduceReqPartition{
 						ID: 0,
-						Messages: []*Message{
-							&Message{Key: []byte("key"), Value: []byte("value")},
+						Messages: []*proto.Message{
+							&proto.Message{Key: []byte("key"), Value: []byte("value")},
 						},
 					},
 				},
@@ -188,50 +196,45 @@ func TestConnectionProduce(t *testing.T) {
 }
 
 func TestConnectionFetch(t *testing.T) {
-	resp1 := &FetchResp{
+	resp1 := &proto.FetchResp{
 		CorrelationID: 1,
-		Topics: []FetchRespTopic{
-			FetchRespTopic{
+		Topics: []proto.FetchRespTopic{
+			proto.FetchRespTopic{
 				Name: "foo",
-				Partitions: []FetchRespPartition{
-					FetchRespPartition{
+				Partitions: []proto.FetchRespPartition{
+					proto.FetchRespPartition{
 						ID:        1,
 						Err:       nil,
 						TipOffset: 20,
-						Messages: []*Message{
-							&Message{Offset: 4, Crc: 421, Key: []byte("f"), Value: []byte("first")},
-							&Message{Offset: 5, Crc: 921, Key: []byte("s"), Value: []byte("second message")},
+						Messages: []*proto.Message{
+							&proto.Message{Offset: 4, Crc: 421, Key: []byte("f"), Value: []byte("first")},
+							&proto.Message{Offset: 5, Crc: 921, Key: []byte("s"), Value: []byte("second message")},
 						},
 					},
 				},
 			},
-			FetchRespTopic{
+			proto.FetchRespTopic{
 				Name: "bar",
-				Partitions: []FetchRespPartition{
-					FetchRespPartition{
+				Partitions: []proto.FetchRespPartition{
+					proto.FetchRespPartition{
 						ID:        6,
-						Err:       ErrUnknownTopicOrPartition,
+						Err:       proto.ErrUnknownTopicOrPartition,
 						TipOffset: -1,
-						Messages:  []*Message{},
+						Messages:  []*proto.Message{},
 					},
 				},
 			},
 		},
 	}
-	resp1b, err := resp1.Bytes()
-	if err != nil {
-		t.Fatalf("could not create response message: %s", err)
-	}
-	// sending in random order should work as well
-	ln, err := testServer([][]byte{resp1b})
+	ln, err := testServer(resp1)
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newConnection(ln.Addr().String())
+	conn, err := newConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
-	resp, err := conn.Fetch(&FetchReq{
+	resp, err := conn.Fetch(&proto.FetchReq{
 		ClientID: "tester",
 	})
 	if err != nil {

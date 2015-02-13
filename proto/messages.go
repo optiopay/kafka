@@ -1,9 +1,10 @@
-package kafka
+package proto
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"time"
@@ -46,13 +47,32 @@ const (
 	RequiredAcksLocal = 1
 )
 
+// ReadReq returns request kind ID and byte representation of the whole message
+// in wire protocol format.
+func ReadReq(r io.Reader) (requestKind int16, b []byte, err error) {
+	dec := NewDecoder(r)
+	msgSize := dec.DecodeInt32()
+	requestKind = dec.DecodeInt16()
+	if err := dec.Err(); err != nil {
+		return 0, nil, err
+	}
+	// size of the message + size of the message itself
+	b = make([]byte, msgSize+4)
+	binary.BigEndian.PutUint32(b, uint32(msgSize))
+	binary.BigEndian.PutUint16(b[4:], uint16(requestKind))
+	if _, err := io.ReadFull(r, b[6:]); err != nil {
+		return 0, nil, err
+	}
+	return requestKind, b, err
+}
+
 // ReadResp returns message correlation ID and byte representation of the whole
 // message in wire protocol that is returned when reading from given stream,
 // including 4 bytes of message size itself.
 // Byte representation returned by ReadResp can be parsed by all response
 // reeaders to transform it into specialized response structure.
 func ReadResp(r io.Reader) (correlationID int32, b []byte, err error) {
-	dec := newDecoder(r)
+	dec := NewDecoder(r)
 	msgSize := dec.DecodeInt32()
 	correlationID = dec.DecodeInt32()
 	if err := dec.Err(); err != nil {
@@ -75,7 +95,7 @@ type Message struct {
 
 func writeMessageSet(w io.Writer, messages []*Message) error {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	enc.Encode(int32(0)) // placeholder for full message size
 	for _, message := range messages {
@@ -100,7 +120,7 @@ func writeMessageSet(w io.Writer, messages []*Message) error {
 
 func readMessageSet(r io.Reader) ([]*Message, error) {
 	set := make([]*Message, 0, 32)
-	dec := newDecoder(r)
+	dec := NewDecoder(r)
 
 	for {
 		offset := dec.DecodeInt64()
@@ -111,23 +131,41 @@ func readMessageSet(r io.Reader) ([]*Message, error) {
 			return nil, err
 		}
 		// single message size
-		_ = dec.DecodeInt32()
+		size := dec.DecodeInt32()
+		if err := dec.Err(); err != nil {
+			return nil, err
+		}
+
+		// read message to buffer to compute it's content crc
+		msgbuf := make([]byte, size)
+		if _, err := io.ReadFull(r, msgbuf); err != nil {
+			return nil, err
+		}
+		msgdec := NewDecoder(bytes.NewBuffer(msgbuf))
 
 		msg := &Message{Offset: offset}
-		msg.Crc = dec.DecodeUint32()
-		// TODO(husio) check crc
+		msg.Crc = msgdec.DecodeUint32()
+
+		if msg.Crc != crc32.ChecksumIEEE(msgbuf[4:]) {
+			println("skipping message", msg.Crc, crc32.ChecksumIEEE(msgbuf[4:]))
+			return set, nil
+		}
 
 		// magic byte
-		_ = dec.DecodeInt8()
+		_ = msgdec.DecodeInt8()
 
-		attributes := dec.DecodeInt8()
+		attributes := msgdec.DecodeInt8()
 		if attributes != compressionNone {
 			// TODO(husio)
 			return nil, errors.New("cannot read compressed message")
 		}
 
-		msg.Key = dec.DecodeBytes()
-		msg.Value = dec.DecodeBytes()
+		msg.Key = msgdec.DecodeBytes()
+		msg.Value = msgdec.DecodeBytes()
+
+		if err := msgdec.Err(); err != nil {
+			return nil, fmt.Errorf("cannot decode message: %s", err)
+		}
 		set = append(set, msg)
 	}
 
@@ -136,7 +174,7 @@ func readMessageSet(r io.Reader) ([]*Message, error) {
 
 func (m *Message) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	enc.Encode(int32(0)) // crc placeholder, updated lated
 	enc.Encode(int8(0))  // magic byte is always 0
@@ -159,9 +197,30 @@ type MetadataReq struct {
 	Topics        []string
 }
 
+func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
+	var req MetadataReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	req.Topics = make([]string, dec.DecodeArrayLen())
+	for i := range req.Topics {
+		req.Topics[i] = dec.DecodeString()
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
 func (r *MetadataReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
@@ -223,7 +282,7 @@ type MetadataRespPartition struct {
 
 func (r *MetadataResp) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
@@ -261,7 +320,7 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 
 func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 	var resp MetadataResp
-	dec := newDecoder(r)
+	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
@@ -325,9 +384,42 @@ type FetchReqPartition struct {
 	MaxBytes    int32
 }
 
+func ReadFetchReq(r io.Reader) (*FetchReq, error) {
+	var req FetchReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	// replica id
+	_ = dec.DecodeInt32()
+	req.MaxWaitTime = time.Duration(dec.DecodeInt32()) * time.Millisecond
+	req.MinBytes = dec.DecodeInt32()
+	req.Topics = make([]FetchReqTopic, dec.DecodeArrayLen())
+	for ti := range req.Topics {
+		var topic = &req.Topics[ti]
+		topic.Name = dec.DecodeString()
+		topic.Partitions = make([]FetchReqPartition, dec.DecodeArrayLen())
+		for pi := range topic.Partitions {
+			var part = &topic.Partitions[pi]
+			part.ID = dec.DecodeInt32()
+			part.FetchOffset = dec.DecodeInt64()
+			part.MaxBytes = dec.DecodeInt32()
+		}
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
 func (r *FetchReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
@@ -391,7 +483,7 @@ type FetchRespPartition struct {
 
 func (r *FetchResp) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
@@ -423,7 +515,7 @@ func ReadFetchResp(r io.Reader) (*FetchResp, error) {
 	var err error
 	var resp FetchResp
 
-	dec := newDecoder(r)
+	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
@@ -462,9 +554,27 @@ type ConsumerMetadataReq struct {
 	ConsumerGroup string
 }
 
+func ReadConsumerMetadataReq(r io.Reader) (*ConsumerMetadataReq, error) {
+	var req ConsumerMetadataReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	req.ConsumerGroup = dec.DecodeString()
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
 func (r *ConsumerMetadataReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
@@ -505,7 +615,7 @@ type ConsumerMetadataResp struct {
 
 func ReadConsumerMetadataResp(r io.Reader) (*ConsumerMetadataResp, error) {
 	var resp ConsumerMetadataResp
-	dec := newDecoder(r)
+	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
@@ -519,6 +629,10 @@ func ReadConsumerMetadataResp(r io.Reader) (*ConsumerMetadataResp, error) {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func (r *ConsumerMetadataResp) Bytes() ([]byte, error) {
+	return nil, errors.New("not implemented")
 }
 
 type OffsetCommitReq struct {
@@ -540,9 +654,40 @@ type OffsetCommitReqPartition struct {
 	Metadata  string
 }
 
+func ReadOffsetCommitReq(r io.Reader) (*OffsetCommitReq, error) {
+	var req OffsetCommitReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	req.ConsumerGroup = dec.DecodeString()
+	req.Topics = make([]OffsetCommitReqTopic, dec.DecodeArrayLen())
+	for ti := range req.Topics {
+		var topic = &req.Topics[ti]
+		topic.Name = dec.DecodeString()
+		topic.Partitions = make([]OffsetCommitReqPartition, dec.DecodeArrayLen())
+		for pi := range topic.Partitions {
+			var part = &topic.Partitions[pi]
+			part.ID = dec.DecodeInt32()
+			part.Offset = dec.DecodeInt64()
+			part.TimeStamp = time.Unix(0, dec.DecodeInt64()*int64(time.Millisecond))
+			part.Metadata = dec.DecodeString()
+		}
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
 func (r *OffsetCommitReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
@@ -603,7 +748,7 @@ type OffsetCommitRespPartition struct {
 
 func ReadOffsetCommitResp(r io.Reader) (*OffsetCommitResp, error) {
 	var resp OffsetCommitResp
-	dec := newDecoder(r)
+	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
@@ -626,6 +771,10 @@ func ReadOffsetCommitResp(r io.Reader) (*OffsetCommitResp, error) {
 	return &resp, nil
 }
 
+func (r *OffsetCommitResp) Bytes() ([]byte, error) {
+	return nil, errors.New("not implemented")
+}
+
 type OffsetFetchReq struct {
 	CorrelationID int32
 	ClientID      string
@@ -638,9 +787,36 @@ type OffsetFetchReqTopic struct {
 	Partitions []int32
 }
 
+func ReadOffsetFetchReq(r io.Reader) (*OffsetFetchReq, error) {
+	var req OffsetFetchReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	req.ConsumerGroup = dec.DecodeString()
+	req.Topics = make([]OffsetFetchReqTopic, dec.DecodeArrayLen())
+	for ti := range req.Topics {
+		var topic = &req.Topics[ti]
+		topic.Name = dec.DecodeString()
+		topic.Partitions = make([]int32, dec.DecodeArrayLen())
+		for pi := range topic.Partitions {
+			topic.Partitions[pi] = dec.DecodeInt32()
+		}
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
 func (r *OffsetFetchReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
@@ -698,7 +874,7 @@ type OffsetFetchRespPartition struct {
 
 func ReadOffsetFetchResp(r io.Reader) (*OffsetFetchResp, error) {
 	var resp OffsetFetchResp
-	dec := newDecoder(r)
+	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
@@ -741,9 +917,46 @@ type ProduceReqPartition struct {
 	Messages []*Message
 }
 
+func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
+	var req ProduceReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	req.RequiredAcks = dec.DecodeInt16()
+	req.Timeout = time.Duration(dec.DecodeInt32()) * time.Millisecond
+	req.Topics = make([]ProduceReqTopic, dec.DecodeArrayLen())
+	for ti := range req.Topics {
+		var topic = &req.Topics[ti]
+		topic.Name = dec.DecodeString()
+		topic.Partitions = make([]ProduceReqPartition, dec.DecodeArrayLen())
+		for pi := range topic.Partitions {
+			var part = &topic.Partitions[pi]
+			part.ID = dec.DecodeInt32()
+			messagesSetSize := dec.DecodeInt32()
+			err := dec.Err()
+			if err != nil {
+				return nil, dec.Err()
+			}
+			if part.Messages, err = readMessageSet(io.LimitReader(r, int64(messagesSetSize))); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
 func (r *ProduceReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
@@ -819,7 +1032,7 @@ type ProduceRespPartition struct {
 
 func (r *ProduceResp) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
@@ -848,7 +1061,7 @@ func (r *ProduceResp) Bytes() ([]byte, error) {
 
 func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
 	var resp ProduceResp
-	dec := newDecoder(r)
+	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
@@ -890,9 +1103,40 @@ type OffsetReqPartition struct {
 	MaxOffsets int32
 }
 
+func ReadOffsetReq(r io.Reader) (*OffsetReq, error) {
+	var req OffsetReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	// replica id
+	_ = dec.DecodeInt32()
+	req.Topics = make([]OffsetReqTopic, dec.DecodeArrayLen())
+	for ti := range req.Topics {
+		var topic = &req.Topics[ti]
+		topic.Name = dec.DecodeString()
+		topic.Partitions = make([]OffsetReqPartition, dec.DecodeArrayLen())
+		for pi := range topic.Partitions {
+			var part = &topic.Partitions[pi]
+			part.ID = dec.DecodeInt32()
+			part.TimeMs = dec.DecodeInt64()
+			part.MaxOffsets = dec.DecodeInt32()
+		}
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
 func (r *OffsetReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := newEncoder(&buf)
+	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
@@ -951,7 +1195,7 @@ type OffsetRespPartition struct {
 
 func ReadOffsetResp(r io.Reader) (*OffsetResp, error) {
 	var resp OffsetResp
-	dec := newDecoder(r)
+	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
@@ -976,4 +1220,8 @@ func ReadOffsetResp(r io.Reader) (*OffsetResp, error) {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func (r *OffsetResp) Bytes() ([]byte, error) {
+	return nil, errors.New("not implemented")
 }

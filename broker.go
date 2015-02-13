@@ -7,6 +7,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/optiopay/kafka/proto"
 )
 
 const megabyte = 1048576
@@ -23,7 +25,15 @@ type clusterMetadata struct {
 }
 
 type BrokerConfig struct {
-	ClientID string
+	ClientID    string
+	DialTimeout time.Duration
+}
+
+func NewBrokerConfig(clientID string) BrokerConfig {
+	return BrokerConfig{
+		ClientID:    clientID,
+		DialTimeout: time.Second * 10,
+	}
 }
 
 // Broker is abstrac connection to kafka cluster, managing connections to all
@@ -50,13 +60,13 @@ func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 	}
 
 	for _, addr := range nodeAddresses {
-		conn, err := newConnection(addr)
+		conn, err := newConnection(addr, config.DialTimeout)
 		if err != nil {
 			log.Printf("could not connect to %s: %s", addr, err)
 			continue
 		}
 		defer conn.Close()
-		resp, err := conn.Metadata(&MetadataReq{
+		resp, err := conn.Metadata(&proto.MetadataReq{
 			ClientID: broker.config.ClientID,
 			Topics:   nil,
 		})
@@ -77,6 +87,11 @@ func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 	return nil, errors.New("could not connect")
 }
 
+func (b *Broker) Close() error {
+	// TODO(husio)
+	return nil
+}
+
 // leaderConnection returns connection to leader for given partition. If
 // connection does not exist, broker will try to connect first and add store
 // connection for any further use.
@@ -88,15 +103,15 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 	nodeID, ok := b.metadata.Endpoints[endpoint]
 	if !ok {
 		// TODO(husio) refresh metadata and check again
-		return nil, ErrUnknownTopicOrPartition
+		return nil, proto.ErrUnknownTopicOrPartition
 	}
 	conn, ok = b.conns[nodeID]
 	if !ok {
 		addr, ok := b.metadata.Nodes[nodeID]
 		if !ok {
-			return nil, ErrBrokerNotAvailable
+			return nil, proto.ErrBrokerNotAvailable
 		}
-		conn, err = newConnection(addr)
+		conn, err = newConnection(addr, b.config.DialTimeout)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +129,7 @@ type ProducerConfig struct {
 func NewProducerConfig() ProducerConfig {
 	return ProducerConfig{
 		Timeout:      time.Second,
-		RequiredAcks: RequiredAcksAll,
+		RequiredAcks: proto.RequiredAcksAll,
 	}
 }
 
@@ -135,6 +150,11 @@ func (p *Producer) Config() ProducerConfig {
 	return p.config
 }
 
+type Message struct {
+	Key   []byte
+	Value []byte
+}
+
 // Produce writes messages to given destination. Write within single Produce
 // call are atomic, meaning either all or none of them are written to kafka.
 func (p *Producer) Produce(topic string, partition int32, messages ...*Message) (offset int64, err error) {
@@ -142,17 +162,24 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 	if err != nil {
 		return 0, err
 	}
-	req := ProduceReq{
+	msgs := make([]*proto.Message, len(messages))
+	for i, m := range messages {
+		msgs[i] = &proto.Message{
+			Key:   m.Key,
+			Value: m.Value,
+		}
+	}
+	req := proto.ProduceReq{
 		ClientID:     p.broker.config.ClientID,
 		RequiredAcks: p.config.RequiredAcks,
 		Timeout:      p.config.Timeout,
-		Topics: []ProduceReqTopic{
-			ProduceReqTopic{
+		Topics: []proto.ProduceReqTopic{
+			proto.ProduceReqTopic{
 				Name: topic,
-				Partitions: []ProduceReqPartition{
-					ProduceReqPartition{
+				Partitions: []proto.ProduceReqPartition{
+					proto.ProduceReqPartition{
 						ID:       partition,
-						Messages: messages,
+						Messages: msgs,
 					},
 				},
 			},
@@ -223,7 +250,7 @@ type Consumer struct {
 	conn   *connection
 	config ConsumerConfig
 	offset int64
-	msgbuf []*Message
+	msgbuf []*proto.Message
 }
 
 // Consumer creates cursor capable of reading messages from given source.
@@ -236,7 +263,7 @@ func (b *Broker) Consumer(config ConsumerConfig) (consumer *Consumer, err error)
 		broker: b,
 		conn:   conn,
 		config: config,
-		msgbuf: make([]*Message, 0),
+		msgbuf: make([]*proto.Message, 0),
 		offset: 0,
 	}
 	return consumer, nil
@@ -247,19 +274,19 @@ func (c *Consumer) Config() ConsumerConfig {
 }
 
 // Fetch is returning single message from consumed partition.
-func (c *Consumer) Fetch() (*Message, error) {
+func (c *Consumer) Fetch() (*proto.Message, error) {
 	var retry int
 
 	for len(c.msgbuf) == 0 {
-		req := FetchReq{
+		req := proto.FetchReq{
 			ClientID:    c.broker.config.ClientID,
 			MaxWaitTime: c.config.FetchTimeout,
 			MinBytes:    c.config.MinFetchSize,
-			Topics: []FetchReqTopic{
-				FetchReqTopic{
+			Topics: []proto.FetchReqTopic{
+				proto.FetchReqTopic{
 					Name: c.config.Topic,
-					Partitions: []FetchReqPartition{
-						FetchReqPartition{
+					Partitions: []proto.FetchReqPartition{
+						proto.FetchReqPartition{
 							ID:          c.config.Partition,
 							FetchOffset: c.offset + 1,
 							MaxBytes:    c.config.MaxFetchSize,
@@ -293,11 +320,27 @@ func (c *Consumer) Fetch() (*Message, error) {
 					if c.config.FetchRetryLimit != -1 && retry > c.config.FetchRetryLimit {
 						return nil, ErrNoData
 					}
-				} else {
-					last := part.Messages[len(part.Messages)-1]
-					c.offset = last.Offset
-					c.msgbuf = part.Messages
+					continue
 				}
+
+				// check first messages if any of them has index lower than requested
+				toSkip := 0
+				messages := part.Messages
+				for toSkip < len(messages) {
+					if messages[toSkip].Offset >= c.offset {
+						break
+					}
+					toSkip++
+				}
+
+				// ignore all messages that are of index lower than requested
+				messages = messages[toSkip:]
+				if len(messages) == 0 {
+					found = false
+					continue
+				}
+
+				c.msgbuf = messages
 			}
 		}
 		if !found {
