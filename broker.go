@@ -34,13 +34,23 @@ type Logger interface {
 }
 
 type clusterMetadata struct {
-	Nodes     map[int32]string // node ID to address
-	Endpoints map[string]int32 // topic:partition to leader node ID
+	created   time.Time
+	nodes     map[int32]string // node ID to address
+	endpoints map[string]int32 // topic:partition to leader node ID
 }
 
 type BrokerConfig struct {
 	// Kafka client ID.
 	ClientID string
+
+	// LeaderRetryLimit limits number of connection attempts to single node
+	// before failing. Use LeaderRetryWait to control wait time between
+	// retries. Defaults to 10.
+	LeaderRetryLimit int
+
+	// LeaderRetryWait controls duration of wait between trying to connect to
+	// single node after failure. Defaults to 250ms.
+	LeaderRetryWait time.Duration
 
 	// Any new connection dial timeout. By default 10 seconds.
 	DialTimeout time.Duration
@@ -51,13 +61,15 @@ type BrokerConfig struct {
 
 func NewBrokerConfig(clientID string) BrokerConfig {
 	return BrokerConfig{
-		ClientID:    clientID,
-		DialTimeout: time.Second * 10,
-		Log:         log.New(ioutil.Discard, "kafka", log.LstdFlags),
+		ClientID:         clientID,
+		DialTimeout:      time.Second * 10,
+		LeaderRetryLimit: 10,
+		LeaderRetryWait:  time.Millisecond * 250,
+		Log:              log.New(ioutil.Discard, "kafka", log.LstdFlags),
 	}
 }
 
-// Broker is abstrac connection to kafka cluster, managing connections to all
+// Broker is abstract connection to kafka cluster, managing connections to all
 // kafka nodes.
 type Broker struct {
 	config BrokerConfig
@@ -74,10 +86,6 @@ func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 	broker := &Broker{
 		config: config,
 		conns:  make(map[int32]*connection),
-		metadata: clusterMetadata{
-			Nodes:     make(map[int32]string),
-			Endpoints: make(map[string]int32),
-		},
 	}
 
 	for _, addr := range nodeAddresses {
@@ -95,14 +103,7 @@ func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 			config.Log.Printf("could not fetch metadata from %s: %s", addr, err)
 			continue
 		}
-		for _, node := range resp.Brokers {
-			broker.metadata.Nodes[node.NodeID] = fmt.Sprintf("%s:%d", node.Host, node.Port)
-		}
-		for _, topic := range resp.Topics {
-			for _, part := range topic.Partitions {
-				broker.metadata.Endpoints[fmt.Sprintf("%s:%d", topic.Name, part.ID)] = part.Leader
-			}
-		}
+		broker.rewriteMetadata(resp)
 		return broker, nil
 	}
 	return nil, errors.New("could not connect")
@@ -113,6 +114,75 @@ func (b *Broker) Close() error {
 	return nil
 }
 
+// refreshMetadata is requesting metadata information from any node and refresh
+// internal cached representation.
+// Because it's changing internal state, this method requires lock protection,
+// but it does not acquire nor release lock itself.
+func (b *Broker) refreshMetadata() error {
+	checkednodes := make(map[int32]bool)
+
+	// try all existing connections first
+	for nodeID, conn := range b.conns {
+		checkednodes[nodeID] = true
+		resp, err := conn.Metadata(&proto.MetadataReq{
+			ClientID: b.config.ClientID,
+			Topics:   nil,
+		})
+		if err != nil {
+			b.config.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
+			continue
+		}
+		b.rewriteMetadata(resp)
+		return nil
+	}
+
+	// try all nodes that we know of that we're not connected to
+	for nodeID, addr := range b.metadata.nodes {
+		if _, ok := checkednodes[nodeID]; ok {
+			continue
+		}
+		conn, err := NewConnection(addr, b.config.DialTimeout)
+		if err != nil {
+			b.config.Log.Printf("could not connect to %s: %s", addr, err)
+			continue
+		}
+		// we had no active connection to this node, so most likely we don't need it
+		defer conn.Close()
+
+		resp, err := conn.Metadata(&proto.MetadataReq{
+			ClientID: b.config.ClientID,
+			Topics:   nil,
+		})
+		if err != nil {
+			b.config.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
+			continue
+		}
+		b.rewriteMetadata(resp)
+		return nil
+	}
+
+	return errors.New("cannot fetch metadata")
+}
+
+// rewriteMetadata creates new internal metadata representation using data from
+// given response. It's call has to be protected with lock.
+func (b *Broker) rewriteMetadata(resp *proto.MetadataResp) {
+	b.config.Log.Printf("rewriting metadata created %s ago", time.Now().Sub(b.metadata.created))
+	b.metadata = clusterMetadata{
+		created:   time.Now(),
+		nodes:     make(map[int32]string),
+		endpoints: make(map[string]int32),
+	}
+	for _, node := range resp.Brokers {
+		b.metadata.nodes[node.NodeID] = fmt.Sprintf("%s:%d", node.Host, node.Port)
+	}
+	for _, topic := range resp.Topics {
+		for _, part := range topic.Partitions {
+			b.metadata.endpoints[fmt.Sprintf("%s:%d", topic.Name, part.ID)] = part.Leader
+		}
+	}
+}
+
 // leaderConnection returns connection to leader for given partition. If
 // connection does not exist, broker will try to connect first and add store
 // connection for any further use.
@@ -121,14 +191,17 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 	defer b.mu.Unlock()
 
 	endpoint := fmt.Sprintf("%s:%d", topic, partition)
-	nodeID, ok := b.metadata.Endpoints[endpoint]
+	nodeID, ok := b.metadata.endpoints[endpoint]
 	if !ok {
-		// TODO(husio) refresh metadata and check again
-		return nil, proto.ErrUnknownTopicOrPartition
+		b.refreshMetadata()
+		nodeID, ok = b.metadata.endpoints[endpoint]
+		if !ok {
+			return nil, proto.ErrUnknownTopicOrPartition
+		}
 	}
 	conn, ok = b.conns[nodeID]
 	if !ok {
-		addr, ok := b.metadata.Nodes[nodeID]
+		addr, ok := b.metadata.nodes[nodeID]
 		if !ok {
 			return nil, proto.ErrBrokerNotAvailable
 		}
@@ -206,7 +279,7 @@ type ProducerConfig struct {
 	RequestTimeout time.Duration
 
 	// Message ACK configuration. Use proto.RequiredAcksAll to require all
-	// servers to write, proto.RequiredAcksLocal to wait only for leater node
+	// servers to write, proto.RequiredAcksLocal to wait only for leader node
 	// answer or proto.RequiredAcksNone to not wait for any response.
 	// Setting this to any other, greater than zero value will make producer to
 	// wait for given number of servers to confirm write before returning.
