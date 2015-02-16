@@ -234,7 +234,7 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 func (b *Broker) offset(topic string, partition int32, timems int64) (offset int64, err error) {
 	conn, err := b.leaderConnection(topic, partition)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
 	resp, err := conn.Offset(&proto.OffsetReq{
 		ClientID:  b.config.ClientID,
@@ -253,7 +253,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 		},
 	})
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
 	found := false
 	for _, t := range resp.Topics {
@@ -276,7 +276,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 		}
 	}
 	if !found {
-		return -1, errors.New("incomplete fetch response")
+		return 0, errors.New("incomplete fetch response")
 	}
 	return offset, err
 }
