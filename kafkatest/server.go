@@ -28,87 +28,7 @@ type Serializable interface {
 
 type RequestHandler func(request Serializable) (response Serializable)
 
-type Logs struct {
-	mu   sync.Mutex
-	logs map[string]map[int32][]*proto.Message
-}
-
-func (lg *Logs) AddPartition(topic string, partitions ...int32) {
-	lg.mu.Lock()
-	for _, part := range partitions {
-		lg.addPartition(topic, part)
-	}
-	lg.mu.Unlock()
-}
-
-func (lg *Logs) addPartition(topic string, partition int32) {
-	parts, ok := lg.logs[topic]
-	if !ok {
-		parts = make(map[int32][]*proto.Message)
-		lg.logs[topic] = parts
-	}
-	if _, ok := parts[partition]; !ok {
-		messages := make([]*proto.Message, 0)
-		parts[partition] = messages
-	}
-}
-
-func (lg *Logs) HasPartition(topic string, partition int32) bool {
-	lg.mu.Lock()
-	ok := lg.hasPartition(topic, partition)
-	lg.mu.Unlock()
-	return ok
-}
-
-func (lg *Logs) PartitionOffset(topic string, partition int32) int64 {
-	lg.mu.Lock()
-	defer lg.mu.Unlock()
-	if !lg.hasPartition(topic, partition) {
-		return -1
-	}
-	msgs := lg.logs[topic][partition]
-	if len(msgs) == 0 {
-		return 0
-	}
-	return msgs[len(msgs)-1].Offset
-}
-
-func (lg *Logs) HasTopic(topic string) bool {
-	lg.mu.Lock()
-	_, ok := lg.logs[topic]
-	lg.mu.Unlock()
-	return ok
-}
-
-func (lg *Logs) hasPartition(topic string, partition int32) bool {
-	parts, ok := lg.logs[topic]
-	if !ok {
-		return false
-	}
-	_, ok = parts[partition]
-	return ok
-}
-
-// AddMessage appends message to log if log array exists. Returns error if it
-// does not.
-func (lg *Logs) AddMessages(topic string, partition int32, messages []*proto.Message) (offset int64, err error) {
-	lg.mu.Lock()
-	defer lg.mu.Unlock()
-	if !lg.hasPartition(topic, partition) {
-		return -1, proto.ErrUnknownTopicOrPartition
-	}
-	mlog := lg.logs[topic][partition]
-	offset = int64(len(mlog) + 1)
-	for _, m := range messages {
-		m.Crc = computeCrc(m)
-		m.Offset = int64(len(mlog)) + 1
-		mlog = append(mlog, m)
-	}
-	lg.logs[topic][partition] = mlog
-	return offset, nil
-}
-
-func computeCrc(m *proto.Message) uint32 {
+func ComputeCrc(m *proto.Message) uint32 {
 	var buf bytes.Buffer
 	enc := proto.NewEncoder(&buf)
 	enc.Encode(int8(0)) // magic byte is always 0
@@ -118,43 +38,8 @@ func computeCrc(m *proto.Message) uint32 {
 	return crc32.ChecksumIEEE(buf.Bytes())
 }
 
-// Messages returns messages for given topic and partition with offset starting
-// with requested.
-// To imitate kafka, it might happend that last message in message set will be
-// empty and that message set will start with messages of index lower than
-// requested
-func (lg *Logs) Messages(topic string, partition int32, offset int64, limit int) ([]*proto.Message, error) {
-	lg.mu.Lock()
-	defer lg.mu.Unlock()
-
-	if !lg.hasPartition(topic, partition) {
-		return nil, proto.ErrUnknownTopicOrPartition
-	}
-	messages := lg.logs[topic][partition]
-	if offset > int64(len(messages)) {
-		return nil, proto.ErrOffsetOutOfRange
-	}
-	safeLimit := limit
-	if safeLimit > len(messages) {
-		safeLimit = len(messages)
-	}
-
-	// imitate kafka's compression that may return messages with lower id than requested
-	if offset > 1 {
-		offset -= 1
-	}
-
-	result := messages[offset:safeLimit]
-
-	// imitiate kafka's optimization that is adding empty message to the end of messages set
-	result = append(result, &proto.Message{})
-
-	return result, nil
-}
-
 type Server struct {
 	Processed int
-	Logs      *Logs
 
 	mu       sync.RWMutex
 	ln       net.Listener
@@ -163,9 +48,6 @@ type Server struct {
 
 func NewServer() *Server {
 	srv := &Server{
-		Logs: &Logs{
-			logs: make(map[string]map[int32][]*proto.Message),
-		},
 		handlers: make(map[int16]RequestHandler),
 	}
 	srv.handlers[AnyRequest] = srv.defaultRequestHandler
@@ -183,6 +65,21 @@ func (srv *Server) Handle(reqKind int16, handler RequestHandler) {
 
 func (srv *Server) Address() string {
 	return srv.ln.Addr().String()
+}
+
+func (srv *Server) HostPort() (string, int) {
+	host, sport, err := net.SplitHostPort(srv.ln.Addr().String())
+	if err != nil {
+		panic(fmt.Sprintf("cannot split server address: %s", err))
+	}
+	port, err := strconv.Atoi(sport)
+	if err != nil {
+		panic(fmt.Sprintf("port '%s' is not a number: %s", sport, err))
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	return host, port
 }
 
 func (srv *Server) Start() {
@@ -272,10 +169,6 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 
 	switch req := request.(type) {
 	case *proto.FetchReq:
-		// TODO(husio) support
-		// * max wait time
-		// * max bytes
-		// * min bytes
 		resp := &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics:        make([]proto.FetchRespTopic, len(req.Topics)),
@@ -286,12 +179,11 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 				Partitions: make([]proto.FetchRespPartition, len(topic.Partitions)),
 			}
 			for pi, part := range topic.Partitions {
-				messages, err := srv.Logs.Messages(topic.Name, part.ID, part.FetchOffset, 10)
 				resp.Topics[ti].Partitions[pi] = proto.FetchRespPartition{
 					ID:        part.ID,
-					Err:       err,
-					TipOffset: srv.Logs.PartitionOffset(topic.Name, part.ID),
-					Messages:  messages,
+					Err:       proto.ErrUnknownTopicOrPartition,
+					TipOffset: -1,
+					Messages:  []*proto.Message{},
 				}
 			}
 		}
@@ -307,14 +199,12 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 				Partitions: make([]proto.ProduceRespPartition, len(topic.Partitions)),
 			}
 			for pi, part := range topic.Partitions {
-				offset, err := srv.Logs.AddMessages(topic.Name, part.ID, part.Messages)
 				resp.Topics[ti].Partitions[pi] = proto.ProduceRespPartition{
 					ID:     part.ID,
-					Err:    err,
-					Offset: offset,
+					Err:    proto.ErrUnknownTopicOrPartition,
+					Offset: -1,
 				}
 			}
-
 		}
 		return resp
 	case *proto.OffsetReq:
@@ -334,33 +224,12 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		if host == "" {
 			host = "localhost"
 		}
-
-		topics := make([]proto.MetadataRespTopic, len(srv.Logs.logs))
-		ti := 0
-		for topic, partitions := range srv.Logs.logs {
-			parts := make([]proto.MetadataRespPartition, len(partitions))
-			pi := 0
-			for part := range partitions {
-				parts[pi] = proto.MetadataRespPartition{
-					ID:       part,
-					Leader:   1,
-					Replicas: []int32{1},
-					Isrs:     []int32{1},
-				}
-				pi += 1
-			}
-			topics[ti] = proto.MetadataRespTopic{
-				Name:       topic,
-				Partitions: parts,
-			}
-			ti += 1
-		}
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
 				proto.MetadataRespBroker{NodeID: 1, Host: host, Port: int32(port)},
 			},
-			Topics: topics,
+			Topics: []proto.MetadataRespTopic{},
 		}
 	case *proto.ConsumerMetadataReq:
 		panic("not implemented")

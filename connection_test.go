@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/optiopay/kafka/kafkatest"
 	"github.com/optiopay/kafka/proto"
 )
 
@@ -196,6 +197,14 @@ func TestConnectionProduce(t *testing.T) {
 }
 
 func TestConnectionFetch(t *testing.T) {
+	messages := []*proto.Message{
+		&proto.Message{Offset: 4, Key: []byte("f"), Value: []byte("first")},
+		&proto.Message{Offset: 5, Key: []byte("s"), Value: []byte("second message")},
+	}
+	for _, m := range messages {
+		m.Crc = kafkatest.ComputeCrc(m)
+	}
+
 	resp1 := &proto.FetchResp{
 		CorrelationID: 1,
 		Topics: []proto.FetchRespTopic{
@@ -206,10 +215,7 @@ func TestConnectionFetch(t *testing.T) {
 						ID:        1,
 						Err:       nil,
 						TipOffset: 20,
-						Messages: []*proto.Message{
-							&proto.Message{Offset: 4, Crc: 421, Key: []byte("f"), Value: []byte("first")},
-							&proto.Message{Offset: 5, Crc: 921, Key: []byte("s"), Value: []byte("second message")},
-						},
+						Messages:  messages,
 					},
 				},
 			},

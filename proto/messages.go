@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"log"
 	"time"
 )
 
@@ -147,7 +148,7 @@ func readMessageSet(r io.Reader) ([]*Message, error) {
 		msg.Crc = msgdec.DecodeUint32()
 
 		if msg.Crc != crc32.ChecksumIEEE(msgbuf[4:]) {
-			println("skipping message", msg.Crc, crc32.ChecksumIEEE(msgbuf[4:]))
+			log.Printf("skipping incomplete message (crc missmatch) %d", msg.Offset)
 			return set, nil
 		}
 
