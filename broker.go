@@ -110,9 +110,14 @@ func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 	return nil, errors.New("could not connect")
 }
 
-func (b *Broker) Close() error {
-	// TODO(husio)
-	return nil
+func (b *Broker) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for nodeID, conn := range b.conns {
+		if err := conn.Close(); err != nil {
+			b.config.Log.Printf("failed closing node %d connection: %s", nodeID, err)
+		}
+	}
 }
 
 // refreshMetadata is requesting metadata information from any node and refresh

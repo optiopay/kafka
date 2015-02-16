@@ -54,9 +54,7 @@ func TestDialWithInvalidAddress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not create broker: %s", err)
 	}
-	if err := broker.Close(); err != nil {
-		t.Fatalf("could not close broker: %s", err)
-	}
+	broker.Close()
 }
 
 func TestProducer(t *testing.T) {
@@ -153,9 +151,7 @@ func TestProducer(t *testing.T) {
 	if offset != 5 {
 		t.Fatalf("expected offset different than %d", offset)
 	}
-	if err := broker.Close(); err != nil {
-		t.Fatalf("could not close broker: %s", err)
-	}
+	broker.Close()
 }
 
 func TestConsumer(t *testing.T) {
@@ -272,10 +268,7 @@ func TestConsumer(t *testing.T) {
 	if string(msg2.Value) != "second" || string(msg2.Key) != "2" || msg2.Offset != 4 {
 		t.Fatalf("expected different message than %#v", msg2)
 	}
-
-	if err := broker.Close(); err != nil {
-		t.Fatalf("could not close broker: %s", err)
-	}
+	broker.Close()
 }
 
 func TestConsumerRetry(t *testing.T) {
@@ -349,10 +342,7 @@ func TestConsumerRetry(t *testing.T) {
 	if fetchCallCount != 6 {
 		t.Fatalf("expected 6 fetch calls, got %d", fetchCallCount)
 	}
-
-	if err := broker.Close(); err != nil {
-		t.Fatalf("could not close broker: %s", err)
-	}
+	broker.Close()
 }
 
 func TestConsumeInvalidOffset(t *testing.T) {
@@ -411,9 +401,7 @@ func TestConsumeInvalidOffset(t *testing.T) {
 	if string(msg.Value) != "second" || string(msg.Key) != "2" || msg.Offset != 4 {
 		t.Fatalf("expected different message than %#v", msg)
 	}
-	if err := broker.Close(); err != nil {
-		t.Fatalf("could not close broker: %s", err)
-	}
+	broker.Close()
 }
 
 func TestPartitionOffset(t *testing.T) {
@@ -485,9 +473,6 @@ func TestLeaderConnectionFailover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not create broker: %s", err)
 	}
-	if err := broker.Close(); err != nil {
-		t.Fatalf("could not close broker: %s", err)
-	}
 
 	if _, err := broker.leaderConnection("does-not-exist", 123456); err != proto.ErrUnknownTopicOrPartition {
 		t.Fatalf("%s expected, got %s", proto.ErrUnknownTopicOrPartition, err)
@@ -527,4 +512,5 @@ func TestLeaderConnectionFailover(t *testing.T) {
 	}
 	c.Accept()
 	<-stop
+	broker.Close()
 }
