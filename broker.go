@@ -302,6 +302,9 @@ type ProducerConfig struct {
 	// wait for given number of servers to confirm write before returning.
 	RequiredAcks int16
 
+	RetryLimit int
+	RetryWait  time.Duration
+
 	// Logger used by producer. By default, reuse logger assigned to broker.
 	Log Logger
 }
@@ -311,6 +314,8 @@ func NewProducerConfig() ProducerConfig {
 	return ProducerConfig{
 		RequestTimeout: time.Second * 5,
 		RequiredAcks:   proto.RequiredAcksAll,
+		RetryLimit:     5,
+		RetryWait:      time.Millisecond * 200,
 		Log:            nil,
 	}
 }
@@ -342,11 +347,36 @@ type Message struct {
 
 // Produce writes messages to given destination. Write within single Produce
 // call are atomic, meaning either all or none of them are written to kafka.
+// Produce can retry sending request on common errors. This behaviour can be
+// configured with RetryLimit and RetryWait producer configuration attributes.
 func (p *Producer) Produce(topic string, partition int32, messages ...*Message) (offset int64, err error) {
+	for retry := 0; retry < p.config.RetryLimit; retry++ {
+		offset, err = p.produce(topic, partition, messages...)
+		switch err {
+		case proto.ErrLeaderNotAvailable, proto.ErrBrokerNotAvailable:
+			p.config.Log.Printf("failed to produce messages (%d): %s", retry, err)
+			time.Sleep(p.config.RetryWait)
+			// TODO(husio) possible thundering herd
+			if err := p.broker.refreshMetadata(); err != nil {
+				p.config.Log.Printf("failed to refresh metadata: %s", err)
+			}
+		case proto.ErrRequestTimeout:
+			p.config.Log.Printf("failed to produce messages (%d): %s", retry, err)
+			time.Sleep(p.config.RetryWait)
+		default:
+			break
+		}
+	}
+	return offset, err
+}
+
+// produce send produce request to leader for given destination.
+func (p *Producer) produce(topic string, partition int32, messages ...*Message) (offset int64, err error) {
 	conn, err := p.broker.leaderConnection(topic, partition)
 	if err != nil {
 		return 0, err
 	}
+
 	msgs := make([]*proto.Message, len(messages))
 	for i, m := range messages {
 		msgs[i] = &proto.Message{
@@ -370,9 +400,9 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 			},
 		},
 	}
+
 	resp, err := conn.Produce(&req)
 	if err != nil {
-		// TODO(husio) handle some of the errors
 		return 0, err
 	}
 

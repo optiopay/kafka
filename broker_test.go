@@ -508,9 +508,119 @@ func TestLeaderConnectionFailover(t *testing.T) {
 
 	c, err := net.Listen("tcp", "localhost:23456")
 	if err != nil {
-		t.Fatalf("could not start server: %s", err)
+		t.Fatalf("cannot not start server: %s", err)
 	}
 	c.Accept()
 	<-stop
 	broker.Close()
+}
+
+func TestProducerFailoverRequestTimeout(t *testing.T) {
+	srv := kafkatest.NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+
+	requestsCount := 0
+	srv.Handle(kafkatest.ProduceRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+		req := request.(*proto.ProduceReq)
+		requestsCount++
+		return &proto.ProduceResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.ProduceRespTopic{
+				proto.ProduceRespTopic{
+					Name: "test",
+					Partitions: []proto.ProduceRespPartition{
+						proto.ProduceRespPartition{
+							ID:  0,
+							Err: proto.ErrRequestTimeout,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv.Address()}, NewBrokerConfig("test"))
+	if err != nil {
+		t.Fatalf("cannot not create broker: %s", err)
+	}
+
+	prodConfig := NewProducerConfig()
+	prodConfig.RetryLimit = 4
+	prodConfig.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConfig)
+
+	_, err = producer.Produce("test", 0, &Message{Value: []byte("first")}, &Message{Value: []byte("second")})
+	if err != proto.ErrRequestTimeout {
+		t.Fatalf("expected %s, got %s", proto.ErrRequestTimeout, err)
+	}
+	if requestsCount != prodConfig.RetryLimit {
+		t.Fatalf("expected %d requests, got %d", prodConfig.RetryLimit, requestsCount)
+	}
+}
+
+func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
+	srv := kafkatest.NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+
+	requestsCount := 0
+	srv.Handle(kafkatest.ProduceRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+		req := request.(*proto.ProduceReq)
+		requestsCount++
+
+		if requestsCount > 4 {
+			return &proto.ProduceResp{
+				CorrelationID: req.CorrelationID,
+				Topics: []proto.ProduceRespTopic{
+					proto.ProduceRespTopic{
+						Name: "test",
+						Partitions: []proto.ProduceRespPartition{
+							proto.ProduceRespPartition{
+								ID:     0,
+								Offset: 11,
+							},
+						},
+					},
+				},
+			}
+		}
+
+		return &proto.ProduceResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.ProduceRespTopic{
+				proto.ProduceRespTopic{
+					Name: "test",
+					Partitions: []proto.ProduceRespPartition{
+						proto.ProduceRespPartition{
+							ID:  0,
+							Err: proto.ErrLeaderNotAvailable,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv.Address()}, NewBrokerConfig("test"))
+	if err != nil {
+		t.Fatalf("cannot not create broker: %s", err)
+	}
+
+	prodConfig := NewProducerConfig()
+	prodConfig.RetryLimit = 5
+	prodConfig.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConfig)
+
+	_, err = producer.Produce("test", 0, &Message{Value: []byte("first")}, &Message{Value: []byte("second")})
+	if err != nil {
+		t.Fatalf("expected no error, got %s", err)
+	}
+	if requestsCount != 5 {
+		t.Fatalf("expected 5 requests, got %d", requestsCount)
+	}
 }
