@@ -49,7 +49,8 @@ type BrokerConfig struct {
 	LeaderRetryLimit int
 
 	// LeaderRetryWait controls duration of wait between trying to connect to
-	// single node after failure. Defaults to 250ms.
+	// single node after failure. Defaults to 500ms.
+	// Timeout on connection is controlled by DialTimeout setting.
 	LeaderRetryWait time.Duration
 
 	// Any new connection dial timeout. By default 10 seconds.
@@ -64,7 +65,7 @@ func NewBrokerConfig(clientID string) BrokerConfig {
 		ClientID:         clientID,
 		DialTimeout:      time.Second * 10,
 		LeaderRetryLimit: 10,
-		LeaderRetryWait:  time.Millisecond * 250,
+		LeaderRetryWait:  time.Millisecond * 500,
 		Log:              log.New(ioutil.Discard, "kafka", log.LstdFlags),
 	}
 }
@@ -186,32 +187,43 @@ func (b *Broker) rewriteMetadata(resp *proto.MetadataResp) {
 // leaderConnection returns connection to leader for given partition. If
 // connection does not exist, broker will try to connect first and add store
 // connection for any further use.
+// Failed connection retry is controlled by broker configuration.
 func (b *Broker) leaderConnection(topic string, partition int32) (conn *connection, err error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	endpoint := fmt.Sprintf("%s:%d", topic, partition)
-	nodeID, ok := b.metadata.endpoints[endpoint]
-	if !ok {
-		b.refreshMetadata()
-		nodeID, ok = b.metadata.endpoints[endpoint]
+
+	for retry := 0; retry < b.config.LeaderRetryLimit; retry++ {
+		b.mu.Lock()
+
+		nodeID, ok := b.metadata.endpoints[endpoint]
 		if !ok {
-			return nil, proto.ErrUnknownTopicOrPartition
+			b.refreshMetadata()
+			nodeID, ok = b.metadata.endpoints[endpoint]
+			if !ok {
+				b.mu.Unlock()
+				return nil, proto.ErrUnknownTopicOrPartition
+			}
 		}
-	}
-	conn, ok = b.conns[nodeID]
-	if !ok {
-		addr, ok := b.metadata.nodes[nodeID]
+
+		conn, ok = b.conns[nodeID]
 		if !ok {
-			return nil, proto.ErrBrokerNotAvailable
+			addr, ok := b.metadata.nodes[nodeID]
+			if !ok {
+				b.mu.Unlock()
+				return nil, proto.ErrBrokerNotAvailable
+			}
+			conn, err = NewConnection(addr, b.config.DialTimeout)
+			if err != nil {
+				b.config.Log.Printf("cannot connect to node %s: %s", addr, err)
+				b.mu.Unlock()
+				time.Sleep(b.config.LeaderRetryWait)
+				continue
+			}
+			b.conns[nodeID] = conn
 		}
-		conn, err = NewConnection(addr, b.config.DialTimeout)
-		if err != nil {
-			return nil, err
-		}
-		b.conns[nodeID] = conn
+		b.mu.Unlock()
+		return conn, nil
 	}
-	return conn, nil
+	return nil, err
 }
 
 func (b *Broker) offset(topic string, partition int32, timems int64) (offset int64, err error) {

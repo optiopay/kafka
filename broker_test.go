@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"fmt"
+	"net"
 	"testing"
 	"time"
 
@@ -464,4 +465,66 @@ func TestPartitionOffset(t *testing.T) {
 	if offset != 123 {
 		t.Fatalf("expected 123 offset, got %d", offset)
 	}
+}
+
+func TestLeaderConnectionFailover(t *testing.T) {
+	srv := kafkatest.NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+
+	addresses := []string{srv.Address()}
+
+	config := NewBrokerConfig("tester")
+	config.DialTimeout = time.Millisecond * 20
+	config.LeaderRetryWait = time.Millisecond
+	config.LeaderRetryLimit = 3
+
+	broker, err := Dial(addresses, config)
+	if err != nil {
+		t.Fatalf("could not create broker: %s", err)
+	}
+	if err := broker.Close(); err != nil {
+		t.Fatalf("could not close broker: %s", err)
+	}
+
+	if _, err := broker.leaderConnection("does-not-exist", 123456); err != proto.ErrUnknownTopicOrPartition {
+		t.Fatalf("%s expected, got %s", proto.ErrUnknownTopicOrPartition, err)
+	}
+
+	// fake initial metadata configuration
+	broker.metadata.nodes = map[int32]string{
+		1: "localhost:214412",
+	}
+	if _, err := broker.leaderConnection("test", 0); err == nil {
+		t.Fatal("expected network error")
+	}
+
+	// provide node address that will be available after short period
+	broker.metadata.nodes = map[int32]string{
+		1: "localhost:23456",
+	}
+	config.LeaderRetryWait = time.Millisecond
+	config.LeaderRetryLimit = 1000
+	stop := make(chan struct{})
+
+	go func() {
+		for {
+			if _, err := broker.leaderConnection("test", 0); err == nil {
+				close(stop)
+				return
+			}
+		}
+	}()
+
+	// let the leader election loop spin for a bit
+	time.Sleep(time.Millisecond * 2)
+
+	c, err := net.Listen("tcp", "localhost:23456")
+	if err != nil {
+		t.Fatalf("could not start server: %s", err)
+	}
+	c.Accept()
+	<-stop
 }
