@@ -624,3 +624,7 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 		t.Fatalf("expected 5 requests, got %d", requestsCount)
 	}
 }
+
+func TestConsumerFailover(t *testing.T) {
+	t.Fatal("not implemented")
+}

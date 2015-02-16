@@ -353,7 +353,7 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 	for retry := 0; retry < p.config.RetryLimit; retry++ {
 		offset, err = p.produce(topic, partition, messages...)
 		switch err {
-		case proto.ErrLeaderNotAvailable, proto.ErrBrokerNotAvailable:
+		case proto.ErrLeaderNotAvailable, proto.ErrNoLeaderForPartition, proto.ErrBrokerNotAvailable:
 			p.config.Log.Printf("failed to produce messages (%d): %s", retry, err)
 			time.Sleep(p.config.RetryWait)
 			// TODO(husio) possible thundering herd
@@ -448,14 +448,20 @@ type ConsumerConfig struct {
 	// off.
 	RetryLimit int
 
+	// RetryWait controls duration of wait between fetch request calls, when
+	// no data was returned. Defaults to 250ms.
+	RetryWait time.Duration
+
+	// RetryErrLimit limits messages fetch retry upon failure. By default 10.
+	RetryErrLimit int
+	// RetryErrWait controls wait duration between retries after failed fetch
+	// request. By default 500ms.
+	RetryErrWait time.Duration
+
 	// MinFetchSize is minimum size of messages to fetch in bytes. By default
 	// set to 1 to fetch any message available.
 	MinFetchSize int32
 	MaxFetchSize int32
-
-	// RetryWait controlls duration of wait between fetch request calls, when
-	// no data was returned. Defaults to 250ms.
-	RetryWait time.Duration
 
 	// Consumer cursor starting point. Set to StartOffsetNewest to receive only
 	// newly created messages or StartOffsetOldest to read everything. Assign
@@ -473,9 +479,11 @@ func NewConsumerConfig(topic string, partition int32) ConsumerConfig {
 		Partition:      partition,
 		RequestTimeout: 0,
 		RetryLimit:     -1,
+		RetryWait:      time.Millisecond * 250,
+		RetryErrLimit:  10,
+		RetryErrWait:   time.Millisecond * 500,
 		MinFetchSize:   1,
 		MaxFetchSize:   2000000,
-		RetryWait:      time.Millisecond * 250,
 		StartOffset:    StartOffsetOldest,
 		Log:            nil,
 	}
@@ -532,35 +540,96 @@ func (c *Consumer) Config() ConsumerConfig {
 	return c.config
 }
 
-// Fetch is returning single message from consumed partition.
+// Fetch is returning single message from consumed partition. Consumer can
+// retry fetching messages even if responses return no new data. Retry
+// behaviour can be configured through RetryLimit and RetryWait consumer
+// parameters.
+//
+// Fetch can retry sending request on common errors. This behaviour can be
+// configured with RetryErrLimit and RetryErrWait consumer configuration
+// attributes.
 func (c *Consumer) Fetch() (*proto.Message, error) {
 	var retry int
 
 	for len(c.msgbuf) == 0 {
-		req := proto.FetchReq{
-			ClientID:    c.broker.config.ClientID,
-			MaxWaitTime: c.config.RequestTimeout,
-			MinBytes:    c.config.MinFetchSize,
-			Topics: []proto.FetchReqTopic{
-				proto.FetchReqTopic{
-					Name: c.config.Topic,
-					Partitions: []proto.FetchReqPartition{
-						proto.FetchReqPartition{
-							ID:          c.config.Partition,
-							FetchOffset: c.offset + 1,
-							MaxBytes:    c.config.MaxFetchSize,
-						},
-					},
-				},
-			},
-		}
-		resp, err := c.conn.Fetch(&req)
+		messages, err := c.fetch()
 		if err != nil {
-			// TODO(husio) handle some of the errors
 			return nil, err
 		}
 
-		found := false
+		// check first messages if any of them has index lower than requested
+		toSkip := 0
+		for toSkip < len(messages) {
+			if messages[toSkip].Offset >= c.offset {
+				break
+			}
+			toSkip++
+		}
+
+		if len(messages) == toSkip {
+			c.config.Log.Printf("none of %d fetched messages is valid", toSkip)
+		}
+		// ignore all messages that are of index lower than requested
+		c.msgbuf = messages[toSkip:]
+
+		if len(c.msgbuf) == 0 {
+			time.Sleep(time.Duration(math.Log(float64(retry+2))) * c.config.RetryWait)
+			retry += 1
+			if c.config.RetryLimit != -1 && retry > c.config.RetryLimit {
+				return nil, ErrNoData
+			}
+		}
+	}
+
+	msg := c.msgbuf[0]
+	c.msgbuf = c.msgbuf[1:]
+	c.offset = msg.Offset
+	return msg, nil
+}
+
+// Fetch and return next batch of messages. In case of certain set of errors,
+// retry sending fetch request. Retry behaviour can be configured with
+// RetryErrLimit and RetryErrWait consumer configuration attributes.
+func (c *Consumer) fetch() ([]*proto.Message, error) {
+	req := proto.FetchReq{
+		ClientID:    c.broker.config.ClientID,
+		MaxWaitTime: c.config.RequestTimeout,
+		MinBytes:    c.config.MinFetchSize,
+		Topics: []proto.FetchReqTopic{
+			proto.FetchReqTopic{
+				Name: c.config.Topic,
+				Partitions: []proto.FetchReqPartition{
+					proto.FetchReqPartition{
+						ID:          c.config.Partition,
+						FetchOffset: c.offset + 1,
+						MaxBytes:    c.config.MaxFetchSize,
+					},
+				},
+			},
+		},
+	}
+
+	for retry := 0; ; retry++ {
+		resp, err := c.conn.Fetch(&req)
+
+		if err != nil && retry == c.config.RetryErrLimit {
+			return nil, err
+		}
+
+		switch err {
+		case proto.ErrLeaderNotAvailable, proto.ErrNoLeaderForPartition, proto.ErrBrokerNotAvailable:
+			c.config.Log.Printf("failed to fetch messages (%d): %s", retry, err)
+			time.Sleep(c.config.RetryErrWait)
+			// TODO(husio) possible thundering herd
+			if err := c.broker.refreshMetadata(); err != nil {
+				c.config.Log.Printf("failed to refresh metadata: %s", err)
+			}
+		case nil:
+			// everything's fine, proceed
+		default:
+			return nil, err
+		}
+
 		for _, topic := range resp.Topics {
 			if topic.Name != c.config.Topic {
 				c.config.Log.Printf("unexpected topic information received: %s (expecting %s)", topic.Name)
@@ -571,44 +640,9 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 					c.config.Log.Printf("unexpected partition information received: %s:%d", topic.Name, part.ID)
 					continue
 				}
-
-				found = true
-				if len(part.Messages) == 0 {
-					time.Sleep(time.Duration(math.Log(float64(retry+2))) * c.config.RetryWait)
-					retry += 1
-					if c.config.RetryLimit != -1 && retry > c.config.RetryLimit {
-						return nil, ErrNoData
-					}
-					continue
-				}
-
-				// check first messages if any of them has index lower than requested
-				toSkip := 0
-				messages := part.Messages
-				for toSkip < len(messages) {
-					if messages[toSkip].Offset >= c.offset {
-						break
-					}
-					toSkip++
-				}
-
-				// ignore all messages that are of index lower than requested
-				messages = messages[toSkip:]
-				if len(messages) == 0 {
-					found = false
-					continue
-				}
-
-				c.msgbuf = messages
+				return part.Messages, nil
 			}
 		}
-		if !found {
-			return nil, errors.New("incomplete fetch response")
-		}
+		return nil, errors.New("incomplete fetch response")
 	}
-
-	msg := c.msgbuf[0]
-	c.msgbuf = c.msgbuf[1:]
-	c.offset = msg.Offset
-	return msg, nil
 }
