@@ -11,7 +11,15 @@ import (
 	"github.com/optiopay/kafka/proto"
 )
 
-const megabyte = 1048576
+const (
+	// StartOffsetNewest configures consumer to fetch messages produced after
+	// creating the consumer.
+	StartOffsetNewest = -1
+
+	// StartOffsetOldest configures consumer to fetch starting from the oldest
+	// message available
+	StartOffsetOldest = -2
+)
 
 var (
 	// Returned by consumer Fetch when retry limit was set and exceeded during
@@ -60,7 +68,7 @@ func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 	}
 
 	for _, addr := range nodeAddresses {
-		conn, err := newConnection(addr, config.DialTimeout)
+		conn, err := NewConnection(addr, config.DialTimeout)
 		if err != nil {
 			log.Printf("could not connect to %s: %s", addr, err)
 			continue
@@ -111,13 +119,73 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 		if !ok {
 			return nil, proto.ErrBrokerNotAvailable
 		}
-		conn, err = newConnection(addr, b.config.DialTimeout)
+		conn, err = NewConnection(addr, b.config.DialTimeout)
 		if err != nil {
 			return nil, err
 		}
 		b.conns[nodeID] = conn
 	}
 	return conn, nil
+}
+
+func (b *Broker) offset(topic string, partition int32, timems int64) (offset int64, err error) {
+	conn, err := b.leaderConnection(topic, partition)
+	if err != nil {
+		return -1, err
+	}
+	resp, err := conn.Offset(&proto.OffsetReq{
+		ClientID:  b.config.ClientID,
+		ReplicaID: -1,
+		Topics: []proto.OffsetReqTopic{
+			proto.OffsetReqTopic{
+				Name: topic,
+				Partitions: []proto.OffsetReqPartition{
+					proto.OffsetReqPartition{
+						ID:         partition,
+						TimeMs:     timems,
+						MaxOffsets: 2,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return -1, err
+	}
+	found := false
+	for _, t := range resp.Topics {
+		if t.Name != topic {
+			log.Printf("unexpected topic information received: %s (expecting %s)", t.Name)
+			continue
+		}
+		for _, part := range t.Partitions {
+			if part.ID != partition {
+				log.Printf("unexpected partition information received: %s:%s (expecting %s)", t.Name, part.ID, partition)
+				continue
+			}
+			found = true
+			if len(part.Offsets) == 0 {
+				offset = 0
+			} else {
+				offset = part.Offsets[0]
+			}
+			err = part.Err
+		}
+	}
+	if !found {
+		return -1, errors.New("incomplete fetch response")
+	}
+	return offset, err
+}
+
+// OffsetEarliest returns offset of the oldest message available in given partition.
+func (b *Broker) OffsetEarliest(topic string, partition int32) (offset int64, err error) {
+	return b.offset(topic, partition, -2)
+}
+
+// OffsetLatest return offset of the next message produced in given partition
+func (b *Broker) OffsetLatest(topic string, partition int32) (offset int64, err error) {
+	return b.offset(topic, partition, -1)
 }
 
 type ProducerConfig struct {
@@ -218,29 +286,40 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 type ConsumerConfig struct {
 	Topic     string
 	Partition int32
-	// FetchTimeout controlls fetch request timeout. This operation is blocking
+
+	// Timeout controlls fetch request timeout. This operation is blocking
 	// the whole connection, so it should always be set to small value. By
 	// default it's set to 0.
-	FetchTimeout time.Duration
-	// FetchRetryLimit limits fetching messages given amount of times before
+	Timeout time.Duration
+
+	// RetryLimit limits fetching messages given amount of times before
 	// returning ErrNoData error. By default set to -1, which turns this limit
 	// off.
-	FetchRetryLimit int
+	RetryLimit int
+
 	// MinFetchSize is minimum size of messages to fetch in bytes. By default
 	// set to 1 to fetch any message available.
 	MinFetchSize int32
 	MaxFetchSize int32
+
+	// RetryWait controlls duration of wait between fetch request calls, when
+	// no data was returned. Defaults to 250ms.
+	RetryWait time.Duration
+
+	StartOffset int64
 }
 
 // NewConsumerConfig return default consumer configuration
 func NewConsumerConfig(topic string, partition int32) ConsumerConfig {
 	return ConsumerConfig{
-		Topic:           topic,
-		Partition:       partition,
-		FetchTimeout:    0,
-		FetchRetryLimit: -1,
-		MinFetchSize:    1,
-		MaxFetchSize:    megabyte * 2,
+		Topic:        topic,
+		Partition:    partition,
+		Timeout:      0,
+		RetryLimit:   -1,
+		MinFetchSize: 1,
+		MaxFetchSize: 2000000,
+		RetryWait:    time.Millisecond * 250,
+		StartOffset:  0, // TODO(husio) compute offset depending on value
 	}
 }
 
@@ -253,18 +332,37 @@ type Consumer struct {
 	msgbuf []*proto.Message
 }
 
-// Consumer creates cursor capable of reading messages from given source.
+// Consumer creates cursor capable of reading messages from single source.
 func (b *Broker) Consumer(config ConsumerConfig) (consumer *Consumer, err error) {
 	conn, err := b.leaderConnection(config.Topic, config.Partition)
 	if err != nil {
 		return nil, err
+	}
+	offset := config.StartOffset
+	if config.StartOffset < 0 {
+		switch config.StartOffset {
+		case StartOffsetNewest:
+			off, err := b.OffsetLatest(config.Topic, config.Partition)
+			if err != nil {
+				return nil, err
+			}
+			offset = off - 1
+		case StartOffsetOldest:
+			off, err := b.OffsetEarliest(config.Topic, config.Partition)
+			if err != nil {
+				return nil, err
+			}
+			offset = off
+		default:
+			return nil, fmt.Errorf("invalid start offset: %d", config.StartOffset)
+		}
 	}
 	consumer = &Consumer{
 		broker: b,
 		conn:   conn,
 		config: config,
 		msgbuf: make([]*proto.Message, 0),
-		offset: 0,
+		offset: offset,
 	}
 	return consumer, nil
 }
@@ -280,7 +378,7 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 	for len(c.msgbuf) == 0 {
 		req := proto.FetchReq{
 			ClientID:    c.broker.config.ClientID,
-			MaxWaitTime: c.config.FetchTimeout,
+			MaxWaitTime: c.config.Timeout,
 			MinBytes:    c.config.MinFetchSize,
 			Topics: []proto.FetchReqTopic{
 				proto.FetchReqTopic{
@@ -315,9 +413,9 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 
 				found = true
 				if len(part.Messages) == 0 {
-					time.Sleep(time.Duration(math.Log(float64(retry+2))*250) * time.Millisecond)
+					time.Sleep(time.Duration(math.Log(float64(retry+2))) * c.config.RetryWait)
 					retry += 1
-					if c.config.FetchRetryLimit != -1 && retry > c.config.FetchRetryLimit {
+					if c.config.RetryLimit != -1 && retry > c.config.RetryLimit {
 						return nil, ErrNoData
 					}
 					continue
@@ -350,5 +448,6 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 
 	msg := c.msgbuf[0]
 	c.msgbuf = c.msgbuf[1:]
+	c.offset = msg.Offset
 	return msg, nil
 }

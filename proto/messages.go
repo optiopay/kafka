@@ -1114,8 +1114,7 @@ func ReadOffsetReq(r io.Reader) (*OffsetReq, error) {
 	_ = dec.DecodeInt32()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
-	// replica id
-	_ = dec.DecodeInt32()
+	req.ReplicaID = dec.DecodeInt32()
 	req.Topics = make([]OffsetReqTopic, dec.DecodeArrayLen())
 	for ti := range req.Topics {
 		var topic = &req.Topics[ti]
@@ -1224,5 +1223,33 @@ func ReadOffsetResp(r io.Reader) (*OffsetResp, error) {
 }
 
 func (r *OffsetResp) Bytes() ([]byte, error) {
-	return nil, errors.New("not implemented")
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeArrayLen(len(r.Topics))
+	for _, topic := range r.Topics {
+		enc.Encode(topic.Name)
+		enc.EncodeArrayLen(len(topic.Partitions))
+		for _, part := range topic.Partitions {
+			enc.Encode(part.ID)
+			enc.EncodeError(part.Err)
+			enc.EncodeArrayLen(len(part.Offsets))
+			for _, off := range part.Offsets {
+				enc.Encode(off)
+			}
+		}
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
 }

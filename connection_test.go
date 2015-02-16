@@ -75,7 +75,7 @@ func TestConnectionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newConnection(ln.Addr().String(), time.Second)
+	conn, err := NewConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -134,7 +134,7 @@ func TestConnectionProduce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newConnection(ln.Addr().String(), time.Second)
+	conn, err := NewConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -236,12 +236,58 @@ func TestConnectionFetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newConnection(ln.Addr().String(), time.Second)
+	conn, err := NewConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
 	resp, err := conn.Fetch(&proto.FetchReq{
 		ClientID: "tester",
+	})
+	if err != nil {
+		t.Fatalf("could not fetch response: %s", err)
+	}
+	if !reflect.DeepEqual(resp, resp1) {
+		t.Fatal("expected different response %#v", resp)
+	}
+}
+
+func TestConnectionOffset(t *testing.T) {
+	resp1 := &proto.OffsetResp{
+		CorrelationID: 1,
+		Topics: []proto.OffsetRespTopic{
+			proto.OffsetRespTopic{
+				Name: "test",
+				Partitions: []proto.OffsetRespPartition{
+					proto.OffsetRespPartition{
+						ID:      0,
+						Offsets: []int64{92, 0},
+					},
+				},
+			},
+		},
+	}
+	ln, err := testServer(resp1)
+	if err != nil {
+		t.Fatalf("test server error: %s", err)
+	}
+	conn, err := NewConnection(ln.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatalf("could not conect to test server: %s", err)
+	}
+	resp, err := conn.Offset(&proto.OffsetReq{
+		ClientID: "tester",
+		Topics: []proto.OffsetReqTopic{
+			proto.OffsetReqTopic{
+				Name: "test",
+				Partitions: []proto.OffsetReqPartition{
+					proto.OffsetReqPartition{
+						ID:         0,
+						TimeMs:     -2,
+						MaxOffsets: 2,
+					},
+				},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("could not fetch response: %s", err)

@@ -9,6 +9,38 @@ import (
 	"github.com/optiopay/kafka/proto"
 )
 
+func TestingMetadataHandler(srv *kafkatest.Server) kafkatest.RequestHandler {
+	return func(request kafkatest.Serializable) kafkatest.Serializable {
+		req := request.(*proto.MetadataReq)
+		host, port := srv.HostPort()
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				proto.MetadataRespBroker{NodeID: 1, Host: host, Port: int32(port)},
+			},
+			Topics: []proto.MetadataRespTopic{
+				proto.MetadataRespTopic{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						proto.MetadataRespPartition{
+							ID:       0,
+							Leader:   1,
+							Replicas: []int32{1},
+							Isrs:     []int32{1},
+						},
+						proto.MetadataRespPartition{
+							ID:       1,
+							Leader:   1,
+							Replicas: []int32{1},
+							Isrs:     []int32{1},
+						},
+					},
+				},
+			},
+		}
+	}
+}
+
 func TestDialWithInvalidAddress(t *testing.T) {
 	srv := kafkatest.NewServer()
 	srv.Start()
@@ -216,7 +248,8 @@ func TestConsumer(t *testing.T) {
 	}
 
 	consConfig := NewConsumerConfig("test", 413)
-	consConfig.FetchRetryLimit = 4
+	consConfig.RetryWait = time.Millisecond
+	consConfig.RetryLimit = 4
 	consumer, err := broker.Consumer(consConfig)
 	if err != nil {
 		t.Fatalf("could not create consumer: %s", err)
@@ -227,7 +260,7 @@ func TestConsumer(t *testing.T) {
 		t.Fatalf("expected no errors, got %s", err)
 	}
 	if string(msg1.Value) != "first" || string(msg1.Key) != "1" || msg1.Offset != 3 {
-		t.Fatalf("expected different message than %+q", msg1)
+		t.Fatalf("expected different message than %#v", msg1)
 	}
 
 	msg2, err := consumer.Fetch()
@@ -235,10 +268,198 @@ func TestConsumer(t *testing.T) {
 		t.Fatalf("expected no errors, got %s", err)
 	}
 	if string(msg2.Value) != "second" || string(msg2.Key) != "2" || msg2.Offset != 4 {
-		t.Fatalf("expected different message than %+q", msg2)
+		t.Fatalf("expected different message than %#v", msg2)
 	}
 
 	if err := broker.Close(); err != nil {
 		t.Fatalf("could not close broker: %s", err)
+	}
+}
+
+func TestConsumerRetry(t *testing.T) {
+	srv := kafkatest.NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(kafkatest.MetadataRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+		req := request.(*proto.MetadataReq)
+		host, port := srv.HostPort()
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				proto.MetadataRespBroker{NodeID: 1, Host: host, Port: int32(port)},
+			},
+			Topics: []proto.MetadataRespTopic{
+				proto.MetadataRespTopic{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						proto.MetadataRespPartition{
+							ID:       0,
+							Leader:   1,
+							Replicas: []int32{1},
+							Isrs:     []int32{1},
+						},
+					},
+				},
+			},
+		}
+	})
+	fetchCallCount := 0
+	srv.Handle(kafkatest.FetchRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+		req := request.(*proto.FetchReq)
+		fetchCallCount++
+		return &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				proto.FetchRespTopic{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						proto.FetchRespPartition{
+							ID:        0,
+							TipOffset: 0,
+							Messages:  []*proto.Message{},
+						},
+					},
+				},
+			},
+		}
+	})
+
+	brokConfig := NewBrokerConfig("test")
+	brokConfig.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, brokConfig)
+	if err != nil {
+		t.Fatalf("could not create broker: %s", err)
+	}
+
+	consConfig := NewConsumerConfig("test", 0)
+	consConfig.RetryLimit = 5
+	consConfig.RetryWait = time.Millisecond
+	consumer, err := broker.Consumer(consConfig)
+	if err != nil {
+		t.Fatalf("could not create consumer: %s", err)
+	}
+
+	if _, err := consumer.Fetch(); err != ErrNoData {
+		t.Fatalf("expected %s error, got %s", ErrNoData, err)
+	}
+	if fetchCallCount != 6 {
+		t.Fatalf("expected 6 fetch calls, got %d", fetchCallCount)
+	}
+
+	if err := broker.Close(); err != nil {
+		t.Fatalf("could not close broker: %s", err)
+	}
+}
+
+func TestConsumeInvalidOffset(t *testing.T) {
+	srv := kafkatest.NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+
+	srv.Handle(kafkatest.FetchRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+		req := request.(*proto.FetchReq)
+		messages := []*proto.Message{
+			// return message with offset lower than requested
+			&proto.Message{Offset: 3, Key: []byte("1"), Value: []byte("first")},
+			&proto.Message{Offset: 4, Key: []byte("2"), Value: []byte("second")},
+			&proto.Message{Offset: 5, Key: []byte("3"), Value: []byte("three")},
+		}
+		for _, m := range messages {
+			m.Crc = kafkatest.ComputeCrc(m)
+		}
+		return &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				proto.FetchRespTopic{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						proto.FetchRespPartition{
+							ID:        0,
+							TipOffset: 2,
+							Messages:  messages,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	brokConfig := NewBrokerConfig("tester")
+	brokConfig.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, brokConfig)
+	if err != nil {
+		t.Fatalf("could not create broker: %s", err)
+	}
+
+	consConfig := NewConsumerConfig("test", 0)
+	consConfig.StartOffset = 4
+	consumer, err := broker.Consumer(consConfig)
+	if err != nil {
+		t.Fatalf("could not create consumer: %s", err)
+	}
+
+	msg, err := consumer.Fetch()
+	if err != nil {
+		t.Fatalf("expected no errors, got %s", err)
+	}
+	if string(msg.Value) != "second" || string(msg.Key) != "2" || msg.Offset != 4 {
+		t.Fatalf("expected different message than %#v", msg)
+	}
+	if err := broker.Close(); err != nil {
+		t.Fatalf("could not close broker: %s", err)
+	}
+}
+
+func TestPartitionOffset(t *testing.T) {
+	srv := kafkatest.NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+
+	var handlerErr error
+	srv.Handle(kafkatest.OffsetRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+		req := request.(*proto.OffsetReq)
+		if req.ReplicaID != -1 {
+			handlerErr = fmt.Errorf("expected -1 replica id, got %d", req.ReplicaID)
+		}
+		if req.Topics[0].Partitions[0].TimeMs != -2 {
+			handlerErr = fmt.Errorf("expected -2 timems, got %d", req.Topics[0].Partitions[0].TimeMs)
+		}
+		return &proto.OffsetResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.OffsetRespTopic{
+				proto.OffsetRespTopic{
+					Name: "test",
+					Partitions: []proto.OffsetRespPartition{
+						proto.OffsetRespPartition{
+							ID:      1,
+							Offsets: []int64{123, 0},
+						},
+					},
+				},
+			},
+		}
+	})
+
+	brokConfig := NewBrokerConfig("tester")
+	brokConfig.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, brokConfig)
+	if err != nil {
+		t.Fatalf("could not create broker: %s", err)
+	}
+
+	offset, err := broker.offset("test", 1, -2)
+	if handlerErr != nil {
+		t.Fatalf("handler error: %s", handlerErr)
+	}
+	if err != nil {
+		t.Fatalf("could not fetch offset: %s", err)
+	}
+	if offset != 123 {
+		t.Fatalf("expected 123 offset, got %d", offset)
 	}
 }

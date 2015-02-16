@@ -33,7 +33,7 @@ type connection struct {
 }
 
 // newConnection returns new, initialized connection or error
-func newConnection(address string, timeout time.Duration) (*connection, error) {
+func NewConnection(address string, timeout time.Duration) (*connection, error) {
 	conn, err := net.DialTimeout("tcp", address, timeout)
 	if err != nil {
 		return nil, err
@@ -154,4 +154,22 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		return nil, c.stopErr
 	}
 	return proto.ReadFetchResp(bytes.NewReader(b))
+}
+
+func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
+	var ok bool
+	if req.CorrelationID, ok = <-c.nextID; !ok {
+		return nil, c.stopErr
+	}
+	// TODO(husio) documentation is not mentioning this directly, but I assume
+	// -1 is for non node clients
+	req.ReplicaID = -1
+	if _, err := req.WriteTo(c.conn); err != nil {
+		return nil, err
+	}
+	b, ok := <-c.respc[req.CorrelationID]
+	if !ok {
+		return nil, c.stopErr
+	}
+	return proto.ReadOffsetResp(bytes.NewReader(b))
 }
