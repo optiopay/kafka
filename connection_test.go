@@ -296,3 +296,45 @@ func TestConnectionOffset(t *testing.T) {
 		t.Fatal("expected different response %#v", resp)
 	}
 }
+
+func TestConnectionProduceNoAck(t *testing.T) {
+	ln, err := testServer()
+	if err != nil {
+		t.Fatalf("test server error: %s", err)
+	}
+	conn, err := NewConnection(ln.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatalf("could not conect to test server: %s", err)
+	}
+	resp, err := conn.Produce(&proto.ProduceReq{
+		ClientID:     "tester",
+		RequiredAcks: proto.RequiredAcksNone,
+		Timeout:      time.Second,
+		Topics: []proto.ProduceReqTopic{
+			proto.ProduceReqTopic{
+				Name: "first",
+				Partitions: []proto.ProduceReqPartition{
+					proto.ProduceReqPartition{
+						ID: 0,
+						Messages: []*proto.Message{
+							&proto.Message{Key: []byte("key 1"), Value: []byte("value 1")},
+							&proto.Message{Key: []byte("key 2"), Value: []byte("value 2")},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("could not fetch response: %s", err)
+	}
+	if resp != nil {
+		t.Fatal("expected no response, got %#v", resp)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("could not close kafka connection: %s", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("could not close test server: %s", err)
+	}
+}

@@ -131,6 +131,9 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 	if _, err := req.WriteTo(c.conn); err != nil {
 		return nil, err
 	}
+	if req.RequiredAcks == proto.RequiredAcksNone {
+		return nil, nil
+	}
 	b, ok := <-c.respc[req.CorrelationID]
 	if !ok {
 		return nil, c.stopErr
