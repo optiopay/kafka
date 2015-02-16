@@ -32,18 +32,21 @@ const (
 
 	// receive the latest offset (i.e. the offset of the next coming message)
 	OffsetReqTimeLatest = -1
+
 	// receive the earliest available offset. Note that because offsets are
 	// pulled in descending order, asking for the earliest offset will always
-	// return you a single element
+	// return you a single element.
 	OffsetReqTimeEarliest = -2
 
-	// Server will not send any response
+	// Server will not send any response.
 	RequiredAcksNone = 0
+
 	// Server will block until the message is committed by all in sync replicas
-	// before sending a response
+	// before sending a response.
 	RequiredAcksAll = -1
+
 	// Server will wait the data is written to the local log before sending a
-	// response
+	// response.
 	RequiredAcksLocal = 1
 )
 
