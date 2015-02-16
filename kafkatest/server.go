@@ -208,9 +208,21 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		}
 		return resp
 	case *proto.OffsetReq:
-		panic("not implemented")
+		topics := make([]proto.OffsetRespTopic, len(req.Topics))
+		for ti := range req.Topics {
+			var topic = &topics[ti]
+			topic.Name = req.Topics[ti].Name
+			topic.Partitions = make([]proto.OffsetRespPartition, len(req.Topics[ti].Partitions))
+			for pi := range topic.Partitions {
+				var part = &topic.Partitions[pi]
+				part.ID = req.Topics[ti].Partitions[pi].ID
+				part.Err = proto.ErrUnknownTopicOrPartition
+			}
+		}
+
 		return &proto.OffsetResp{
 			CorrelationID: req.CorrelationID,
+			Topics:        topics,
 		}
 	case *proto.MetadataReq:
 		host, sport, err := net.SplitHostPort(srv.ln.Addr().String())

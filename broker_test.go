@@ -249,6 +249,7 @@ func TestConsumer(t *testing.T) {
 
 	consConfig := NewConsumerConfig("test", 413)
 	consConfig.RetryWait = time.Millisecond
+	consConfig.StartOffset = 0
 	consConfig.RetryLimit = 4
 	consumer, err := broker.Consumer(consConfig)
 	if err != nil {
@@ -334,6 +335,7 @@ func TestConsumerRetry(t *testing.T) {
 
 	consConfig := NewConsumerConfig("test", 0)
 	consConfig.RetryLimit = 5
+	consConfig.StartOffset = 0
 	consConfig.RetryWait = time.Millisecond
 	consumer, err := broker.Consumer(consConfig)
 	if err != nil {

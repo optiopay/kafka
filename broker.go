@@ -189,15 +189,15 @@ func (b *Broker) OffsetLatest(topic string, partition int32) (offset int64, err 
 }
 
 type ProducerConfig struct {
-	Timeout      time.Duration
-	RequiredAcks int16
+	RequestTimeout time.Duration
+	RequiredAcks   int16
 }
 
 // NewProducerConfig return default producer configuration
 func NewProducerConfig() ProducerConfig {
 	return ProducerConfig{
-		Timeout:      time.Second,
-		RequiredAcks: proto.RequiredAcksAll,
+		RequestTimeout: time.Second,
+		RequiredAcks:   proto.RequiredAcksAll,
 	}
 }
 
@@ -240,7 +240,7 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 	req := proto.ProduceReq{
 		ClientID:     p.broker.config.ClientID,
 		RequiredAcks: p.config.RequiredAcks,
-		Timeout:      p.config.Timeout,
+		Timeout:      p.config.RequestTimeout,
 		Topics: []proto.ProduceReqTopic{
 			proto.ProduceReqTopic{
 				Name: topic,
@@ -284,13 +284,17 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 }
 
 type ConsumerConfig struct {
-	Topic     string
+	// Topic name that should be consumed
+	Topic string
+
+	// Partition ID that should be consumed.
 	Partition int32
 
-	// Timeout controlls fetch request timeout. This operation is blocking
-	// the whole connection, so it should always be set to small value. By
-	// default it's set to 0.
-	Timeout time.Duration
+	// RequestTimeout controlls fetch request timeout.This operation is
+	// blocking the whole connection, so it should always be set to small
+	// value. By default it's set to 0.
+	// To control fetch function timeout use RetryLimit and RetryWait.
+	RequestTimeout time.Duration
 
 	// RetryLimit limits fetching messages given amount of times before
 	// returning ErrNoData error. By default set to -1, which turns this limit
@@ -306,20 +310,23 @@ type ConsumerConfig struct {
 	// no data was returned. Defaults to 250ms.
 	RetryWait time.Duration
 
+	// Consumer cursor starting point. Set to StartOffsetNewest to receive only
+	// newly created messages or StartOffsetOldest to read everything. Assign
+	// any offset value to manually set cursor. Defaults to StartOffsetOldest
 	StartOffset int64
 }
 
 // NewConsumerConfig return default consumer configuration
 func NewConsumerConfig(topic string, partition int32) ConsumerConfig {
 	return ConsumerConfig{
-		Topic:        topic,
-		Partition:    partition,
-		Timeout:      0,
-		RetryLimit:   -1,
-		MinFetchSize: 1,
-		MaxFetchSize: 2000000,
-		RetryWait:    time.Millisecond * 250,
-		StartOffset:  0, // TODO(husio) compute offset depending on value
+		Topic:          topic,
+		Partition:      partition,
+		RequestTimeout: 0,
+		RetryLimit:     -1,
+		MinFetchSize:   1,
+		MaxFetchSize:   2000000,
+		RetryWait:      time.Millisecond * 250,
+		StartOffset:    StartOffsetOldest,
 	}
 }
 
@@ -378,7 +385,7 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 	for len(c.msgbuf) == 0 {
 		req := proto.FetchReq{
 			ClientID:    c.broker.config.ClientID,
-			MaxWaitTime: c.config.Timeout,
+			MaxWaitTime: c.config.RequestTimeout,
 			MinBytes:    c.config.MinFetchSize,
 			Topics: []proto.FetchReqTopic{
 				proto.FetchReqTopic{
