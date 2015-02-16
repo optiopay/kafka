@@ -3,6 +3,7 @@ package kafka
 import (
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"sync"
@@ -27,20 +28,32 @@ var (
 	ErrNoData = errors.New("no data")
 )
 
+type Logger interface {
+	Print(...interface{})
+	Printf(string, ...interface{})
+}
+
 type clusterMetadata struct {
 	Nodes     map[int32]string // node ID to address
 	Endpoints map[string]int32 // topic:partition to leader node ID
 }
 
 type BrokerConfig struct {
-	ClientID    string
+	// Kafka client ID.
+	ClientID string
+
+	// Any new connection dial timeout. By default 10 seconds.
 	DialTimeout time.Duration
+
+	// Logger used by the broker. By default all messages are dropped.
+	Log Logger
 }
 
 func NewBrokerConfig(clientID string) BrokerConfig {
 	return BrokerConfig{
 		ClientID:    clientID,
 		DialTimeout: time.Second * 10,
+		Log:         log.New(ioutil.Discard, "kafka", log.LstdFlags),
 	}
 }
 
@@ -70,7 +83,7 @@ func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 	for _, addr := range nodeAddresses {
 		conn, err := NewConnection(addr, config.DialTimeout)
 		if err != nil {
-			log.Printf("could not connect to %s: %s", addr, err)
+			config.Log.Printf("could not connect to %s: %s", addr, err)
 			continue
 		}
 		defer conn.Close()
@@ -79,7 +92,7 @@ func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
 			Topics:   nil,
 		})
 		if err != nil {
-			log.Printf("could not fetch metadata from %s: %s", addr, err)
+			config.Log.Printf("could not fetch metadata from %s: %s", addr, err)
 			continue
 		}
 		for _, node := range resp.Brokers {
@@ -155,12 +168,12 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 	found := false
 	for _, t := range resp.Topics {
 		if t.Name != topic {
-			log.Printf("unexpected topic information received: %s (expecting %s)", t.Name)
+			b.config.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name)
 			continue
 		}
 		for _, part := range t.Partitions {
 			if part.ID != partition {
-				log.Printf("unexpected partition information received: %s:%s (expecting %s)", t.Name, part.ID, partition)
+				b.config.Log.Printf("unexpected partition information received: %s:%s (expecting %s)", t.Name, part.ID, partition)
 				continue
 			}
 			found = true
@@ -189,15 +202,26 @@ func (b *Broker) OffsetLatest(topic string, partition int32) (offset int64, err 
 }
 
 type ProducerConfig struct {
+	// Timeout of single produce request. By default, 5 seconds.
 	RequestTimeout time.Duration
-	RequiredAcks   int16
+
+	// Message ACK configuration. Use proto.RequiredAcksAll to require all
+	// servers to write, proto.RequiredAcksLocal to wait only for leater node
+	// answer or proto.RequiredAcksNone to not wait for any response.
+	// Setting this to any other, greater than zero value will make producer to
+	// wait for given number of servers to confirm write before returning.
+	RequiredAcks int16
+
+	// Logger used by producer. By default, reuse logger assigned to broker.
+	Log Logger
 }
 
 // NewProducerConfig return default producer configuration
 func NewProducerConfig() ProducerConfig {
 	return ProducerConfig{
-		RequestTimeout: time.Second,
+		RequestTimeout: time.Second * 5,
 		RequiredAcks:   proto.RequiredAcksAll,
+		Log:            nil,
 	}
 }
 
@@ -208,6 +232,9 @@ type Producer struct {
 }
 
 func (b *Broker) Producer(config ProducerConfig) *Producer {
+	if config.Log == nil {
+		config.Log = b.config.Log
+	}
 	return &Producer{
 		config: config,
 		broker: b,
@@ -263,12 +290,12 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 	found := false
 	for _, t := range resp.Topics {
 		if t.Name != topic {
-			log.Printf("unexpected topic information received: %s", t.Name)
+			p.config.Log.Printf("unexpected topic information received: %s", t.Name)
 			continue
 		}
 		for _, part := range t.Partitions {
 			if part.ID != partition {
-				log.Printf("unexpected partition information received: %s:%d", t.Name, part.ID)
+				p.config.Log.Printf("unexpected partition information received: %s:%d", t.Name, part.ID)
 				continue
 			}
 			found = true
@@ -314,6 +341,9 @@ type ConsumerConfig struct {
 	// newly created messages or StartOffsetOldest to read everything. Assign
 	// any offset value to manually set cursor. Defaults to StartOffsetOldest
 	StartOffset int64
+
+	// Logger used by consumer. By default, reuse logger assigned to broker.
+	Log Logger
 }
 
 // NewConsumerConfig return default consumer configuration
@@ -327,6 +357,7 @@ func NewConsumerConfig(topic string, partition int32) ConsumerConfig {
 		MaxFetchSize:   2000000,
 		RetryWait:      time.Millisecond * 250,
 		StartOffset:    StartOffsetOldest,
+		Log:            nil,
 	}
 }
 
@@ -344,6 +375,9 @@ func (b *Broker) Consumer(config ConsumerConfig) (consumer *Consumer, err error)
 	conn, err := b.leaderConnection(config.Topic, config.Partition)
 	if err != nil {
 		return nil, err
+	}
+	if config.Log == nil {
+		config.Log = b.config.Log
 	}
 	offset := config.StartOffset
 	if config.StartOffset < 0 {
@@ -409,12 +443,12 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 		found := false
 		for _, topic := range resp.Topics {
 			if topic.Name != c.config.Topic {
-				log.Printf("unexpected topic information received: %s (expecting %s)", topic.Name)
+				c.config.Log.Printf("unexpected topic information received: %s (expecting %s)", topic.Name)
 				continue
 			}
 			for _, part := range topic.Partitions {
 				if part.ID != c.config.Partition {
-					log.Printf("unexpected partition information received: %s:%d", topic.Name, part.ID)
+					c.config.Log.Printf("unexpected partition information received: %s:%d", topic.Name, part.ID)
 					continue
 				}
 
