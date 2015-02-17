@@ -119,7 +119,7 @@ func TestProducer(t *testing.T) {
 		}
 		messages := req.Topics[0].Partitions[0].Messages
 		for _, msg := range messages {
-			crc := kafkatest.ComputeCrc(msg)
+			crc := proto.ComputeCrc(msg)
 			if msg.Crc != crc {
 				handleErr = fmt.Errorf("expected '%s' crc, got %s", crc, msg.Crc)
 				return nil
@@ -213,9 +213,6 @@ func TestConsumer(t *testing.T) {
 			&proto.Message{Offset: 3, Key: []byte("1"), Value: []byte("first")},
 			&proto.Message{Offset: 4, Key: []byte("2"), Value: []byte("second")},
 			&proto.Message{Offset: 5, Key: []byte("3"), Value: []byte("three")},
-		}
-		for _, m := range messages {
-			m.Crc = kafkatest.ComputeCrc(m)
 		}
 
 		return &proto.FetchResp{
@@ -364,9 +361,6 @@ func TestConsumeInvalidOffset(t *testing.T) {
 			&proto.Message{Offset: 3, Key: []byte("1"), Value: []byte("first")},
 			&proto.Message{Offset: 4, Key: []byte("2"), Value: []byte("second")},
 			&proto.Message{Offset: 5, Key: []byte("3"), Value: []byte("three")},
-		}
-		for _, m := range messages {
-			m.Crc = kafkatest.ComputeCrc(m)
 		}
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
@@ -638,9 +632,6 @@ func TestConsumerFailover(t *testing.T) {
 	messages := []*proto.Message{
 		&proto.Message{Value: []byte("first")},
 		&proto.Message{Value: []byte("second")},
-	}
-	for _, m := range messages {
-		m.Crc = kafkatest.ComputeCrc(m)
 	}
 
 	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))

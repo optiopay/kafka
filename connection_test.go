@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/optiopay/kafka/kafkatest"
 	"github.com/optiopay/kafka/proto"
 )
 
@@ -202,7 +201,7 @@ func TestConnectionFetch(t *testing.T) {
 		&proto.Message{Offset: 5, Key: []byte("s"), Value: []byte("second message")},
 	}
 	for _, m := range messages {
-		m.Crc = kafkatest.ComputeCrc(m)
+		m.Crc = proto.ComputeCrc(m)
 	}
 
 	resp1 := &proto.FetchResp{

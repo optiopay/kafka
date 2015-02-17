@@ -3,7 +3,6 @@ package kafkatest
 import (
 	"bytes"
 	"fmt"
-	"hash/crc32"
 	"net"
 	"strconv"
 	"sync"
@@ -27,16 +26,6 @@ type Serializable interface {
 }
 
 type RequestHandler func(request Serializable) (response Serializable)
-
-func ComputeCrc(m *proto.Message) uint32 {
-	var buf bytes.Buffer
-	enc := proto.NewEncoder(&buf)
-	enc.Encode(int8(0)) // magic byte is always 0
-	enc.Encode(int8(0)) // no compression support
-	enc.Encode(m.Key)
-	enc.Encode(m.Value)
-	return crc32.ChecksumIEEE(buf.Bytes())
-}
 
 type Server struct {
 	Processed int

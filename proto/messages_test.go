@@ -255,6 +255,53 @@ func TestFetchRequest(t *testing.T) {
 	}
 }
 
+func TestFetchRequest2(t *testing.T) {
+	msgb := []byte{0x0, 0x0, 0x0, 0x48, 0x0, 0x0, 0x0, 0xf1, 0x0, 0x0, 0x0, 0x1, 0x0, 0x4, 0x74, 0x65, 0x73, 0x74, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x8, 0x0, 0x3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0, 0x0, 0x0, 0x0}
+	resp, err := ReadFetchResp(bytes.NewBuffer(msgb))
+	if err != nil {
+		t.Fatalf("could not read fetch response: %s", err)
+	}
+	expected := &FetchResp{
+		CorrelationID: 241,
+		Topics: []FetchRespTopic{
+			FetchRespTopic{
+				Name: "test",
+				Partitions: []FetchRespPartition{
+					FetchRespPartition{
+						ID:        0,
+						Err:       ErrUnknownTopicOrPartition,
+						TipOffset: -1,
+						Messages:  []*Message{},
+					},
+					FetchRespPartition{
+						ID:        1,
+						Err:       ErrUnknownTopicOrPartition,
+						TipOffset: -1,
+						Messages:  []*Message{},
+					},
+					FetchRespPartition{
+						ID:        8,
+						Err:       ErrUnknownTopicOrPartition,
+						TipOffset: -1,
+						Messages:  []*Message{},
+					},
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(resp, expected) {
+		t.Fatalf("expected different structure: %#v", resp)
+	}
+
+	b, err := resp.Bytes()
+	if err != nil {
+		t.Fatalf("cannot serialize response: %s", err)
+	}
+	if !bytes.Equal(b, msgb) {
+		t.Fatalf("serialization failure: %#v", b)
+	}
+}
+
 func TestFetchResponse(t *testing.T) {
 	msgb := []byte{0x0, 0x0, 0x0, 0x75, 0x0, 0x0, 0x0, 0xf1, 0x0, 0x0, 0x0, 0x1, 0x0, 0x3, 0x66, 0x6f, 0x6f, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x4, 0x0, 0x0, 0x0, 0x40, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x14, 0xb8, 0xba, 0x5f, 0x57, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x66, 0x6f, 0x6f, 0x0, 0x0, 0x0, 0x3, 0x62, 0x61, 0x72, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0x0, 0x14, 0xb8, 0xba, 0x5f, 0x57, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x66, 0x6f, 0x6f, 0x0, 0x0, 0x0, 0x3, 0x62, 0x61, 0x72, 0x0, 0x0, 0x0, 0x1, 0x0, 0x3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x0, 0x0, 0x0, 0x0}
 	resp, err := ReadFetchResp(bytes.NewBuffer(msgb))
@@ -289,11 +336,146 @@ func TestFetchResponse(t *testing.T) {
 	if !reflect.DeepEqual(resp, expected) {
 		t.Fatalf("expected different message: %#v", resp)
 	}
-	if b, err := resp.Bytes(); err != nil {
+	b, err := resp.Bytes()
+	if err != nil {
 		t.Fatalf("cannot serialize response: %s", err)
-	} else {
-		if !bytes.Equal(b, msgb) {
-			t.Fatalf("serialized representation different from expected: %#v", b)
+	}
+	if !bytes.Equal(b, msgb) {
+		t.Fatalf("serialized representation different from expected: %#v", b)
+	}
+}
+
+func BenchmarkProduceRequestMarshal(b *testing.B) {
+	messages := make([]*Message, 1000)
+	for i := range messages {
+		messages[i] = &Message{
+			Offset: int64(i),
+			Crc:    uint32(i),
+			Key:    nil,
+			Value:  []byte(`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec a diam lectus. Sed sit amet ipsum mauris. Maecenas congue ligula ac quam viverra nec consectetur ante hendrerit. Donec et mollis dolor. Praesent et diam eget libero egestas mattis sit amet vitae augue. Nam tincidunt congue enim, ut porta lorem lacinia consectetur.`),
+		}
+
+	}
+	req := &ProduceReq{
+		CorrelationID: 241,
+		ClientID:      "test",
+		RequiredAcks:  RequiredAcksAll,
+		Timeout:       time.Second,
+		Topics: []ProduceReqTopic{
+			ProduceReqTopic{
+				Name: "foo",
+				Partitions: []ProduceReqPartition{
+					ProduceReqPartition{
+						ID:       0,
+						Messages: messages,
+					},
+				},
+			},
+		},
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if _, err := req.Bytes(); err != nil {
+			b.Fatalf("could not serialize messages: %s", err)
+		}
+	}
+}
+
+func BenchmarkProduceResponseUnmarshal(b *testing.B) {
+	resp := &ProduceResp{
+		CorrelationID: 241,
+		Topics: []ProduceRespTopic{
+			ProduceRespTopic{
+				Name: "foo",
+				Partitions: []ProduceRespPartition{
+					ProduceRespPartition{
+						ID:     0,
+						Err:    error(nil),
+						Offset: 1,
+					},
+				},
+			},
+		},
+	}
+	raw, err := resp.Bytes()
+	if err != nil {
+		b.Fatalf("cannot serialize response: %s", err)
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if _, err := ReadProduceResp(bytes.NewBuffer(raw)); err != nil {
+			b.Fatalf("could not deserialize messages: %s", err)
+		}
+	}
+}
+
+func BenchmarkFetchRequestMarshal(b *testing.B) {
+	req := &FetchReq{
+		CorrelationID: 241,
+		ClientID:      "test",
+		MaxWaitTime:   time.Second * 2,
+		MinBytes:      12454,
+		Topics: []FetchReqTopic{
+			FetchReqTopic{
+				Name: "foo",
+				Partitions: []FetchReqPartition{
+					FetchReqPartition{ID: 421, FetchOffset: 529, MaxBytes: 4921},
+					FetchReqPartition{ID: 0, FetchOffset: 11, MaxBytes: 92},
+				},
+			},
+		},
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if _, err := req.Bytes(); err != nil {
+			b.Fatalf("could not serialize messages: %s", err)
+		}
+	}
+}
+
+func BenchmarkFetchResponseUnmarshal(b *testing.B) {
+	messages := make([]*Message, 100)
+	for i := range messages {
+		messages[i] = &Message{
+			Offset: int64(i),
+			Key:    nil,
+			Value:  []byte(`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec a diam lectus. Sed sit amet ipsum mauris. Maecenas congue ligula ac quam viverra nec consectetur ante hendrerit. Donec et mollis dolor. Praesent et diam eget libero egestas mattis sit amet vitae augue. Nam tincidunt congue enim, ut porta lorem lacinia consectetur.`),
+		}
+
+	}
+	resp := &FetchResp{
+		CorrelationID: 241,
+		Topics: []FetchRespTopic{
+			FetchRespTopic{
+				Name: "foo",
+				Partitions: []FetchRespPartition{
+					FetchRespPartition{
+						ID:        0,
+						TipOffset: 444,
+						Messages:  messages,
+					},
+					FetchRespPartition{
+						ID:        123,
+						Err:       ErrBrokerNotAvailable,
+						TipOffset: -1,
+						Messages:  []*Message{},
+					},
+				},
+			},
+		},
+	}
+	raw, err := resp.Bytes()
+	if err != nil {
+		b.Fatalf("cannot serialize response: %s", err)
+	}
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if _, err := ReadFetchResp(bytes.NewBuffer(raw)); err != nil {
+			b.Fatalf("could not deserialize messages: %s", err)
 		}
 	}
 }

@@ -96,6 +96,16 @@ type Message struct {
 	Value  []byte
 }
 
+func ComputeCrc(m *Message) uint32 {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+	enc.Encode(int8(0)) // magic byte is always 0
+	enc.Encode(int8(0)) // no compression support
+	enc.Encode(m.Key)
+	enc.Encode(m.Value)
+	return crc32.ChecksumIEEE(buf.Bytes())
+}
+
 func writeMessageSet(w io.Writer, messages []*Message) error {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
@@ -105,7 +115,7 @@ func writeMessageSet(w io.Writer, messages []*Message) error {
 		enc.Encode(int64(message.Offset))
 		messageSize := 14 + len(message.Key) + len(message.Value)
 		enc.Encode(int32(messageSize))
-		enc.Encode(message.Crc)
+		enc.Encode(ComputeCrc(message))
 		enc.Encode(int8(0)) // magic byte
 		enc.Encode(int8(0)) // attributes
 		enc.Encode(message.Key)
@@ -122,9 +132,15 @@ func writeMessageSet(w io.Writer, messages []*Message) error {
 }
 
 func readMessageSet(r io.Reader) ([]*Message, error) {
-	set := make([]*Message, 0, 32)
 	dec := NewDecoder(r)
+	messagesSetSize := dec.DecodeInt32()
+	if err := dec.Err(); err != nil {
+		return nil, err
+	}
 
+	rd := io.LimitReader(r, int64(messagesSetSize))
+	dec = NewDecoder(rd)
+	set := make([]*Message, 0, 32)
 	for {
 		offset := dec.DecodeInt64()
 		if err := dec.Err(); err != nil {
@@ -141,7 +157,7 @@ func readMessageSet(r io.Reader) ([]*Message, error) {
 
 		// read message to buffer to compute it's content crc
 		msgbuf := make([]byte, size)
-		if _, err := io.ReadFull(r, msgbuf); err != nil {
+		if _, err := io.ReadFull(rd, msgbuf); err != nil {
 			return nil, err
 		}
 		msgdec := NewDecoder(bytes.NewBuffer(msgbuf))
@@ -174,25 +190,6 @@ func readMessageSet(r io.Reader) ([]*Message, error) {
 	}
 
 	return set, nil
-}
-
-func (m *Message) Bytes() ([]byte, error) {
-	var buf bytes.Buffer
-	enc := NewEncoder(&buf)
-
-	enc.Encode(int32(0)) // crc placeholder, updated lated
-	enc.Encode(int8(0))  // magic byte is always 0
-	enc.Encode(int8(0))  // no compression support
-	enc.Encode(m.Key)
-	enc.Encode(m.Value)
-
-	if enc.Err() != nil {
-		return nil, enc.Err()
-	}
-	b := buf.Bytes()
-	// update the crc field
-	binary.BigEndian.PutUint32(b, crc32.ChecksumIEEE(b[4:]))
-	return b, nil
 }
 
 type MetadataReq struct {
@@ -500,7 +497,9 @@ func (r *FetchResp) Bytes() ([]byte, error) {
 			enc.Encode(part.ID)
 			enc.EncodeError(part.Err)
 			enc.Encode(part.TipOffset)
-			writeMessageSet(&buf, part.Messages)
+			if err := writeMessageSet(&buf, part.Messages); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -535,12 +534,10 @@ func ReadFetchResp(r io.Reader) (*FetchResp, error) {
 			part.ID = dec.DecodeInt32()
 			part.Err = errFromNo(dec.DecodeInt16())
 			part.TipOffset = dec.DecodeInt64()
-			messagesSetSize := dec.DecodeInt32()
-
 			if dec.Err() != nil {
 				return nil, dec.Err()
 			}
-			if part.Messages, err = readMessageSet(io.LimitReader(r, int64(messagesSetSize))); err != nil {
+			if part.Messages, err = readMessageSet(r); err != nil {
 				return nil, err
 			}
 		}
@@ -941,12 +938,11 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 		for pi := range topic.Partitions {
 			var part = &topic.Partitions[pi]
 			part.ID = dec.DecodeInt32()
-			messagesSetSize := dec.DecodeInt32()
 			err := dec.Err()
 			if err != nil {
 				return nil, dec.Err()
 			}
-			if part.Messages, err = readMessageSet(io.LimitReader(r, int64(messagesSetSize))); err != nil {
+			if part.Messages, err = readMessageSet(r); err != nil {
 				return nil, err
 			}
 		}
@@ -977,23 +973,8 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 		enc.EncodeArrayLen(len(t.Partitions))
 		for _, p := range t.Partitions {
 			enc.Encode(p.ID)
-
-			var msgSetSize int32
-			var messageBytes = make([][]byte, len(p.Messages))
-			for i, m := range p.Messages {
-				b, err := m.Bytes()
-				if err != nil {
-					return nil, err
-				}
-				messageBytes[i] = b
-				// message offset + message len size + message size
-				msgSetSize += int32(8 + 4 + len(b))
-			}
-
-			enc.Encode(msgSetSize)
-			for _, b := range messageBytes {
-				enc.Encode(int64(0)) // offset does not matter when producing
-				enc.Encode(b)
+			if err := writeMessageSet(&buf, p.Messages); err != nil {
+				return nil, err
 			}
 		}
 	}
