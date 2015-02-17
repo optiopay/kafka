@@ -353,7 +353,7 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 	for retry := 0; retry < p.config.RetryLimit; retry++ {
 		offset, err = p.produce(topic, partition, messages...)
 		switch err {
-		case proto.ErrLeaderNotAvailable, proto.ErrNoLeaderForPartition, proto.ErrBrokerNotAvailable:
+		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
 			p.config.Log.Printf("failed to produce messages (%d): %s", retry, err)
 			time.Sleep(p.config.RetryWait)
 			// TODO(husio) possible thundering herd
@@ -617,7 +617,7 @@ func (c *Consumer) fetch() ([]*proto.Message, error) {
 		}
 
 		switch err {
-		case proto.ErrLeaderNotAvailable, proto.ErrNoLeaderForPartition, proto.ErrBrokerNotAvailable:
+		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
 			c.config.Log.Printf("failed to fetch messages (%d): %s", retry, err)
 			time.Sleep(c.config.RetryErrWait)
 			// TODO(husio) possible thundering herd

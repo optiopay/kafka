@@ -11,7 +11,7 @@ var (
 	ErrUnknownTopicOrPartition = &KafkaError{3, "unknown topic or partition"}
 	ErrInvalidMessageSize      = &KafkaError{4, "invalid message size"}
 	ErrLeaderNotAvailable      = &KafkaError{5, "leader not available"}
-	ErrNoLeaderForPartition    = &KafkaError{6, "no leader for partition"}
+	ErrNotLeaderForPartition   = &KafkaError{6, "not leader for partition"}
 	ErrRequestTimeout          = &KafkaError{7, "request timeed out"}
 	ErrBrokerNotAvailable      = &KafkaError{8, "broker not available"}
 	ErrReplicaNotAvailable     = &KafkaError{9, "replica not available"}
@@ -29,7 +29,7 @@ var (
 		3:  ErrUnknownTopicOrPartition,
 		4:  ErrInvalidMessageSize,
 		5:  ErrLeaderNotAvailable,
-		6:  ErrNoLeaderForPartition,
+		6:  ErrNotLeaderForPartition,
 		7:  ErrRequestTimeout,
 		8:  ErrBrokerNotAvailable,
 		9:  ErrReplicaNotAvailable,

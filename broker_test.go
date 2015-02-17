@@ -654,7 +654,7 @@ func TestConsumerFailover(t *testing.T) {
 						Partitions: []proto.FetchRespPartition{
 							proto.FetchRespPartition{
 								ID:  1,
-								Err: proto.ErrNoLeaderForPartition,
+								Err: proto.ErrNotLeaderForPartition,
 							},
 						},
 					},
