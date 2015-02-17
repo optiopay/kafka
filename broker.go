@@ -110,6 +110,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 	return nil, errors.New("could not connect")
 }
 
+// Close is closing broker and all active kafka nodes connections.
 func (b *Broker) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -192,7 +193,7 @@ func (b *Broker) rewriteMetadata(resp *proto.MetadataResp) {
 // leaderConnection returns connection to leader for given partition. If
 // connection does not exist, broker will try to connect first and add store
 // connection for any further use.
-// Failed connection retry is controlled by broker confuration.
+// Failed connection retry is controlled by broker configuration.
 func (b *Broker) leaderConnection(topic string, partition int32) (conn *connection, err error) {
 	endpoint := fmt.Sprintf("%s:%d", topic, partition)
 
@@ -213,6 +214,7 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 		if !ok {
 			addr, ok := b.metadata.nodes[nodeID]
 			if !ok {
+				b.conf.Log.Printf("no information about node %d", nodeID)
 				b.mu.Unlock()
 				return nil, proto.ErrBrokerNotAvailable
 			}
@@ -231,6 +233,8 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 	return nil, err
 }
 
+// offset will return offset value for given partition. Use timems to specify
+// which offset value should be returned.
 func (b *Broker) offset(topic string, partition int32, timems int64) (offset int64, err error) {
 	conn, err := b.leaderConnection(topic, partition)
 	if err != nil {
@@ -238,7 +242,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 	}
 	resp, err := conn.Offset(&proto.OffsetReq{
 		ClientID:  b.conf.ClientID,
-		ReplicaID: -1,
+		ReplicaID: -1, // any client
 		Topics: []proto.OffsetReqTopic{
 			proto.OffsetReqTopic{
 				Name: topic,
@@ -267,6 +271,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 				continue
 			}
 			found = true
+			// happends when there are no messages
 			if len(part.Offsets) == 0 {
 				offset = 0
 			} else {
@@ -295,21 +300,27 @@ type ProducerConf struct {
 	// Timeout of single produce request. By default, 5 seconds.
 	RequestTimeout time.Duration
 
-	// Message ACK confuration. Use proto.RequiredAcksAll to require all
+	// Message ACK configuration. Use proto.RequiredAcksAll to require all
 	// servers to write, proto.RequiredAcksLocal to wait only for leader node
 	// answer or proto.RequiredAcksNone to not wait for any response.
 	// Setting this to any other, greater than zero value will make producer to
 	// wait for given number of servers to confirm write before returning.
 	RequiredAcks int16
 
+	// RetryLimit specify how many times message producing should be retried in
+	// case of failure, before returning the error to the caller. By default
+	// set to 5.
 	RetryLimit int
-	RetryWait  time.Duration
+
+	// RetryWait specify wait duration before produce retry after failure. By
+	// default set to 200ms.
+	RetryWait time.Duration
 
 	// Logger used by producer. By default, reuse logger assigned to broker.
 	Log Logger
 }
 
-// NewProducerConf return default producer confuration
+// NewProducerConf return default producer configuration
 func NewProducerConf() ProducerConf {
 	return ProducerConf{
 		RequestTimeout: time.Second * 5,
@@ -320,12 +331,13 @@ func NewProducerConf() ProducerConf {
 	}
 }
 
-// Producer is link to broker with extra confuration.
+// Producer is link to broker with extra configuration.
 type Producer struct {
 	conf   ProducerConf
 	broker *Broker
 }
 
+// Producer returns new producer instance, bound to broker.
 func (b *Broker) Producer(conf ProducerConf) *Producer {
 	if conf.Log == nil {
 		conf.Log = b.conf.Log
@@ -336,6 +348,7 @@ func (b *Broker) Producer(conf ProducerConf) *Producer {
 	}
 }
 
+// Conf returns configuration used by producer.
 func (p *Producer) Conf() ProducerConf {
 	return p.conf
 }
@@ -348,7 +361,7 @@ type Message struct {
 // Produce writes messages to given destination. Write within single Produce
 // call are atomic, meaning either all or none of them are written to kafka.
 // Produce can retry sending request on common errors. This behaviour can be
-// confured with RetryLimit and RetryWait producer confuration attributes.
+// configured with RetryLimit and RetryWait producer configuration attributes.
 func (p *Producer) Produce(topic string, partition int32, messages ...*Message) (offset int64, err error) {
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		offset, err = p.produce(topic, partition, messages...)
@@ -461,6 +474,9 @@ type ConsumerConf struct {
 	// MinFetchSize is minimum size of messages to fetch in bytes. By default
 	// set to 1 to fetch any message available.
 	MinFetchSize int32
+
+	// MaxFetchSize is maximum size of data that can be send by kafka node to
+	// consumer. By default set to 2000000 bytes.
 	MaxFetchSize int32
 
 	// Consumer cursor starting point. Set to StartOffsetNewest to receive only
@@ -472,7 +488,7 @@ type ConsumerConf struct {
 	Log Logger
 }
 
-// NewConsumerConf return default consumer confuration
+// NewConsumerConf return default consumer configuration.
 func NewConsumerConf(topic string, partition int32) ConsumerConf {
 	return ConsumerConf{
 		Topic:          topic,
@@ -489,7 +505,8 @@ func NewConsumerConf(topic string, partition int32) ConsumerConf {
 	}
 }
 
-// Consumer is representing single partition reading buffer.
+// Consumer is representing single partition reading buffer. Consumer is also
+// providing limited failures handling and message filtering.
 type Consumer struct {
 	broker *Broker
 	conn   *connection
@@ -498,7 +515,7 @@ type Consumer struct {
 	msgbuf []*proto.Message
 }
 
-// Consumer creates cursor capable of reading messages from single source.
+// Consumer creates new consumer instance, bound to broker.
 func (b *Broker) Consumer(conf ConsumerConf) (consumer *Consumer, err error) {
 	conn, err := b.leaderConnection(conf.Topic, conf.Partition)
 	if err != nil {
@@ -515,6 +532,8 @@ func (b *Broker) Consumer(conf ConsumerConf) (consumer *Consumer, err error) {
 			if err != nil {
 				return nil, err
 			}
+			// latest offset that next produced message will get, but consumer
+			// offset should be set to the last returned message offset
 			offset = off - 1
 		case StartOffsetOldest:
 			off, err := b.OffsetEarliest(conf.Topic, conf.Partition)
@@ -536,17 +555,20 @@ func (b *Broker) Consumer(conf ConsumerConf) (consumer *Consumer, err error) {
 	return consumer, nil
 }
 
+// Conf returns consumer configuration.
 func (c *Consumer) Conf() ConsumerConf {
 	return c.conf
 }
 
 // Fetch is returning single message from consumed partition. Consumer can
 // retry fetching messages even if responses return no new data. Retry
-// behaviour can be confured through RetryLimit and RetryWait consumer
+// behaviour can be configured through RetryLimit and RetryWait consumer
 // parameters.
 //
+// Fetch is not thread safe.
+//
 // Fetch can retry sending request on common errors. This behaviour can be
-// confured with RetryErrLimit and RetryErrWait consumer confuration
+// configured with RetryErrLimit and RetryErrWait consumer configuration
 // attributes.
 func (c *Consumer) Fetch() (*proto.Message, error) {
 	var retry int
@@ -557,7 +579,8 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 			return nil, err
 		}
 
-		// check first messages if any of them has index lower than requested
+		// check first messages if any of them has index lower than requested,
+		// this can happen because of kafka optimizations
 		toSkip := 0
 		for toSkip < len(messages) {
 			if messages[toSkip].Offset >= c.offset {
@@ -565,6 +588,9 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 			}
 			toSkip++
 		}
+
+		// messages crc is checked by underlying connection so no need to check
+		// those again
 
 		if len(messages) == toSkip {
 			c.conf.Log.Printf("none of %d fetched messages is valid", toSkip)
@@ -588,8 +614,8 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 }
 
 // Fetch and return next batch of messages. In case of certain set of errors,
-// retry sending fetch request. Retry behaviour can be confured with
-// RetryErrLimit and RetryErrWait consumer confuration attributes.
+// retry sending fetch request. Retry behaviour can be configured with
+// RetryErrLimit and RetryErrWait consumer configuration attributes.
 func (c *Consumer) fetch() ([]*proto.Message, error) {
 	req := proto.FetchReq{
 		ClientID:    c.broker.conf.ClientID,
@@ -611,7 +637,6 @@ func (c *Consumer) fetch() ([]*proto.Message, error) {
 
 	for retry := 0; ; retry++ {
 		resp, err := c.conn.Fetch(&req)
-
 		if err != nil && retry == c.conf.RetryErrLimit {
 			return nil, err
 		}
