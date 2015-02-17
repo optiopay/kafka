@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	// StartOffsetNewest confures consumer to fetch messages produced after
+	// StartOffsetNewest configures consumer to fetch messages produced after
 	// creating the consumer.
 	StartOffsetNewest = -1
 
-	// StartOffsetOldest confures consumer to fetch starting from the oldest
+	// StartOffsetOldest configures consumer to fetch starting from the oldest
 	// message available
 	StartOffsetOldest = -2
 )
