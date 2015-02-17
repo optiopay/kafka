@@ -97,9 +97,9 @@ func TestProducer(t *testing.T) {
 	}
 
 	producer := broker.Producer(NewProducerConf())
-	messages := []*Message{
-		&Message{Value: []byte("first")},
-		&Message{Value: []byte("second")},
+	messages := []*proto.Message{
+		&proto.Message{Value: []byte("first")},
+		&proto.Message{Value: []byte("second")},
 	}
 	_, err = producer.Produce("does-not-exist", 42142, messages...)
 	if err != proto.ErrUnknownTopicOrPartition {
@@ -151,6 +151,11 @@ func TestProducer(t *testing.T) {
 	if offset != 5 {
 		t.Fatalf("expected offset different than %d", offset)
 	}
+
+	if messages[0].Offset != 5 || messages[1].Offset != 6 {
+		t.Fatalf("message offset is incorrect: %#v", messages)
+	}
+
 	broker.Close()
 }
 
@@ -552,7 +557,7 @@ func TestProducerFailoverRequestTimeout(t *testing.T) {
 	prodConf.RetryWait = time.Millisecond
 	producer := broker.Producer(prodConf)
 
-	_, err = producer.Produce("test", 0, &Message{Value: []byte("first")}, &Message{Value: []byte("second")})
+	_, err = producer.Produce("test", 0, &proto.Message{Value: []byte("first")}, &proto.Message{Value: []byte("second")})
 	if err != proto.ErrRequestTimeout {
 		t.Fatalf("expected %s, got %s", proto.ErrRequestTimeout, err)
 	}
@@ -616,7 +621,7 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 	prodConf.RetryWait = time.Millisecond
 	producer := broker.Producer(prodConf)
 
-	_, err = producer.Produce("test", 0, &Message{Value: []byte("first")}, &Message{Value: []byte("second")})
+	_, err = producer.Produce("test", 0, &proto.Message{Value: []byte("first")}, &proto.Message{Value: []byte("second")})
 	if err != nil {
 		t.Fatalf("expected no error, got %s", err)
 	}

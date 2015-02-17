@@ -353,16 +353,13 @@ func (p *Producer) Conf() ProducerConf {
 	return p.conf
 }
 
-type Message struct {
-	Key   []byte
-	Value []byte
-}
-
 // Produce writes messages to given destination. Write within single Produce
 // call are atomic, meaning either all or none of them are written to kafka.
 // Produce can retry sending request on common errors. This behaviour can be
 // configured with RetryLimit and RetryWait producer configuration attributes.
-func (p *Producer) Produce(topic string, partition int32, messages ...*Message) (offset int64, err error) {
+//
+// Upon successful produce call, messages Offset field is updated.
+func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		offset, err = p.produce(topic, partition, messages...)
 		switch err {
@@ -380,23 +377,24 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*Message) 
 			break
 		}
 	}
+
+	if err == nil {
+		// offset is the offset value of first published messages
+		for i, msg := range messages {
+			msg.Offset = int64(i) + offset
+		}
+	}
+
 	return offset, err
 }
 
 // produce send produce request to leader for given destination.
-func (p *Producer) produce(topic string, partition int32, messages ...*Message) (offset int64, err error) {
+func (p *Producer) produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 	conn, err := p.broker.leaderConnection(topic, partition)
 	if err != nil {
 		return 0, err
 	}
 
-	msgs := make([]*proto.Message, len(messages))
-	for i, m := range messages {
-		msgs[i] = &proto.Message{
-			Key:   m.Key,
-			Value: m.Value,
-		}
-	}
 	req := proto.ProduceReq{
 		ClientID:     p.broker.conf.ClientID,
 		RequiredAcks: p.conf.RequiredAcks,
@@ -407,7 +405,7 @@ func (p *Producer) produce(topic string, partition int32, messages ...*Message) 
 				Partitions: []proto.ProduceReqPartition{
 					proto.ProduceReqPartition{
 						ID:       partition,
-						Messages: msgs,
+						Messages: messages,
 					},
 				},
 			},

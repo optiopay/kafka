@@ -52,9 +52,9 @@ func ExampleProducer() {
 	conf.RequiredAcks = proto.RequiredAcksLocal
 
 	producer := broker.Producer(conf)
-	messages := []*Message{
-		&Message{Value: []byte("first")},
-		&Message{Value: []byte("second")},
+	messages := []*proto.Message{
+		&proto.Message{Value: []byte("first")},
+		&proto.Message{Value: []byte("second")},
 	}
 	if _, err := producer.Produce("my-messages", 0, messages...); err != nil {
 		panic(err)
