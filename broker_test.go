@@ -508,7 +508,7 @@ func TestLeaderConnectionFailover(t *testing.T) {
 
 	c, err := net.Listen("tcp", "localhost:23456")
 	if err != nil {
-		t.Fatalf("cannot not start server: %s", err)
+		t.Fatalf("cannot start server: %s", err)
 	}
 	c.Accept()
 	<-stop
@@ -544,7 +544,7 @@ func TestProducerFailoverRequestTimeout(t *testing.T) {
 
 	broker, err := Dial([]string{srv.Address()}, NewBrokerConfig("test"))
 	if err != nil {
-		t.Fatalf("cannot not create broker: %s", err)
+		t.Fatalf("cannot create broker: %s", err)
 	}
 
 	prodConfig := NewProducerConfig()
@@ -608,7 +608,7 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 
 	broker, err := Dial([]string{srv.Address()}, NewBrokerConfig("test"))
 	if err != nil {
-		t.Fatalf("cannot not create broker: %s", err)
+		t.Fatalf("cannot create broker: %s", err)
 	}
 
 	prodConfig := NewProducerConfig()
@@ -626,5 +626,96 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 }
 
 func TestConsumerFailover(t *testing.T) {
-	t.Fatal("not implemented")
+	srv := kafkatest.NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	messages := []*proto.Message{
+		&proto.Message{Value: []byte("first")},
+		&proto.Message{Value: []byte("second")},
+	}
+	for _, m := range messages {
+		m.Crc = kafkatest.ComputeCrc(m)
+	}
+
+	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+
+	respCount := 0
+	srv.Handle(kafkatest.FetchRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+		respCount++
+		req := request.(*proto.FetchReq)
+
+		if respCount == 4 {
+			return &proto.FetchResp{
+				CorrelationID: req.CorrelationID,
+				Topics: []proto.FetchRespTopic{
+					proto.FetchRespTopic{
+						Name: "test",
+						Partitions: []proto.FetchRespPartition{
+							proto.FetchRespPartition{
+								ID:  1,
+								Err: proto.ErrNoLeaderForPartition,
+							},
+						},
+					},
+				},
+			}
+		}
+		resp := &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				proto.FetchRespTopic{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						proto.FetchRespPartition{
+							ID:       1,
+							Messages: messages,
+						},
+					},
+				},
+			},
+		}
+		messages = []*proto.Message{}
+		return resp
+	})
+
+	broker, err := Dial([]string{srv.Address()}, NewBrokerConfig("test"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	conf := NewConsumerConfig("test", 1)
+	conf.RetryWait = time.Nanosecond
+	conf.RetryLimit = 4
+	conf.RetryErrWait = time.Nanosecond
+	conf.StartOffset = 0
+
+	consumer, err := broker.Consumer(conf)
+	if err != nil {
+		t.Fatalf("cannot create consumer: %s", err)
+	}
+
+	for {
+		msg, err := consumer.Fetch()
+		if err != nil {
+			t.Fatalf("failed to consume: %s", err)
+		}
+		if string(msg.Value) != "first" {
+			t.Fatalf("expected first message got %#q", msg)
+		}
+
+		msg, err = consumer.Fetch()
+		if err != nil {
+			t.Fatalf("failed to consume: %s", err)
+		}
+		if string(msg.Value) != "second" {
+			t.Fatalf("expected second message got %#q", msg)
+		}
+
+		if msg, err := consumer.Fetch(); err != ErrNoData {
+			t.Fatalf("expected no data, got %#v (%#q)", err, msg)
+		}
+
+		return
+	}
 }
