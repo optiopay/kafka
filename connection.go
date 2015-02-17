@@ -120,7 +120,8 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 }
 
 // Produce sends given produce request to kafka node and returns related
-// response.
+// response. Sending request with no ACKs flag will result with returning nil
+// right after sending request, without waiting for response.
 // Calling this method on closed connection will always return ErrClosed.
 func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) {
 	var ok bool
@@ -159,6 +160,8 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 	return proto.ReadFetchResp(bytes.NewReader(b))
 }
 
+// Offset sends given offset request to kafka node and returns related response.
+// Calling this method on closed connection will always return ErrClosed.
 func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
