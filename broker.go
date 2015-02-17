@@ -13,11 +13,11 @@ import (
 )
 
 const (
-	// StartOffsetNewest configures consumer to fetch messages produced after
+	// StartOffsetNewest confures consumer to fetch messages produced after
 	// creating the consumer.
 	StartOffsetNewest = -1
 
-	// StartOffsetOldest configures consumer to fetch starting from the oldest
+	// StartOffsetOldest confures consumer to fetch starting from the oldest
 	// message available
 	StartOffsetOldest = -2
 )
@@ -39,7 +39,7 @@ type clusterMetadata struct {
 	endpoints map[string]int32 // topic:partition to leader node ID
 }
 
-type BrokerConfig struct {
+type BrokerConf struct {
 	// Kafka client ID.
 	ClientID string
 
@@ -60,8 +60,8 @@ type BrokerConfig struct {
 	Log Logger
 }
 
-func NewBrokerConfig(clientID string) BrokerConfig {
-	return BrokerConfig{
+func NewBrokerConf(clientID string) BrokerConf {
+	return BrokerConf{
 		ClientID:         clientID,
 		DialTimeout:      time.Second * 10,
 		LeaderRetryLimit: 10,
@@ -73,7 +73,7 @@ func NewBrokerConfig(clientID string) BrokerConfig {
 // Broker is abstract connection to kafka cluster, managing connections to all
 // kafka nodes.
 type Broker struct {
-	config BrokerConfig
+	conf BrokerConf
 
 	mu       sync.Mutex
 	metadata clusterMetadata
@@ -83,25 +83,25 @@ type Broker struct {
 // Dial connects to any node from given list of kafka addresses and after
 // successful metadata fetch, returns broker.
 // Returned broker is not initially connected to any kafka node.
-func Dial(nodeAddresses []string, config BrokerConfig) (*Broker, error) {
+func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 	broker := &Broker{
-		config: config,
-		conns:  make(map[int32]*connection),
+		conf:  conf,
+		conns: make(map[int32]*connection),
 	}
 
 	for _, addr := range nodeAddresses {
-		conn, err := NewConnection(addr, config.DialTimeout)
+		conn, err := NewConnection(addr, conf.DialTimeout)
 		if err != nil {
-			config.Log.Printf("could not connect to %s: %s", addr, err)
+			conf.Log.Printf("could not connect to %s: %s", addr, err)
 			continue
 		}
 		defer conn.Close()
 		resp, err := conn.Metadata(&proto.MetadataReq{
-			ClientID: broker.config.ClientID,
+			ClientID: broker.conf.ClientID,
 			Topics:   nil,
 		})
 		if err != nil {
-			config.Log.Printf("could not fetch metadata from %s: %s", addr, err)
+			conf.Log.Printf("could not fetch metadata from %s: %s", addr, err)
 			continue
 		}
 		broker.rewriteMetadata(resp)
@@ -115,7 +115,7 @@ func (b *Broker) Close() {
 	defer b.mu.Unlock()
 	for nodeID, conn := range b.conns {
 		if err := conn.Close(); err != nil {
-			b.config.Log.Printf("failed closing node %d connection: %s", nodeID, err)
+			b.conf.Log.Printf("failed closing node %d connection: %s", nodeID, err)
 		}
 	}
 }
@@ -131,11 +131,11 @@ func (b *Broker) refreshMetadata() error {
 	for nodeID, conn := range b.conns {
 		checkednodes[nodeID] = true
 		resp, err := conn.Metadata(&proto.MetadataReq{
-			ClientID: b.config.ClientID,
+			ClientID: b.conf.ClientID,
 			Topics:   nil,
 		})
 		if err != nil {
-			b.config.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
+			b.conf.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
 			continue
 		}
 		b.rewriteMetadata(resp)
@@ -147,20 +147,20 @@ func (b *Broker) refreshMetadata() error {
 		if _, ok := checkednodes[nodeID]; ok {
 			continue
 		}
-		conn, err := NewConnection(addr, b.config.DialTimeout)
+		conn, err := NewConnection(addr, b.conf.DialTimeout)
 		if err != nil {
-			b.config.Log.Printf("could not connect to %s: %s", addr, err)
+			b.conf.Log.Printf("could not connect to %s: %s", addr, err)
 			continue
 		}
 		// we had no active connection to this node, so most likely we don't need it
 		defer conn.Close()
 
 		resp, err := conn.Metadata(&proto.MetadataReq{
-			ClientID: b.config.ClientID,
+			ClientID: b.conf.ClientID,
 			Topics:   nil,
 		})
 		if err != nil {
-			b.config.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
+			b.conf.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
 			continue
 		}
 		b.rewriteMetadata(resp)
@@ -173,7 +173,7 @@ func (b *Broker) refreshMetadata() error {
 // rewriteMetadata creates new internal metadata representation using data from
 // given response. It's call has to be protected with lock.
 func (b *Broker) rewriteMetadata(resp *proto.MetadataResp) {
-	b.config.Log.Printf("rewriting metadata created %s ago", time.Now().Sub(b.metadata.created))
+	b.conf.Log.Printf("rewriting metadata created %s ago", time.Now().Sub(b.metadata.created))
 	b.metadata = clusterMetadata{
 		created:   time.Now(),
 		nodes:     make(map[int32]string),
@@ -192,11 +192,11 @@ func (b *Broker) rewriteMetadata(resp *proto.MetadataResp) {
 // leaderConnection returns connection to leader for given partition. If
 // connection does not exist, broker will try to connect first and add store
 // connection for any further use.
-// Failed connection retry is controlled by broker configuration.
+// Failed connection retry is controlled by broker confuration.
 func (b *Broker) leaderConnection(topic string, partition int32) (conn *connection, err error) {
 	endpoint := fmt.Sprintf("%s:%d", topic, partition)
 
-	for retry := 0; retry < b.config.LeaderRetryLimit; retry++ {
+	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
 		b.mu.Lock()
 
 		nodeID, ok := b.metadata.endpoints[endpoint]
@@ -216,11 +216,11 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 				b.mu.Unlock()
 				return nil, proto.ErrBrokerNotAvailable
 			}
-			conn, err = NewConnection(addr, b.config.DialTimeout)
+			conn, err = NewConnection(addr, b.conf.DialTimeout)
 			if err != nil {
-				b.config.Log.Printf("cannot connect to node %s: %s", addr, err)
+				b.conf.Log.Printf("cannot connect to node %s: %s", addr, err)
 				b.mu.Unlock()
-				time.Sleep(b.config.LeaderRetryWait)
+				time.Sleep(b.conf.LeaderRetryWait)
 				continue
 			}
 			b.conns[nodeID] = conn
@@ -237,7 +237,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 		return 0, err
 	}
 	resp, err := conn.Offset(&proto.OffsetReq{
-		ClientID:  b.config.ClientID,
+		ClientID:  b.conf.ClientID,
 		ReplicaID: -1,
 		Topics: []proto.OffsetReqTopic{
 			proto.OffsetReqTopic{
@@ -258,12 +258,12 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 	found := false
 	for _, t := range resp.Topics {
 		if t.Name != topic {
-			b.config.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name)
+			b.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name)
 			continue
 		}
 		for _, part := range t.Partitions {
 			if part.ID != partition {
-				b.config.Log.Printf("unexpected partition information received: %s:%s (expecting %s)", t.Name, part.ID, partition)
+				b.conf.Log.Printf("unexpected partition information received: %s:%s (expecting %s)", t.Name, part.ID, partition)
 				continue
 			}
 			found = true
@@ -291,11 +291,11 @@ func (b *Broker) OffsetLatest(topic string, partition int32) (offset int64, err 
 	return b.offset(topic, partition, -1)
 }
 
-type ProducerConfig struct {
+type ProducerConf struct {
 	// Timeout of single produce request. By default, 5 seconds.
 	RequestTimeout time.Duration
 
-	// Message ACK configuration. Use proto.RequiredAcksAll to require all
+	// Message ACK confuration. Use proto.RequiredAcksAll to require all
 	// servers to write, proto.RequiredAcksLocal to wait only for leader node
 	// answer or proto.RequiredAcksNone to not wait for any response.
 	// Setting this to any other, greater than zero value will make producer to
@@ -309,9 +309,9 @@ type ProducerConfig struct {
 	Log Logger
 }
 
-// NewProducerConfig return default producer configuration
-func NewProducerConfig() ProducerConfig {
-	return ProducerConfig{
+// NewProducerConf return default producer confuration
+func NewProducerConf() ProducerConf {
+	return ProducerConf{
 		RequestTimeout: time.Second * 5,
 		RequiredAcks:   proto.RequiredAcksAll,
 		RetryLimit:     5,
@@ -320,24 +320,24 @@ func NewProducerConfig() ProducerConfig {
 	}
 }
 
-// Producer is link to broker with extra configuration.
+// Producer is link to broker with extra confuration.
 type Producer struct {
-	config ProducerConfig
+	conf   ProducerConf
 	broker *Broker
 }
 
-func (b *Broker) Producer(config ProducerConfig) *Producer {
-	if config.Log == nil {
-		config.Log = b.config.Log
+func (b *Broker) Producer(conf ProducerConf) *Producer {
+	if conf.Log == nil {
+		conf.Log = b.conf.Log
 	}
 	return &Producer{
-		config: config,
+		conf:   conf,
 		broker: b,
 	}
 }
 
-func (p *Producer) Config() ProducerConfig {
-	return p.config
+func (p *Producer) Conf() ProducerConf {
+	return p.conf
 }
 
 type Message struct {
@@ -348,21 +348,21 @@ type Message struct {
 // Produce writes messages to given destination. Write within single Produce
 // call are atomic, meaning either all or none of them are written to kafka.
 // Produce can retry sending request on common errors. This behaviour can be
-// configured with RetryLimit and RetryWait producer configuration attributes.
+// confured with RetryLimit and RetryWait producer confuration attributes.
 func (p *Producer) Produce(topic string, partition int32, messages ...*Message) (offset int64, err error) {
-	for retry := 0; retry < p.config.RetryLimit; retry++ {
+	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		offset, err = p.produce(topic, partition, messages...)
 		switch err {
 		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
-			p.config.Log.Printf("failed to produce messages (%d): %s", retry, err)
-			time.Sleep(p.config.RetryWait)
+			p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)
+			time.Sleep(p.conf.RetryWait)
 			// TODO(husio) possible thundering herd
 			if err := p.broker.refreshMetadata(); err != nil {
-				p.config.Log.Printf("failed to refresh metadata: %s", err)
+				p.conf.Log.Printf("failed to refresh metadata: %s", err)
 			}
 		case proto.ErrRequestTimeout:
-			p.config.Log.Printf("failed to produce messages (%d): %s", retry, err)
-			time.Sleep(p.config.RetryWait)
+			p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)
+			time.Sleep(p.conf.RetryWait)
 		default:
 			break
 		}
@@ -385,9 +385,9 @@ func (p *Producer) produce(topic string, partition int32, messages ...*Message) 
 		}
 	}
 	req := proto.ProduceReq{
-		ClientID:     p.broker.config.ClientID,
-		RequiredAcks: p.config.RequiredAcks,
-		Timeout:      p.config.RequestTimeout,
+		ClientID:     p.broker.conf.ClientID,
+		RequiredAcks: p.conf.RequiredAcks,
+		Timeout:      p.conf.RequestTimeout,
 		Topics: []proto.ProduceReqTopic{
 			proto.ProduceReqTopic{
 				Name: topic,
@@ -410,12 +410,12 @@ func (p *Producer) produce(topic string, partition int32, messages ...*Message) 
 	found := false
 	for _, t := range resp.Topics {
 		if t.Name != topic {
-			p.config.Log.Printf("unexpected topic information received: %s", t.Name)
+			p.conf.Log.Printf("unexpected topic information received: %s", t.Name)
 			continue
 		}
 		for _, part := range t.Partitions {
 			if part.ID != partition {
-				p.config.Log.Printf("unexpected partition information received: %s:%d", t.Name, part.ID)
+				p.conf.Log.Printf("unexpected partition information received: %s:%d", t.Name, part.ID)
 				continue
 			}
 			found = true
@@ -430,7 +430,7 @@ func (p *Producer) produce(topic string, partition int32, messages ...*Message) 
 	return offset, err
 }
 
-type ConsumerConfig struct {
+type ConsumerConf struct {
 	// Topic name that should be consumed
 	Topic string
 
@@ -472,9 +472,9 @@ type ConsumerConfig struct {
 	Log Logger
 }
 
-// NewConsumerConfig return default consumer configuration
-func NewConsumerConfig(topic string, partition int32) ConsumerConfig {
-	return ConsumerConfig{
+// NewConsumerConf return default consumer confuration
+func NewConsumerConf(topic string, partition int32) ConsumerConf {
+	return ConsumerConf{
 		Topic:          topic,
 		Partition:      partition,
 		RequestTimeout: 0,
@@ -493,60 +493,60 @@ func NewConsumerConfig(topic string, partition int32) ConsumerConfig {
 type Consumer struct {
 	broker *Broker
 	conn   *connection
-	config ConsumerConfig
+	conf   ConsumerConf
 	offset int64
 	msgbuf []*proto.Message
 }
 
 // Consumer creates cursor capable of reading messages from single source.
-func (b *Broker) Consumer(config ConsumerConfig) (consumer *Consumer, err error) {
-	conn, err := b.leaderConnection(config.Topic, config.Partition)
+func (b *Broker) Consumer(conf ConsumerConf) (consumer *Consumer, err error) {
+	conn, err := b.leaderConnection(conf.Topic, conf.Partition)
 	if err != nil {
 		return nil, err
 	}
-	if config.Log == nil {
-		config.Log = b.config.Log
+	if conf.Log == nil {
+		conf.Log = b.conf.Log
 	}
-	offset := config.StartOffset
-	if config.StartOffset < 0 {
-		switch config.StartOffset {
+	offset := conf.StartOffset
+	if conf.StartOffset < 0 {
+		switch conf.StartOffset {
 		case StartOffsetNewest:
-			off, err := b.OffsetLatest(config.Topic, config.Partition)
+			off, err := b.OffsetLatest(conf.Topic, conf.Partition)
 			if err != nil {
 				return nil, err
 			}
 			offset = off - 1
 		case StartOffsetOldest:
-			off, err := b.OffsetEarliest(config.Topic, config.Partition)
+			off, err := b.OffsetEarliest(conf.Topic, conf.Partition)
 			if err != nil {
 				return nil, err
 			}
 			offset = off
 		default:
-			return nil, fmt.Errorf("invalid start offset: %d", config.StartOffset)
+			return nil, fmt.Errorf("invalid start offset: %d", conf.StartOffset)
 		}
 	}
 	consumer = &Consumer{
 		broker: b,
 		conn:   conn,
-		config: config,
+		conf:   conf,
 		msgbuf: make([]*proto.Message, 0),
 		offset: offset,
 	}
 	return consumer, nil
 }
 
-func (c *Consumer) Config() ConsumerConfig {
-	return c.config
+func (c *Consumer) Conf() ConsumerConf {
+	return c.conf
 }
 
 // Fetch is returning single message from consumed partition. Consumer can
 // retry fetching messages even if responses return no new data. Retry
-// behaviour can be configured through RetryLimit and RetryWait consumer
+// behaviour can be confured through RetryLimit and RetryWait consumer
 // parameters.
 //
 // Fetch can retry sending request on common errors. This behaviour can be
-// configured with RetryErrLimit and RetryErrWait consumer configuration
+// confured with RetryErrLimit and RetryErrWait consumer confuration
 // attributes.
 func (c *Consumer) Fetch() (*proto.Message, error) {
 	var retry int
@@ -567,15 +567,15 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 		}
 
 		if len(messages) == toSkip {
-			c.config.Log.Printf("none of %d fetched messages is valid", toSkip)
+			c.conf.Log.Printf("none of %d fetched messages is valid", toSkip)
 		}
 		// ignore all messages that are of index lower than requested
 		c.msgbuf = messages[toSkip:]
 
 		if len(c.msgbuf) == 0 {
-			time.Sleep(time.Duration(math.Log(float64(retry+2))) * c.config.RetryWait)
+			time.Sleep(time.Duration(math.Log(float64(retry+2))) * c.conf.RetryWait)
 			retry += 1
-			if c.config.RetryLimit != -1 && retry > c.config.RetryLimit {
+			if c.conf.RetryLimit != -1 && retry > c.conf.RetryLimit {
 				return nil, ErrNoData
 			}
 		}
@@ -588,21 +588,21 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 }
 
 // Fetch and return next batch of messages. In case of certain set of errors,
-// retry sending fetch request. Retry behaviour can be configured with
-// RetryErrLimit and RetryErrWait consumer configuration attributes.
+// retry sending fetch request. Retry behaviour can be confured with
+// RetryErrLimit and RetryErrWait consumer confuration attributes.
 func (c *Consumer) fetch() ([]*proto.Message, error) {
 	req := proto.FetchReq{
-		ClientID:    c.broker.config.ClientID,
-		MaxWaitTime: c.config.RequestTimeout,
-		MinBytes:    c.config.MinFetchSize,
+		ClientID:    c.broker.conf.ClientID,
+		MaxWaitTime: c.conf.RequestTimeout,
+		MinBytes:    c.conf.MinFetchSize,
 		Topics: []proto.FetchReqTopic{
 			proto.FetchReqTopic{
-				Name: c.config.Topic,
+				Name: c.conf.Topic,
 				Partitions: []proto.FetchReqPartition{
 					proto.FetchReqPartition{
-						ID:          c.config.Partition,
+						ID:          c.conf.Partition,
 						FetchOffset: c.offset + 1,
-						MaxBytes:    c.config.MaxFetchSize,
+						MaxBytes:    c.conf.MaxFetchSize,
 					},
 				},
 			},
@@ -612,17 +612,17 @@ func (c *Consumer) fetch() ([]*proto.Message, error) {
 	for retry := 0; ; retry++ {
 		resp, err := c.conn.Fetch(&req)
 
-		if err != nil && retry == c.config.RetryErrLimit {
+		if err != nil && retry == c.conf.RetryErrLimit {
 			return nil, err
 		}
 
 		switch err {
 		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
-			c.config.Log.Printf("failed to fetch messages (%d): %s", retry, err)
-			time.Sleep(c.config.RetryErrWait)
+			c.conf.Log.Printf("failed to fetch messages (%d): %s", retry, err)
+			time.Sleep(c.conf.RetryErrWait)
 			// TODO(husio) possible thundering herd
 			if err := c.broker.refreshMetadata(); err != nil {
-				c.config.Log.Printf("failed to refresh metadata: %s", err)
+				c.conf.Log.Printf("failed to refresh metadata: %s", err)
 			}
 		case nil:
 			// everything's fine, proceed
@@ -631,13 +631,13 @@ func (c *Consumer) fetch() ([]*proto.Message, error) {
 		}
 
 		for _, topic := range resp.Topics {
-			if topic.Name != c.config.Topic {
-				c.config.Log.Printf("unexpected topic information received: %s (expecting %s)", topic.Name)
+			if topic.Name != c.conf.Topic {
+				c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", topic.Name)
 				continue
 			}
 			for _, part := range topic.Partitions {
-				if part.ID != c.config.Partition {
-					c.config.Log.Printf("unexpected partition information received: %s:%d", topic.Name, part.ID)
+				if part.ID != c.conf.Partition {
+					c.conf.Log.Printf("unexpected partition information received: %s:%d", topic.Name, part.ID)
 					continue
 				}
 				return part.Messages, nil

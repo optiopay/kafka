@@ -48,9 +48,9 @@ func TestDialWithInvalidAddress(t *testing.T) {
 	defer srv.Close()
 
 	addresses := []string{"localhost:4291190", "localhost:2141202", srv.Address()}
-	config := NewBrokerConfig("tester")
-	config.DialTimeout = time.Millisecond * 200
-	broker, err := Dial(addresses, config)
+	conf := NewBrokerConf("tester")
+	conf.DialTimeout = time.Millisecond * 200
+	broker, err := Dial(addresses, conf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
@@ -89,14 +89,14 @@ func TestProducer(t *testing.T) {
 		}
 	})
 
-	config := NewBrokerConfig("tester")
-	config.DialTimeout = time.Millisecond * 200
-	broker, err := Dial([]string{srv.Address()}, config)
+	conf := NewBrokerConf("tester")
+	conf.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, conf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
 
-	producer := broker.Producer(NewProducerConfig())
+	producer := broker.Producer(NewProducerConf())
 	messages := []*Message{
 		&Message{Value: []byte("first")},
 		&Message{Value: []byte("second")},
@@ -230,25 +230,25 @@ func TestConsumer(t *testing.T) {
 		}
 	})
 
-	brokConfig := NewBrokerConfig("tester")
-	brokConfig.DialTimeout = time.Millisecond * 200
-	broker, err := Dial([]string{srv.Address()}, brokConfig)
+	brokConf := NewBrokerConf("tester")
+	brokConf.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, brokConf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
 
-	if _, err := broker.Consumer(NewConsumerConfig("does-not-exists", 413)); err != proto.ErrUnknownTopicOrPartition {
+	if _, err := broker.Consumer(NewConsumerConf("does-not-exists", 413)); err != proto.ErrUnknownTopicOrPartition {
 		t.Fatalf("expected %s error, got %s", proto.ErrUnknownTopicOrPartition, err)
 	}
-	if _, err := broker.Consumer(NewConsumerConfig("test", 1)); err != proto.ErrUnknownTopicOrPartition {
+	if _, err := broker.Consumer(NewConsumerConf("test", 1)); err != proto.ErrUnknownTopicOrPartition {
 		t.Fatalf("expected %s error, got %s", proto.ErrUnknownTopicOrPartition, err)
 	}
 
-	consConfig := NewConsumerConfig("test", 413)
-	consConfig.RetryWait = time.Millisecond
-	consConfig.StartOffset = 0
-	consConfig.RetryLimit = 4
-	consumer, err := broker.Consumer(consConfig)
+	consConf := NewConsumerConf("test", 413)
+	consConf.RetryWait = time.Millisecond
+	consConf.StartOffset = 0
+	consConf.RetryLimit = 4
+	consumer, err := broker.Consumer(consConf)
 	if err != nil {
 		t.Fatalf("cannot create consumer: %s", err)
 	}
@@ -320,18 +320,18 @@ func TestConsumerRetry(t *testing.T) {
 		}
 	})
 
-	brokConfig := NewBrokerConfig("test")
-	brokConfig.DialTimeout = time.Millisecond * 200
-	broker, err := Dial([]string{srv.Address()}, brokConfig)
+	brokConf := NewBrokerConf("test")
+	brokConf.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, brokConf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
 
-	consConfig := NewConsumerConfig("test", 0)
-	consConfig.RetryLimit = 5
-	consConfig.StartOffset = 0
-	consConfig.RetryWait = time.Millisecond
-	consumer, err := broker.Consumer(consConfig)
+	consConf := NewConsumerConf("test", 0)
+	consConf.RetryLimit = 5
+	consConf.StartOffset = 0
+	consConf.RetryWait = time.Millisecond
+	consumer, err := broker.Consumer(consConf)
 	if err != nil {
 		t.Fatalf("cannot create consumer: %s", err)
 	}
@@ -380,16 +380,16 @@ func TestConsumeInvalidOffset(t *testing.T) {
 		}
 	})
 
-	brokConfig := NewBrokerConfig("tester")
-	brokConfig.DialTimeout = time.Millisecond * 200
-	broker, err := Dial([]string{srv.Address()}, brokConfig)
+	brokConf := NewBrokerConf("tester")
+	brokConf.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, brokConf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
 
-	consConfig := NewConsumerConfig("test", 0)
-	consConfig.StartOffset = 4
-	consumer, err := broker.Consumer(consConfig)
+	consConf := NewConsumerConf("test", 0)
+	consConf.StartOffset = 4
+	consumer, err := broker.Consumer(consConf)
 	if err != nil {
 		t.Fatalf("cannot create consumer: %s", err)
 	}
@@ -436,9 +436,9 @@ func TestPartitionOffset(t *testing.T) {
 		}
 	})
 
-	brokConfig := NewBrokerConfig("tester")
-	brokConfig.DialTimeout = time.Millisecond * 200
-	broker, err := Dial([]string{srv.Address()}, brokConfig)
+	brokConf := NewBrokerConf("tester")
+	brokConf.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, brokConf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
@@ -464,12 +464,12 @@ func TestLeaderConnectionFailover(t *testing.T) {
 
 	addresses := []string{srv.Address()}
 
-	config := NewBrokerConfig("tester")
-	config.DialTimeout = time.Millisecond * 20
-	config.LeaderRetryWait = time.Millisecond
-	config.LeaderRetryLimit = 3
+	conf := NewBrokerConf("tester")
+	conf.DialTimeout = time.Millisecond * 20
+	conf.LeaderRetryWait = time.Millisecond
+	conf.LeaderRetryLimit = 3
 
-	broker, err := Dial(addresses, config)
+	broker, err := Dial(addresses, conf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
@@ -478,7 +478,7 @@ func TestLeaderConnectionFailover(t *testing.T) {
 		t.Fatalf("%s expected, got %s", proto.ErrUnknownTopicOrPartition, err)
 	}
 
-	// fake initial metadata configuration
+	// fake initial metadata confuration
 	broker.metadata.nodes = map[int32]string{
 		1: "localhost:214412",
 	}
@@ -490,8 +490,8 @@ func TestLeaderConnectionFailover(t *testing.T) {
 	broker.metadata.nodes = map[int32]string{
 		1: "localhost:23456",
 	}
-	config.LeaderRetryWait = time.Millisecond
-	config.LeaderRetryLimit = 1000
+	conf.LeaderRetryWait = time.Millisecond
+	conf.LeaderRetryLimit = 1000
 	stop := make(chan struct{})
 
 	go func() {
@@ -542,22 +542,22 @@ func TestProducerFailoverRequestTimeout(t *testing.T) {
 		}
 	})
 
-	broker, err := Dial([]string{srv.Address()}, NewBrokerConfig("test"))
+	broker, err := Dial([]string{srv.Address()}, NewBrokerConf("test"))
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
 
-	prodConfig := NewProducerConfig()
-	prodConfig.RetryLimit = 4
-	prodConfig.RetryWait = time.Millisecond
-	producer := broker.Producer(prodConfig)
+	prodConf := NewProducerConf()
+	prodConf.RetryLimit = 4
+	prodConf.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConf)
 
 	_, err = producer.Produce("test", 0, &Message{Value: []byte("first")}, &Message{Value: []byte("second")})
 	if err != proto.ErrRequestTimeout {
 		t.Fatalf("expected %s, got %s", proto.ErrRequestTimeout, err)
 	}
-	if requestsCount != prodConfig.RetryLimit {
-		t.Fatalf("expected %d requests, got %d", prodConfig.RetryLimit, requestsCount)
+	if requestsCount != prodConf.RetryLimit {
+		t.Fatalf("expected %d requests, got %d", prodConf.RetryLimit, requestsCount)
 	}
 }
 
@@ -606,15 +606,15 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 		}
 	})
 
-	broker, err := Dial([]string{srv.Address()}, NewBrokerConfig("test"))
+	broker, err := Dial([]string{srv.Address()}, NewBrokerConf("test"))
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
 
-	prodConfig := NewProducerConfig()
-	prodConfig.RetryLimit = 5
-	prodConfig.RetryWait = time.Millisecond
-	producer := broker.Producer(prodConfig)
+	prodConf := NewProducerConf()
+	prodConf.RetryLimit = 5
+	prodConf.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConf)
 
 	_, err = producer.Produce("test", 0, &Message{Value: []byte("first")}, &Message{Value: []byte("second")})
 	if err != nil {
@@ -679,12 +679,12 @@ func TestConsumerFailover(t *testing.T) {
 		return resp
 	})
 
-	broker, err := Dial([]string{srv.Address()}, NewBrokerConfig("test"))
+	broker, err := Dial([]string{srv.Address()}, NewBrokerConf("test"))
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
 
-	conf := NewConsumerConfig("test", 1)
+	conf := NewConsumerConf("test", 1)
 	conf.RetryWait = time.Nanosecond
 	conf.RetryLimit = 4
 	conf.RetryErrWait = time.Nanosecond
