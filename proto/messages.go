@@ -192,8 +192,6 @@ func readMessageSet(r io.Reader) ([]*Message, error) {
 		}
 		set = append(set, msg)
 	}
-
-	return set, nil
 }
 
 type MetadataReq struct {

@@ -86,7 +86,7 @@ func TestConnectionMetadata(t *testing.T) {
 		t.Fatalf("could not fetch response: %s", err)
 	}
 	if !reflect.DeepEqual(resp, resp1) {
-		t.Fatal("expected different response %#v", resp)
+		t.Fatalf("expected different response %#v", resp)
 	}
 	if err := conn.Close(); err != nil {
 		t.Fatalf("could not close kafka connection: %s", err)
@@ -160,7 +160,7 @@ func TestConnectionProduce(t *testing.T) {
 		t.Fatalf("could not fetch response: %s", err)
 	}
 	if !reflect.DeepEqual(resp, resp1) {
-		t.Fatal("expected different response %#v", resp)
+		t.Fatalf("expected different response %#v", resp)
 	}
 	resp, err = conn.Produce(&proto.ProduceReq{
 		ClientID:     "tester",
@@ -184,7 +184,7 @@ func TestConnectionProduce(t *testing.T) {
 		t.Fatalf("could not fetch response: %s", err)
 	}
 	if !reflect.DeepEqual(resp, resp2) {
-		t.Fatal("expected different response %#v", resp)
+		t.Fatalf("expected different response %#v", resp)
 	}
 
 	if err := conn.Close(); err != nil {
@@ -246,7 +246,7 @@ func TestConnectionFetch(t *testing.T) {
 		t.Fatalf("could not fetch response: %s", err)
 	}
 	if !reflect.DeepEqual(resp, resp1) {
-		t.Fatal("expected different response %#v", resp)
+		t.Fatalf("expected different response %#v", resp)
 	}
 }
 
@@ -292,7 +292,7 @@ func TestConnectionOffset(t *testing.T) {
 		t.Fatalf("could not fetch response: %s", err)
 	}
 	if !reflect.DeepEqual(resp, resp1) {
-		t.Fatal("expected different response %#v", resp)
+		t.Fatalf("expected different response %#v", resp)
 	}
 }
 
@@ -328,7 +328,7 @@ func TestConnectionProduceNoAck(t *testing.T) {
 		t.Fatalf("could not fetch response: %s", err)
 	}
 	if resp != nil {
-		t.Fatal("expected no response, got %#v", resp)
+		t.Fatalf("expected no response, got %#v", resp)
 	}
 	if err := conn.Close(); err != nil {
 		t.Fatalf("could not close kafka connection: %s", err)

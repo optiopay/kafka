@@ -80,7 +80,7 @@ func (srv *Server) Start() {
 	}
 	ln, err := net.Listen("tcp4", "")
 	if err != nil {
-		panic(fmt.Sprint("cannot start server: %s", err))
+		panic(fmt.Sprintf("cannot start server: %s", err))
 	}
 	srv.ln = ln
 
@@ -234,21 +234,11 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		}
 	case *proto.ConsumerMetadataReq:
 		panic("not implemented")
-		return &proto.ConsumerMetadataResp{
-			CorrelationID: req.CorrelationID,
-		}
 	case *proto.OffsetCommitReq:
 		panic("not implemented")
-		return &proto.OffsetCommitResp{
-			CorrelationID: req.CorrelationID,
-		}
 	case *proto.OffsetFetchReq:
 		panic("not implemented")
-		return &proto.OffsetFetchReq{
-			CorrelationID: req.CorrelationID,
-		}
 	default:
 		panic(fmt.Sprintf("unknown message type: %T", req))
 	}
-	return nil
 }
