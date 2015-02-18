@@ -121,11 +121,29 @@ func (b *Broker) Close() {
 	}
 }
 
+func (b *Broker) Metadata() (*proto.MetadataResp, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.fetchMetadata()
+}
+
 // refreshMetadata is requesting metadata information from any node and refresh
 // internal cached representation.
 // Because it's changing internal state, this method requires lock protection,
 // but it does not acquire nor release lock itself.
 func (b *Broker) refreshMetadata() error {
+	meta, err := b.fetchMetadata()
+	if err != nil {
+		b.rewriteMetadata(meta)
+	}
+	return err
+}
+
+// fetchMetadata is requesting metadata information from any node and return
+// protocol response if successful
+// Because it's using metadata information to find node connections it's not
+// thread safe and using it require locking.
+func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 	checkednodes := make(map[int32]bool)
 
 	// try all existing connections first
@@ -139,8 +157,7 @@ func (b *Broker) refreshMetadata() error {
 			b.conf.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
 			continue
 		}
-		b.rewriteMetadata(resp)
-		return nil
+		return resp, nil
 	}
 
 	// try all nodes that we know of that we're not connected to
@@ -165,10 +182,10 @@ func (b *Broker) refreshMetadata() error {
 			continue
 		}
 		b.rewriteMetadata(resp)
-		return nil
+		return resp, nil
 	}
 
-	return errors.New("cannot fetch metadata")
+	return nil, errors.New("cannot fetch metadata")
 }
 
 // rewriteMetadata creates new internal metadata representation using data from
