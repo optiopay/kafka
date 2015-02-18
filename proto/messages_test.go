@@ -345,6 +345,18 @@ func TestFetchResponse(t *testing.T) {
 	}
 }
 
+func TestSerializeEmptyMessageSet(t *testing.T) {
+	var buf bytes.Buffer
+	messages := []*Message{}
+	if err := writeMessageSet(&buf, messages); err != nil {
+		t.Fatalf("cannot serialize messages: %s", err)
+	}
+	expected := []byte{0, 0, 0, 0} // zero size, int32 type
+	if !bytes.Equal(buf.Bytes(), expected) {
+		t.Fatalf("expected different byte representation: %#v", buf.Bytes())
+	}
+}
+
 func BenchmarkProduceRequestMarshal(b *testing.B) {
 	messages := make([]*Message, 1000)
 	for i := range messages {

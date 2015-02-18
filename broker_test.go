@@ -715,3 +715,121 @@ func TestConsumerFailover(t *testing.T) {
 		return
 	}
 }
+
+// this is not the best benchmark, because kafkatest.Server implementation is
+// not made for performance, but it should be good enough to help tuning code.
+func BenchmarkConsumer(b *testing.B) {
+	const messagesPerResp = 30
+
+	srv := kafkatest.NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+
+	var msgOffset int64
+	srv.Handle(kafkatest.FetchRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+		req := request.(*proto.FetchReq)
+		messages := make([]*proto.Message, messagesPerResp)
+
+		for i := range messages {
+			msgOffset++
+			msg := &proto.Message{
+				Offset: msgOffset,
+				Value:  []byte(`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec a diam lectus. Sed sit amet ipsum mauris. Maecenas congue ligula ac quam viverra nec consectetur ante hendrerit. Donec et mollis dolor. Praesent et diam eget libero egestas mattis sit amet vitae augue. Nam tincidunt congue enim, ut porta lorem lacinia consectetur.`),
+			}
+			messages[i] = msg
+		}
+		return &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				proto.FetchRespTopic{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						proto.FetchRespPartition{
+							ID:        0,
+							TipOffset: msgOffset - int64(len(messages)),
+							Messages:  messages,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv.Address()}, NewBrokerConf("test"))
+	if err != nil {
+		b.Fatalf("cannot create broker: %s", err)
+	}
+
+	conf := NewConsumerConf("test", 0)
+	conf.StartOffset = 0
+
+	consumer, err := broker.Consumer(conf)
+	if err != nil {
+		b.Fatalf("cannot create consumer: %s", err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := consumer.Fetch()
+		if err != nil {
+			b.Fatalf("cannot fetch message: %s", err)
+		}
+	}
+}
+
+func BenchmarkProducer(b *testing.B) {
+	const messagesPerReq = 30
+
+	srv := kafkatest.NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+
+	var msgOffset int64
+	srv.Handle(kafkatest.ProduceRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+		req := request.(*proto.ProduceReq)
+		msgOffset += messagesPerReq
+		return &proto.ProduceResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.ProduceRespTopic{
+				proto.ProduceRespTopic{
+					Name: "test",
+					Partitions: []proto.ProduceRespPartition{
+						proto.ProduceRespPartition{
+							ID:     0,
+							Offset: msgOffset,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	conf := NewBrokerConf("tester")
+	conf.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, conf)
+	if err != nil {
+		b.Fatalf("cannot create broker: %s", err)
+	}
+
+	messages := make([]*proto.Message, messagesPerReq)
+	for i := range messages {
+		msg := &proto.Message{
+			Value: []byte(`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec a diam lectus. Sed sit amet ipsum mauris. Maecenas congue ligula ac quam viverra nec consectetur ante hendrerit. Donec et mollis dolor. Praesent et diam eget libero egestas mattis sit amet vitae augue. Nam tincidunt congue enim, ut porta lorem lacinia consectetur.`),
+		}
+		messages[i] = msg
+	}
+
+	producer := broker.Producer(NewProducerConf())
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := producer.Produce("test", 0, messages...); err != nil {
+			b.Fatalf("cannot produce message: %s", err)
+		}
+
+	}
+}
