@@ -10,7 +10,8 @@ before_install:
 - go get github.com/kisielk/errcheck
 
 script:
-- go test -v -race ./...
+- go test -v -race github.com/optiopay/kafka
+- go test -v -race github.com/optiopay/kafka/proto
 - go vet github.com/optiopay/kafka
 - go vet github.com/optiopay/kafka/proto
 - go vet github.com/optiopay/kafka/kafkatest
