@@ -111,10 +111,14 @@ func ComputeCrc(m *Message) uint32 {
 // writeMessageSet writes given set of messages into writer, prefixed with
 // total set size.
 func writeMessageSet(w io.Writer, messages []*Message) error {
-	var buf bytes.Buffer
-	enc := NewEncoder(&buf)
+	enc := NewEncoder(w)
 
-	enc.Encode(int32(0)) // placeholder for full message size
+	totalSize := 0
+	for _, m := range messages {
+		totalSize += 26 + len(m.Key) + len(m.Value)
+	}
+	enc.Encode(int32(totalSize))
+
 	for _, message := range messages {
 		enc.Encode(int64(message.Offset))
 		messageSize := 14 + len(message.Key) + len(message.Value)
@@ -125,14 +129,7 @@ func writeMessageSet(w io.Writer, messages []*Message) error {
 		enc.Encode(message.Key)
 		enc.Encode(message.Value)
 	}
-	if err := enc.Err(); err != nil {
-		return err
-	}
-
-	b := buf.Bytes()
-	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
-	_, err := w.Write(b)
-	return err
+	return enc.Err()
 }
 
 // readMessageSet reads and return messages from the stream. Messages set
