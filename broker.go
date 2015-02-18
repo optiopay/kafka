@@ -634,16 +634,6 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 // retry sending fetch request. Retry behaviour can be configured with
 // RetryErrLimit and RetryErrWait consumer configuration attributes.
 func (c *Consumer) fetch() ([]*proto.Message, error) {
-	// ask about any message that offset is greater than the last one we
-	// fetched
-	fetchOffset := c.offset + 1
-	// this is stange kafka thing: asking about message with offset 1 higher
-	// than the last existing message is fine, except when there are no
-	// messages in the log -- in such case you should always ask about offset 0.
-	if fetchOffset == 1 {
-		fetchOffset = 0
-	}
-
 	req := proto.FetchReq{
 		ClientID:    c.broker.conf.ClientID,
 		MaxWaitTime: c.conf.RequestTimeout,
@@ -654,7 +644,7 @@ func (c *Consumer) fetch() ([]*proto.Message, error) {
 				Partitions: []proto.FetchReqPartition{
 					proto.FetchReqPartition{
 						ID:          c.conf.Partition,
-						FetchOffset: fetchOffset,
+						FetchOffset: c.offset + 1,
 						MaxBytes:    c.conf.MaxFetchSize,
 					},
 				},
