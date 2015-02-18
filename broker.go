@@ -360,6 +360,8 @@ func (p *Producer) Conf() ProducerConf {
 //
 // Upon successful produce call, messages Offset field is updated.
 func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
+
+retryLoop:
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		offset, err = p.produce(topic, partition, messages...)
 		switch err {
@@ -374,7 +376,7 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Mes
 			p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)
 			time.Sleep(p.conf.RetryWait)
 		default:
-			break
+			break retryLoop
 		}
 	}
 

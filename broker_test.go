@@ -62,32 +62,7 @@ func TestProducer(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
-		req, ok := request.(*proto.MetadataReq)
-		if !ok {
-			panic(fmt.Sprintf("expected metadata request, got %T", request))
-		}
-		host, port := srv.HostPort()
-		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
-			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host, Port: int32(port)},
-			},
-			Topics: []proto.MetadataRespTopic{
-				proto.MetadataRespTopic{
-					Name: "test",
-					Partitions: []proto.MetadataRespPartition{
-						proto.MetadataRespPartition{
-							ID:       0,
-							Leader:   1,
-							Replicas: []int32{1},
-							Isrs:     []int32{1},
-						},
-					},
-				},
-			},
-		}
-	})
+	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
 
 	conf := NewBrokerConf("tester")
 	conf.DialTimeout = time.Millisecond * 200
@@ -107,6 +82,7 @@ func TestProducer(t *testing.T) {
 	}
 
 	var handleErr error
+	var createdMsgs int
 	srv.Handle(kafkatest.ProduceRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
 		req := request.(*proto.ProduceReq)
 		if req.Topics[0].Name != "test" {
@@ -119,6 +95,7 @@ func TestProducer(t *testing.T) {
 		}
 		messages := req.Topics[0].Partitions[0].Messages
 		for _, msg := range messages {
+			createdMsgs++
 			crc := proto.ComputeCrc(msg)
 			if msg.Crc != crc {
 				handleErr = fmt.Errorf("expected '%s' crc, got %s", crc, msg.Crc)
@@ -154,6 +131,9 @@ func TestProducer(t *testing.T) {
 
 	if messages[0].Offset != 5 || messages[1].Offset != 6 {
 		t.Fatalf("message offset is incorrect: %#v", messages)
+	}
+	if createdMsgs != 2 {
+		t.Fatalf("expected 2 messages to be created, got %d", createdMsgs)
 	}
 
 	broker.Close()
