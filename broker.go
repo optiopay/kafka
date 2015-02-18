@@ -558,6 +558,15 @@ func (b *Broker) Consumer(conf ConsumerConf) (consumer *Consumer, err error) {
 				return nil, err
 			}
 			offset = off
+			// this is stange kafka thing: asking about message with offset one
+			// higher than the last existing message is fine, except when there
+			// are no messages in the log -- in such case you should always ask
+			// about offset 0.
+			// Set offset -1 to make fetch request 0 offset message when there
+			// are none.
+			if off == 0 {
+				offset = -1
+			}
 		default:
 			return nil, fmt.Errorf("invalid start offset: %d", conf.StartOffset)
 		}
