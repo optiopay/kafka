@@ -22,52 +22,50 @@ func getTestEncoder() *encoder {
 	return NewEncoder(b)
 }
 
-func failByteNotEqual(t *testing.T, a, b []byte) {
-	if bytes.Equal(a, b) {
-		return
-	}
-	t.Fatalf("% x != % x", a, b)
-}
-
 func TestEncoder(t *testing.T) {
 	e := getTestEncoder()
 	e.Encode(int8(keyint))
-	failByteNotEqual(t, b.Bytes(), bint8)
+	if !bytes.Equal(b.Bytes(), bint8) {
+		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bint8)
+	}
 
 	e = getTestEncoder()
 	e.Encode(int64(keyint))
-	failByteNotEqual(t, b.Bytes(), bint64)
+	if !bytes.Equal(b.Bytes(), bint64) {
+		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bint64)
+	}
 
 	e = getTestEncoder()
 	e.Encode(string(keystr))
-	failByteNotEqual(t, b.Bytes(), bstr)
+	if !bytes.Equal(b.Bytes(), bstr) {
+		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bstr)
+	}
 
 	e = getTestEncoder()
 	e.Encode([]byte(keystr))
-	failByteNotEqual(t, b.Bytes(), bbyte)
-}
-
-func getTestDecoder(b []byte) *decoder {
-	buf := bytes.NewBuffer(b)
-	return NewDecoder(buf)
+	if !bytes.Equal(b.Bytes(), bbyte) {
+		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bbyte)
+	}
 }
 
 func TestDecoder(t *testing.T) {
-	d := getTestDecoder(bint8)
+	d := NewDecoder(bytes.NewBuffer(bint8))
 	if d.DecodeInt8() != int8(keyint) {
 		t.Fatalf("int8 decoding failed")
 	}
 
-	d = getTestDecoder(bint64)
+	d = NewDecoder(bytes.NewBuffer(bint64))
 	if d.DecodeInt64() != int64(keyint) {
 		t.Fatalf("int64 decoding failed")
 	}
 
-	d = getTestDecoder(bstr)
+	d = NewDecoder(bytes.NewBuffer(bstr))
 	if d.DecodeString() != keystr {
 		t.Fatalf("string decoding failed")
 	}
 
-	d = getTestDecoder(bbyte)
-	failByteNotEqual(t, d.DecodeBytes(), []byte(keystr))
+	d = NewDecoder(bytes.NewBuffer(bbyte))
+	if !bytes.Equal(d.DecodeBytes(), []byte(keystr)) {
+		t.Fatalf("bytes are not the same")
+	}
 }
