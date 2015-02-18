@@ -89,6 +89,7 @@ func ReadResp(r io.Reader) (correlationID int32, b []byte, err error) {
 	return correlationID, b, err
 }
 
+// Message represents single entity of message set.
 type Message struct {
 	Offset int64
 	Crc    uint32
@@ -96,6 +97,7 @@ type Message struct {
 	Value  []byte
 }
 
+// ComputeCrc returns crc32 hash for given message content.
 func ComputeCrc(m *Message) uint32 {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
@@ -106,6 +108,8 @@ func ComputeCrc(m *Message) uint32 {
 	return crc32.ChecksumIEEE(buf.Bytes())
 }
 
+// writeMessageSet writes given set of messages into writer, prefixed with
+// total set size.
 func writeMessageSet(w io.Writer, messages []*Message) error {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
@@ -131,6 +135,9 @@ func writeMessageSet(w io.Writer, messages []*Message) error {
 	return err
 }
 
+// readMessageSet reads and return messages from the stream. Messages set
+// should be prefixed with message set size, that will also be consumed by this
+// function.
 func readMessageSet(r io.Reader) ([]*Message, error) {
 	dec := NewDecoder(r)
 	messagesSetSize := dec.DecodeInt32()
