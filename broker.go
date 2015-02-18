@@ -95,7 +95,9 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 			conf.Log.Printf("could not connect to %s: %s", addr, err)
 			continue
 		}
-		defer conn.Close()
+		defer func(c *connection) {
+			_ = conn.Close()
+		}(conn)
 		resp, err := conn.Metadata(&proto.MetadataReq{
 			ClientID: broker.conf.ClientID,
 			Topics:   nil,
@@ -171,7 +173,9 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 			continue
 		}
 		// we had no active connection to this node, so most likely we don't need it
-		defer conn.Close()
+		defer func(c *connection) {
+			_ = c.Close()
+		}(conn)
 
 		resp, err := conn.Metadata(&proto.MetadataReq{
 			ClientID: b.conf.ClientID,
@@ -218,7 +222,11 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 
 		nodeID, ok := b.metadata.endpoints[endpoint]
 		if !ok {
-			b.refreshMetadata()
+			if err := b.refreshMetadata(); err != nil {
+				b.conf.Log.Printf("cannot refresh metadata: %s", err)
+				b.mu.Unlock()
+				return nil, err
+			}
 			nodeID, ok = b.metadata.endpoints[endpoint]
 			if !ok {
 				b.mu.Unlock()

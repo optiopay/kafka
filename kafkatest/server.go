@@ -97,7 +97,7 @@ func (srv *Server) Start() {
 
 func (srv *Server) Close() {
 	srv.mu.Lock()
-	srv.ln.Close()
+	_ = srv.ln.Close()
 	srv.mu.Unlock()
 }
 
@@ -147,7 +147,9 @@ func (srv *Server) handleClient(c net.Conn) {
 			if err != nil {
 				panic(fmt.Sprintf("cannot serialize %T: %s", response, err))
 			}
-			c.Write(b)
+			if _, err := c.Write(b); err != nil {
+				panic(fmt.Sprintf("cannot wirte to client: %s", err))
+			}
 		}
 	}
 }
