@@ -71,7 +71,9 @@ func TestProducer(t *testing.T) {
 		t.Fatalf("cannot create broker: %s", err)
 	}
 
-	producer := broker.Producer(NewProducerConf())
+	prodConf := NewProducerConf()
+	prodConf.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConf)
 	messages := []*proto.Message{
 		&proto.Message{Value: []byte("first")},
 		&proto.Message{Value: []byte("second")},

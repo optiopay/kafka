@@ -133,7 +133,7 @@ func (b *Broker) Metadata() (*proto.MetadataResp, error) {
 // but it does not acquire nor release lock itself.
 func (b *Broker) refreshMetadata() error {
 	meta, err := b.fetchMetadata()
-	if err != nil {
+	if err == nil {
 		b.rewriteMetadata(meta)
 	}
 	return err
@@ -181,7 +181,6 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 			b.conf.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
 			continue
 		}
-		b.rewriteMetadata(resp)
 		return resp, nil
 	}
 
@@ -382,7 +381,7 @@ retryLoop:
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		offset, err = p.produce(topic, partition, messages...)
 		switch err {
-		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
+		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable, proto.ErrUnknownTopicOrPartition:
 			p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)
 			time.Sleep(p.conf.RetryWait)
 			// TODO(husio) possible thundering herd
