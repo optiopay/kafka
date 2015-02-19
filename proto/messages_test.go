@@ -357,6 +357,32 @@ func TestSerializeEmptyMessageSet(t *testing.T) {
 	}
 }
 
+func TestReadIncomleteMessage(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeMessageSet(&buf, []*Message{
+		&Message{Value: []byte("111111111111111")},
+		&Message{Value: []byte("222222222222222")},
+		&Message{Value: []byte("333333333333333")},
+	})
+	if err != nil {
+		t.Fatalf("cannot serialize messages: %s", err)
+	}
+
+	b := buf.Bytes()
+	// cut off the last bytes as kafka can do
+	b = b[:len(b)-4]
+	messages, err := readMessageSet(bytes.NewBuffer(b))
+	if err != nil {
+		t.Fatalf("cannot deserialize messages: %s", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+	if messages[0].Value[0] != '1' || messages[1].Value[0] != '2' {
+		t.Fatal("expected different messages content")
+	}
+}
+
 func BenchmarkProduceRequestMarshal(b *testing.B) {
 	messages := make([]*Message, 1000)
 	for i := range messages {
