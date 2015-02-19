@@ -96,7 +96,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 			continue
 		}
 		defer func(c *connection) {
-			_ = conn.Close()
+			_ = c.Close()
 		}(conn)
 		resp, err := conn.Metadata(&proto.MetadataReq{
 			ClientID: broker.conf.ClientID,
