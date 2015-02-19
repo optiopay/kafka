@@ -135,6 +135,10 @@ func writeMessageSet(w io.Writer, messages []*Message) error {
 // readMessageSet reads and return messages from the stream. Messages set
 // should be prefixed with message set size, that will also be consumed by this
 // function.
+// Because kafka is sending message set directly from the drive, it might cut
+// off part of the last message. This also means that the last message can be
+// shorter than the header is saying. In such case just ignore the last
+// malformed message from the set and returned earlier data.
 func readMessageSet(r io.Reader) ([]*Message, error) {
 	dec := NewDecoder(r)
 	messagesSetSize := dec.DecodeInt32()
@@ -176,8 +180,8 @@ func readMessageSet(r io.Reader) ([]*Message, error) {
 		msg.Crc = msgdec.DecodeUint32()
 
 		if msg.Crc != crc32.ChecksumIEEE(msgbuf[4:]) {
-			// message is incomplete, meaning this is also the last message in
-			// the set
+			// ignore this message and because we want to have constant
+			// history, do not process anything more
 			return set, nil
 		}
 
