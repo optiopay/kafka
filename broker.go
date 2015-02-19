@@ -536,6 +536,8 @@ type Consumer struct {
 	conn   *connection
 	conf   ConsumerConf
 	offset int64
+
+	mu     sync.Mutex
 	msgbuf []*proto.Message
 }
 
@@ -598,14 +600,14 @@ func (c *Consumer) Conf() ConsumerConf {
 // behaviour can be configured through RetryLimit and RetryWait consumer
 // parameters.
 //
-// Fetch is not thread safe.
-//
 // Fetch can retry sending request on common errors. This behaviour can be
 // configured with RetryErrLimit and RetryErrWait consumer configuration
 // attributes.
 func (c *Consumer) Fetch() (*proto.Message, error) {
-	var retry int
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
+	var retry int
 	for len(c.msgbuf) == 0 {
 		messages, err := c.fetch()
 		if err != nil {
