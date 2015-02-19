@@ -634,7 +634,9 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 		c.msgbuf = messages[toSkip:]
 
 		if len(c.msgbuf) == 0 {
-			time.Sleep(time.Duration(math.Log(float64(retry+2))) * c.conf.RetryWait)
+			if c.conf.RetryWait > 0 {
+				time.Sleep(time.Duration(math.Log(float64(retry+2))) * c.conf.RetryWait)
+			}
 			retry += 1
 			if c.conf.RetryLimit != -1 && retry > c.conf.RetryLimit {
 				return nil, ErrNoData
