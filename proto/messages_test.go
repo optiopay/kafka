@@ -491,3 +491,6 @@ func BenchmarkFetchResponseUnmarshal(b *testing.B) {
 		}
 	}
 }
+
+// vim has problem with coloring byte arrays in this file
+// vim: set syntax=off:
