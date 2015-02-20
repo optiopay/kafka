@@ -60,3 +60,38 @@ func ExampleProducer() {
 		panic(err)
 	}
 }
+
+func ExampleMultiplexer() {
+	addresses := []string{"localhost:9092", "localhost:9093"}
+	broker, err := Dial(addresses, NewBrokerConf("test"))
+	if err != nil {
+		panic(err)
+	}
+	defer broker.Close()
+
+	topics := []string{"fruits", "vegetables"}
+	fetchers := make([]Fetcher, len(topics))
+
+	for i, topic := range topics {
+		conf := NewConsumerConf(topic, 0)
+		conf.RetryLimit = 20
+		conf.Log = log.New(os.Stderr, fmt.Sprintf("[consumer:%s]", topic), log.LstdFlags)
+		conf.StartOffset = StartOffsetNewest
+		consumer, err := broker.Consumer(conf)
+		if err != nil {
+			panic(err)
+		}
+		fetchers[i] = consumer
+	}
+
+	mx := Merge(fetchers...)
+	defer mx.Close()
+
+	for {
+		msg, err := mx.Fetch()
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("message: %#v", msg)
+	}
+}
