@@ -7,10 +7,6 @@ import (
 	"github.com/husio/kafka/proto"
 )
 
-type Fetcher interface {
-	Fetch() (*proto.Message, error)
-}
-
 // ErrMxClosed is returned as a result of closed multiplexer fetch.
 var ErrMxClosed = errors.New("closed")
 

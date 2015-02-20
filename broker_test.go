@@ -6,12 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/husio/kafka/kafkatest"
 	"github.com/husio/kafka/proto"
 )
 
-func TestingMetadataHandler(srv *kafkatest.Server) kafkatest.RequestHandler {
-	return func(request kafkatest.Serializable) kafkatest.Serializable {
+func TestingMetadataHandler(srv *Server) RequestHandler {
+	return func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		host, port := srv.HostPort()
 		return &proto.MetadataResp{
@@ -43,7 +42,7 @@ func TestingMetadataHandler(srv *kafkatest.Server) kafkatest.RequestHandler {
 }
 
 func TestDialWithInvalidAddress(t *testing.T) {
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
@@ -58,11 +57,11 @@ func TestDialWithInvalidAddress(t *testing.T) {
 }
 
 func TestProducer(t *testing.T) {
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
 	conf := NewBrokerConf("tester")
 	conf.DialTimeout = time.Millisecond * 200
@@ -85,7 +84,7 @@ func TestProducer(t *testing.T) {
 
 	var handleErr error
 	var createdMsgs int
-	srv.Handle(kafkatest.ProduceRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		if req.Topics[0].Name != "test" {
 			handleErr = fmt.Errorf("expected 'test' topic, got %s", req.Topics[0].Name)
@@ -142,11 +141,11 @@ func TestProducer(t *testing.T) {
 }
 
 func TestConsumer(t *testing.T) {
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(MetadataRequest, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		host, port := srv.HostPort()
 		return &proto.MetadataResp{
@@ -170,7 +169,7 @@ func TestConsumer(t *testing.T) {
 		}
 	})
 	fetchCallCount := 0
-	srv.Handle(kafkatest.FetchRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(FetchRequest, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		fetchCallCount++
 		if fetchCallCount < 2 {
@@ -256,11 +255,11 @@ func TestConsumer(t *testing.T) {
 }
 
 func TestConsumerRetry(t *testing.T) {
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(MetadataRequest, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		host, port := srv.HostPort()
 		return &proto.MetadataResp{
@@ -284,7 +283,7 @@ func TestConsumerRetry(t *testing.T) {
 		}
 	})
 	fetchCallCount := 0
-	srv.Handle(kafkatest.FetchRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(FetchRequest, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		fetchCallCount++
 		return &proto.FetchResp{
@@ -330,13 +329,13 @@ func TestConsumerRetry(t *testing.T) {
 }
 
 func TestConsumeInvalidOffset(t *testing.T) {
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
-	srv.Handle(kafkatest.FetchRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(FetchRequest, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		messages := []*proto.Message{
 			// return message with offset lower than requested
@@ -386,14 +385,14 @@ func TestConsumeInvalidOffset(t *testing.T) {
 }
 
 func TestPartitionOffset(t *testing.T) {
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
 	var handlerErr error
-	srv.Handle(kafkatest.OffsetRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(OffsetRequest, func(request Serializable) Serializable {
 		req := request.(*proto.OffsetReq)
 		if req.ReplicaID != -1 {
 			handlerErr = fmt.Errorf("expected -1 replica id, got %d", req.ReplicaID)
@@ -437,11 +436,11 @@ func TestPartitionOffset(t *testing.T) {
 }
 
 func TestLeaderConnectionFailover(t *testing.T) {
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
 	addresses := []string{srv.Address()}
 
@@ -497,14 +496,14 @@ func TestLeaderConnectionFailover(t *testing.T) {
 }
 
 func TestProducerFailoverRequestTimeout(t *testing.T) {
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
 	requestsCount := 0
-	srv.Handle(kafkatest.ProduceRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		requestsCount++
 		return &proto.ProduceResp{
@@ -543,14 +542,14 @@ func TestProducerFailoverRequestTimeout(t *testing.T) {
 }
 
 func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
 	requestsCount := 0
-	srv.Handle(kafkatest.ProduceRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		requestsCount++
 
@@ -607,7 +606,7 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 }
 
 func TestConsumerFailover(t *testing.T) {
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
@@ -616,10 +615,10 @@ func TestConsumerFailover(t *testing.T) {
 		&proto.Message{Value: []byte("second")},
 	}
 
-	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
 	respCount := 0
-	srv.Handle(kafkatest.FetchRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(FetchRequest, func(request Serializable) Serializable {
 		respCount++
 		req := request.(*proto.FetchReq)
 
@@ -698,19 +697,19 @@ func TestConsumerFailover(t *testing.T) {
 	}
 }
 
-// this is not the best benchmark, because kafkatest.Server implementation is
+// this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
 func BenchmarkConsumer(b *testing.B) {
 	const messagesPerResp = 30
 
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
 	var msgOffset int64
-	srv.Handle(kafkatest.FetchRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(FetchRequest, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		messages := make([]*proto.Message, messagesPerResp)
 
@@ -764,14 +763,14 @@ func BenchmarkConsumer(b *testing.B) {
 func BenchmarkProducer(b *testing.B) {
 	const messagesPerReq = 30
 
-	srv := kafkatest.NewServer()
+	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(kafkatest.MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
 	var msgOffset int64
-	srv.Handle(kafkatest.ProduceRequest, func(request kafkatest.Serializable) kafkatest.Serializable {
+	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		msgOffset += messagesPerReq
 		return &proto.ProduceResp{

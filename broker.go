@@ -26,8 +26,33 @@ var (
 	// Returned by consumer Fetch when retry limit was set and exceeded during
 	// single function call
 	ErrNoData = errors.New("no data")
+
+	// make sure interfaces are implemented
+	_ Client  = &Broker{}
+	_ Fetcher = &Consumer{}
+	_ Sender  = &Producer{}
 )
 
+// Client is interface implemented by Broker.
+type Client interface {
+	Producer(ProducerConf) Sender
+	Consumer(ConsumerConf) (Fetcher, error)
+	OffsetEarliest(string, int32) (int64, error)
+	OffsetLatest(string, int32) (int64, error)
+	Close()
+}
+
+// Fetcher is interface implemented by Consumer.
+type Fetcher interface {
+	Fetch() (*proto.Message, error)
+}
+
+// Sender is insterface implemented by Producer.
+type Sender interface {
+	Produce(string, int32, ...*proto.Message) (int64, error)
+}
+
+// Logger is insterface implemented by log.Logger
 type Logger interface {
 	Print(...interface{})
 	Printf(string, ...interface{})
@@ -362,7 +387,7 @@ type Producer struct {
 }
 
 // Producer returns new producer instance, bound to broker.
-func (b *Broker) Producer(conf ProducerConf) *Producer {
+func (b *Broker) Producer(conf ProducerConf) Sender {
 	if conf.Log == nil {
 		conf.Log = b.conf.Log
 	}
@@ -537,7 +562,7 @@ type Consumer struct {
 }
 
 // Consumer creates new consumer instance, bound to broker.
-func (b *Broker) Consumer(conf ConsumerConf) (consumer *Consumer, err error) {
+func (b *Broker) Consumer(conf ConsumerConf) (consumer Fetcher, err error) {
 	conn, err := b.leaderConnection(conf.Topic, conf.Partition)
 	if err != nil {
 		return nil, err

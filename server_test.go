@@ -1,4 +1,4 @@
-package kafkatest
+package kafka
 
 import (
 	"bytes"
