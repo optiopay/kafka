@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/optiopay/kafka/proto"
+	"github.com/husio/kafka/proto"
 )
 
 type serializableMessage interface {

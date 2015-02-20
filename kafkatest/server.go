@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/optiopay/kafka/proto"
+	"github.com/husio/kafka/proto"
 )
 
 const (

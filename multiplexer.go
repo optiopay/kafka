@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/optiopay/kafka/proto"
+	"github.com/husio/kafka/proto"
 )
 
 type Fetcher interface {

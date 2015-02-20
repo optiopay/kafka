@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/optiopay/kafka/kafkatest"
-	"github.com/optiopay/kafka/proto"
+	"github.com/husio/kafka/kafkatest"
+	"github.com/husio/kafka/proto"
 )
 
 func TestingMetadataHandler(srv *kafkatest.Server) kafkatest.RequestHandler {

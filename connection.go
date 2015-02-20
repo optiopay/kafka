@@ -7,7 +7,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/optiopay/kafka/proto"
+	"github.com/husio/kafka/proto"
 )
 
 const (
