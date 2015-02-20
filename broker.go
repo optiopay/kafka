@@ -372,11 +372,6 @@ func (b *Broker) Producer(conf ProducerConf) *Producer {
 	}
 }
 
-// Conf returns configuration used by producer.
-func (p *Producer) Conf() ProducerConf {
-	return p.conf
-}
-
 // Produce writes messages to given destination. Write within single Produce
 // call are atomic, meaning either all or none of them are written to kafka.
 // Produce can retry sending request on common errors. This behaviour can be
@@ -588,11 +583,6 @@ func (b *Broker) Consumer(conf ConsumerConf) (consumer *Consumer, err error) {
 		offset: offset,
 	}
 	return consumer, nil
-}
-
-// Conf returns consumer configuration.
-func (c *Consumer) Conf() ConsumerConf {
-	return c.conf
 }
 
 // Fetch is returning single message from consumed partition. Consumer can
