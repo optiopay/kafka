@@ -311,12 +311,12 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 	found := false
 	for _, t := range resp.Topics {
 		if t.Name != topic {
-			b.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name)
+			b.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name, topic)
 			continue
 		}
 		for _, part := range t.Partitions {
 			if part.ID != partition {
-				b.conf.Log.Printf("unexpected partition information received: %s:%s (expecting %s)", t.Name, part.ID, partition)
+				b.conf.Log.Printf("unexpected partition information received: %s:%d (expecting %d)", t.Name, part.ID, partition)
 				continue
 			}
 			found = true
@@ -709,7 +709,7 @@ func (c *Consumer) fetch() ([]*proto.Message, error) {
 
 		for _, topic := range resp.Topics {
 			if topic.Name != c.conf.Topic {
-				c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", topic.Name)
+				c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", topic.Name, c.conf.Topic)
 				continue
 			}
 			for _, part := range topic.Partitions {

@@ -91,7 +91,7 @@ func TestProducer(t *testing.T) {
 			return nil
 		}
 		if req.Topics[0].Partitions[0].ID != 0 {
-			handleErr = fmt.Errorf("expected 0 partition, got %s", req.Topics[0].Partitions[0].ID)
+			handleErr = fmt.Errorf("expected 0 partition, got %d", req.Topics[0].Partitions[0].ID)
 			return nil
 		}
 		messages := req.Topics[0].Partitions[0].Messages
@@ -99,7 +99,7 @@ func TestProducer(t *testing.T) {
 			createdMsgs++
 			crc := proto.ComputeCrc(msg)
 			if msg.Crc != crc {
-				handleErr = fmt.Errorf("expected '%s' crc, got %s", crc, msg.Crc)
+				handleErr = fmt.Errorf("expected '%d' crc, got %d", crc, msg.Crc)
 				return nil
 			}
 		}
