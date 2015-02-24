@@ -245,6 +245,13 @@ func TestConnectionFetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not fetch response: %s", err)
 	}
+
+	// before comparison, set message topic and partition attributes
+	for _, m := range messages {
+		m.Topic = "foo"
+		m.Partition = 1
+	}
+
 	if !reflect.DeepEqual(resp, resp1) {
 		t.Fatalf("expected different response %#v", resp)
 	}

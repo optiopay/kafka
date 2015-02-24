@@ -91,10 +91,12 @@ func ReadResp(r io.Reader) (correlationID int32, b []byte, err error) {
 
 // Message represents single entity of message set.
 type Message struct {
-	Offset int64
-	Crc    uint32
-	Key    []byte
-	Value  []byte
+	Key       []byte
+	Value     []byte
+	Offset    int64  // set when fetching and after successful producing
+	Crc       uint32 // set when fetching, ignored when producing
+	Topic     string // set when fetching, ignored when producing
+	Partition int32  // set when fetching, ignored when producing
 }
 
 // ComputeCrc returns crc32 hash for given message content.
@@ -551,6 +553,10 @@ func ReadFetchResp(r io.Reader) (*FetchResp, error) {
 			}
 			if part.Messages, err = readMessageSet(r); err != nil {
 				return nil, err
+			}
+			for _, msg := range part.Messages {
+				msg.Topic = topic.Name
+				msg.Partition = part.ID
 			}
 		}
 	}
