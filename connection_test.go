@@ -246,7 +246,7 @@ func TestConnectionFetch(t *testing.T) {
 		t.Fatalf("could not fetch response: %s", err)
 	}
 
-	// before comparison, set message topic and partition attributes
+	// before comparison, set attributes as we expect deserializer to do
 	for _, m := range messages {
 		m.Topic = "foo"
 		m.Partition = 1
