@@ -525,7 +525,8 @@ type ConsumerConf struct {
 
 	// Consumer cursor starting point. Set to StartOffsetNewest to receive only
 	// newly created messages or StartOffsetOldest to read everything. Assign
-	// any offset value to manually set cursor. Defaults to StartOffsetOldest
+	// any offset value to manually set cursor -- consuming starts with message
+	// which offset is equal to given value. Defaults to StartOffsetOldest
 	StartOffset int64
 
 	// Logger used by consumer. By default, reuse logger assigned to broker.
