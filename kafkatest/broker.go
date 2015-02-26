@@ -83,6 +83,7 @@ func (b *Broker) Consumer(conf kafka.ConsumerConf) (kafka.Fetcher, error) {
 	}
 
 	c := &Consumer{
+		conf:     conf,
 		Broker:   b,
 		Messages: make(chan *proto.Message),
 		Errors:   make(chan error),
@@ -113,6 +114,8 @@ func (b *Broker) ReadProducers(timeout time.Duration) (*ProducedMessages, error)
 // Consumer mocks kafka's consumer. Use Messages and Errors channels to mock
 // Fetch method results.
 type Consumer struct {
+	conf kafka.ConsumerConf
+
 	Broker *Broker
 
 	// Messages is channel consumed by fetch method call. Pushing message into
@@ -130,6 +133,8 @@ type Consumer struct {
 func (c *Consumer) Fetch() (*proto.Message, error) {
 	select {
 	case msg := <-c.Messages:
+		msg.Topic = c.conf.Topic
+		msg.Partition = c.conf.Partition
 		return msg, nil
 	case err := <-c.Errors:
 		return nil, err
