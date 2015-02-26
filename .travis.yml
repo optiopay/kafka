@@ -1,0 +1,17 @@
+language: go
+go:
+- 1.4
+- tip
+
+
+before_install:
+- export REPOSITORY_ROOT=${TRAVIS_BUILD_DIR}
+- go get golang.org/x/tools/cmd/vet
+- go get github.com/kisielk/errcheck
+
+script:
+- go test -v -race github.com/husio/kafka/...
+- go vet github.com/husio/kafka/...
+- errcheck github.com/husio/kafka/...
+
+sudo: false
