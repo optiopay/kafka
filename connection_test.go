@@ -23,7 +23,7 @@ func testServer(messages ...serializableMessage) (net.Listener, error) {
 	for i, m := range messages {
 		b, err := m.Bytes()
 		if err != nil {
-			ln.Close()
+			_ = ln.Close()
 			return nil, err
 		}
 		responses[i] = b
@@ -38,7 +38,7 @@ func testServer(messages ...serializableMessage) (net.Listener, error) {
 
 			go func(conn net.Conn) {
 				for _, resp := range responses {
-					cli.Write(resp)
+					_, _ = cli.Write(resp)
 				}
 			}(cli)
 		}

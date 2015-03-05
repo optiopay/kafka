@@ -490,7 +490,9 @@ func TestLeaderConnectionFailover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot start server: %s", err)
 	}
-	c.Accept()
+	if _, err = c.Accept(); err != nil {
+		t.Fatalf("cannot accept connection: %s", err)
+	}
 	<-stop
 	broker.Close()
 }
