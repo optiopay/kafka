@@ -495,7 +495,7 @@ type ConsumerConf struct {
 
 	// RequestTimeout controlls fetch request timeout.This operation is
 	// blocking the whole connection, so it should always be set to small
-	// value. By default it's set to 0.
+	// value. By default it's set to 50ms.
 	// To control fetch function timeout use RetryLimit and RetryWait.
 	RequestTimeout time.Duration
 
@@ -505,7 +505,7 @@ type ConsumerConf struct {
 	RetryLimit int
 
 	// RetryWait controls duration of wait between fetch request calls, when
-	// no data was returned. Defaults to 250ms.
+	// no data was returned. Defaults to 50ms.
 	RetryWait time.Duration
 
 	// RetryErrLimit limits messages fetch retry upon failure. By default 10.
@@ -538,9 +538,9 @@ func NewConsumerConf(topic string, partition int32) ConsumerConf {
 	return ConsumerConf{
 		Topic:          topic,
 		Partition:      partition,
-		RequestTimeout: 0,
+		RequestTimeout: time.Millisecond * 50,
 		RetryLimit:     -1,
-		RetryWait:      time.Millisecond * 250,
+		RetryWait:      time.Millisecond * 50,
 		RetryErrLimit:  10,
 		RetryErrWait:   time.Millisecond * 500,
 		MinFetchSize:   1,
