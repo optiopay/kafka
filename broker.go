@@ -510,6 +510,7 @@ type ConsumerConf struct {
 
 	// RetryErrLimit limits messages fetch retry upon failure. By default 10.
 	RetryErrLimit int
+
 	// RetryErrWait controls wait duration between retries after failed fetch
 	// request. By default 500ms.
 	RetryErrWait time.Duration
