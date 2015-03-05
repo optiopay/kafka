@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"math"
 	"sync"
 	"time"
 
@@ -651,7 +650,7 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 
 		if len(c.msgbuf) == 0 {
 			if c.conf.RetryWait > 0 {
-				time.Sleep(time.Duration(math.Log(float64(retry+2))) * c.conf.RetryWait)
+				time.Sleep(c.conf.RetryWait)
 			}
 			retry += 1
 			if c.conf.RetryLimit != -1 && retry > c.conf.RetryLimit {
