@@ -3,9 +3,11 @@ package kafka
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/husio/kafka/proto"
@@ -281,6 +283,23 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 	return nil, err
 }
 
+// closeDeadConnection is closing and removing any reference to given
+// connection. Because we remove dead connection, additional request to refresh
+// metadata is made
+func (b *Broker) closeDeadConnection(conn *connection) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for nid, c := range b.conns {
+		if c == conn {
+			delete(b.conns, nid)
+			_ = c.Close()
+			b.refreshMetadata()
+			return
+		}
+	}
+}
+
 // offset will return offset value for given partition. Use timems to specify
 // which offset value should be returned.
 func (b *Broker) offset(topic string, partition int32, timems int64) (offset int64, err error) {
@@ -415,6 +434,11 @@ retryLoop:
 			if err := p.broker.refreshMetadata(); err != nil {
 				p.conf.Log.Printf("failed to refresh metadata: %s", err)
 			}
+		case io.EOF, syscall.EPIPE:
+			// p.produce call is closing connection when this error shows up,
+			// but it's also returning it so that retry loop can count this
+			// case
+			continue
 		case proto.ErrRequestTimeout:
 			p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)
 			time.Sleep(p.conf.RetryWait)
@@ -459,6 +483,12 @@ func (p *Producer) produce(topic string, partition int32, messages ...*proto.Mes
 
 	resp, err := conn.Produce(&req)
 	if err != nil {
+		if err == io.EOF || err == syscall.EPIPE {
+			// Connection is broken, so should be closed, but the error is
+			// still valid and should be returned so that retry mechanism have
+			// chance to react.
+			p.broker.closeDeadConnection(conn)
+		}
 		return 0, err
 	}
 
@@ -689,6 +719,17 @@ func (c *Consumer) fetch() ([]*proto.Message, error) {
 	}
 
 	for retry := 0; ; retry++ {
+		if c.conn == nil {
+			conn, err := c.broker.leaderConnection(c.conf.Topic, c.conf.Partition)
+			if err != nil {
+				if retry == c.conf.RetryErrLimit {
+					return nil, err
+				}
+				continue
+			}
+			c.conn = conn
+		}
+
 		resp, err := c.conn.Fetch(&req)
 		if err != nil && retry == c.conf.RetryErrLimit {
 			return nil, err
@@ -702,6 +743,10 @@ func (c *Consumer) fetch() ([]*proto.Message, error) {
 			if err := c.broker.refreshMetadata(); err != nil {
 				c.conf.Log.Printf("failed to refresh metadata: %s", err)
 			}
+			continue
+		case io.EOF, syscall.EPIPE:
+			c.broker.closeDeadConnection(c.conn)
+			c.conn = nil
 			continue
 		case nil:
 			// everything's fine, proceed

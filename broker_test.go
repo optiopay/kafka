@@ -700,10 +700,44 @@ func TestConsumerFailover(t *testing.T) {
 }
 
 func TestProducerBrokenPipe(t *testing.T) {
-	srv := NewServer()
-	srv.Start()
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
-	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
+	srv1 := NewServer()
+	srv1.Start()
+	srv2 := NewServer()
+	srv2.Start()
+
+	host1, port1 := srv1.HostPort()
+	host2, port2 := srv2.HostPort()
+
+	srv1.Handle(MetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.MetadataReq)
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
+				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+			},
+			Topics: []proto.MetadataRespTopic{
+				proto.MetadataRespTopic{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						proto.MetadataRespPartition{
+							ID:       0,
+							Leader:   1,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+						proto.MetadataRespPartition{
+							ID:       1,
+							Leader:   1,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+					},
+				},
+			},
+		}
+	})
+	srv1.Handle(ProduceRequest, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		return &proto.ProduceResp{
 			CorrelationID: req.CorrelationID,
@@ -720,8 +754,56 @@ func TestProducerBrokenPipe(t *testing.T) {
 			},
 		}
 	})
+	// after closing first server, which started as leader, broker should ask
+	// other nodes about the leader and refresh connections
+	srv2.Handle(MetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.MetadataReq)
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
+				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+			},
+			Topics: []proto.MetadataRespTopic{
+				proto.MetadataRespTopic{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						proto.MetadataRespPartition{
+							ID:       0,
+							Leader:   2,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+						proto.MetadataRespPartition{
+							ID:       1,
+							Leader:   2,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+					},
+				},
+			},
+		}
+	})
+	srv2.Handle(ProduceRequest, func(request Serializable) Serializable {
+		req := request.(*proto.ProduceReq)
+		return &proto.ProduceResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.ProduceRespTopic{
+				proto.ProduceRespTopic{
+					Name: "test",
+					Partitions: []proto.ProduceRespPartition{
+						proto.ProduceRespPartition{
+							ID:     0,
+							Offset: 12346,
+						},
+					},
+				},
+			},
+		}
+	})
 
-	broker, err := Dial([]string{srv.Address()}, NewBrokerConf("test-epipe"))
+	broker, err := Dial([]string{srv1.Address()}, NewBrokerConf("test-epipe"))
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
@@ -732,7 +814,7 @@ func TestProducerBrokenPipe(t *testing.T) {
 		t.Fatalf("cannot produce: %s", err)
 	}
 
-	srv.Close()
+	srv1.Close()
 	// give TCP buffer some time to cool down
 	time.Sleep(time.Millisecond)
 
@@ -742,10 +824,44 @@ func TestProducerBrokenPipe(t *testing.T) {
 }
 
 func TestConsumerBrokenPipe(t *testing.T) {
-	srv := NewServer()
-	srv.Start()
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv1 := NewServer()
+	srv1.Start()
+	srv2 := NewServer()
+	srv2.Start()
+
+	host1, port1 := srv1.HostPort()
+	host2, port2 := srv2.HostPort()
+
+	srv1.Handle(MetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.MetadataReq)
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
+				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+			},
+			Topics: []proto.MetadataRespTopic{
+				proto.MetadataRespTopic{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						proto.MetadataRespPartition{
+							ID:       0,
+							Leader:   1,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+						proto.MetadataRespPartition{
+							ID:       1,
+							Leader:   1,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+					},
+				},
+			},
+		}
+	})
+	srv1.Handle(FetchRequest, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
@@ -765,7 +881,58 @@ func TestConsumerBrokenPipe(t *testing.T) {
 		}
 	})
 
-	broker, err := Dial([]string{srv.Address()}, NewBrokerConf("test-epipe"))
+	// after closing first server, which started as leader, broker should ask
+	// other nodes about the leader and refresh connections
+	srv2.Handle(MetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.MetadataReq)
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
+				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+			},
+			Topics: []proto.MetadataRespTopic{
+				proto.MetadataRespTopic{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						proto.MetadataRespPartition{
+							ID:       0,
+							Leader:   2,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+						proto.MetadataRespPartition{
+							ID:       1,
+							Leader:   2,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+					},
+				},
+			},
+		}
+	})
+	srv2.Handle(FetchRequest, func(request Serializable) Serializable {
+		req := request.(*proto.FetchReq)
+		return &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				proto.FetchRespTopic{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						proto.FetchRespPartition{
+							ID: 0,
+							Messages: []*proto.Message{
+								&proto.Message{},
+							},
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv1.Address()}, NewBrokerConf("test-epipe"))
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
@@ -775,11 +942,15 @@ func TestConsumerBrokenPipe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create consumer: %s", err)
 	}
+	if _, err = consumer.Fetch(); err != nil {
+		t.Fatalf("cannot consume: %s", err)
+	}
 
-	srv.Close()
+	srv1.Close()
 	// give TCP buffer some time to cool down
 	time.Sleep(time.Millisecond)
 
+	// this should succeed after reconnecting to second node
 	if _, err = consumer.Fetch(); err != nil {
 		t.Fatalf("cannot consume: %s", err)
 	}
