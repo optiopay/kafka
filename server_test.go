@@ -112,7 +112,7 @@ func (srv *Server) handleClient(c net.Conn) {
 		case <-srv.stop:
 		case <-stop:
 		}
-		c.Close()
+		_ = c.Close()
 	}()
 
 	for {

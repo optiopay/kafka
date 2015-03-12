@@ -294,7 +294,7 @@ func (b *Broker) closeDeadConnection(conn *connection) {
 		if c == conn {
 			delete(b.conns, nid)
 			_ = c.Close()
-			b.refreshMetadata()
+			_ = b.refreshMetadata()
 			return
 		}
 	}
