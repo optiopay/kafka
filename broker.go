@@ -702,6 +702,7 @@ func (c *Consumer) fetch() ([]*proto.Message, error) {
 			if err := c.broker.refreshMetadata(); err != nil {
 				c.conf.Log.Printf("failed to refresh metadata: %s", err)
 			}
+			continue
 		case nil:
 			// everything's fine, proceed
 		default:

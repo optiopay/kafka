@@ -699,6 +699,92 @@ func TestConsumerFailover(t *testing.T) {
 	}
 }
 
+func TestProducerBrokenPipe(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
+		req := request.(*proto.ProduceReq)
+		return &proto.ProduceResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.ProduceRespTopic{
+				proto.ProduceRespTopic{
+					Name: "test",
+					Partitions: []proto.ProduceRespPartition{
+						proto.ProduceRespPartition{
+							ID:     0,
+							Offset: 12345,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv.Address()}, NewBrokerConf("test-epipe"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	producer := broker.Producer(NewProducerConf())
+	// produce whatever to fill the cache
+	if _, err = producer.Produce("test", 0, &proto.Message{}); err != nil {
+		t.Fatalf("cannot produce: %s", err)
+	}
+
+	srv.Close()
+	// give TCP buffer some time to cool down
+	time.Sleep(time.Millisecond)
+
+	if _, err = producer.Produce("test", 0, &proto.Message{}); err != nil {
+		t.Fatalf("cannot produce: %s", err)
+	}
+}
+
+func TestConsumerBrokenPipe(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+		req := request.(*proto.FetchReq)
+		return &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				proto.FetchRespTopic{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						proto.FetchRespPartition{
+							ID: 0,
+							Messages: []*proto.Message{
+								&proto.Message{},
+							},
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv.Address()}, NewBrokerConf("test-epipe"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+	conf := NewConsumerConf("test", 0)
+	conf.StartOffset = 0
+	consumer, err := broker.Consumer(conf)
+	if err != nil {
+		t.Fatalf("cannot create consumer: %s", err)
+	}
+
+	srv.Close()
+	// give TCP buffer some time to cool down
+	time.Sleep(time.Millisecond)
+
+	if _, err = consumer.Fetch(); err != nil {
+		t.Fatalf("cannot consume: %s", err)
+	}
+}
+
 // this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
 func BenchmarkConsumer(b *testing.B) {

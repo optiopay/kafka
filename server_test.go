@@ -29,6 +29,7 @@ type RequestHandler func(request Serializable) (response Serializable)
 
 type Server struct {
 	Processed int
+	stop      chan struct{}
 
 	mu       sync.RWMutex
 	ln       net.Listener
@@ -37,6 +38,7 @@ type Server struct {
 
 func NewServer() *Server {
 	srv := &Server{
+		stop:     make(chan struct{}),
 		handlers: make(map[int16]RequestHandler),
 	}
 	srv.handlers[AnyRequest] = srv.defaultRequestHandler
@@ -98,13 +100,25 @@ func (srv *Server) Start() {
 func (srv *Server) Close() {
 	srv.mu.Lock()
 	_ = srv.ln.Close()
+	close(srv.stop)
 	srv.mu.Unlock()
 }
 
 func (srv *Server) handleClient(c net.Conn) {
+	stop := make(chan struct{})
+
+	go func() {
+		select {
+		case <-srv.stop:
+		case <-stop:
+		}
+		c.Close()
+	}()
+
 	for {
 		kind, b, err := proto.ReadReq(c)
 		if err != nil {
+			close(stop)
 			return
 		}
 		srv.mu.RLock()
