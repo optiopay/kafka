@@ -220,7 +220,9 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 // rewriteMetadata creates new internal metadata representation using data from
 // given response. It's call has to be protected with lock.
 func (b *Broker) rewriteMetadata(resp *proto.MetadataResp) {
-	b.conf.Log.Printf("rewriting metadata created %s ago", time.Now().Sub(b.metadata.created))
+	if !b.metadata.created.IsZero() {
+		b.conf.Log.Printf("rewriting metadata created %s ago", time.Now().Sub(b.metadata.created))
+	}
 	b.metadata = clusterMetadata{
 		created:   time.Now(),
 		nodes:     make(map[int32]string),
@@ -295,6 +297,7 @@ func (b *Broker) closeDeadConnection(conn *connection) {
 			delete(b.conns, nid)
 			_ = c.Close()
 			_ = b.refreshMetadata()
+			b.conf.Log.Printf("closing dead connection to %d", nid)
 			return
 		}
 	}
@@ -487,6 +490,7 @@ func (p *Producer) produce(topic string, partition int32, messages ...*proto.Mes
 			// Connection is broken, so should be closed, but the error is
 			// still valid and should be returned so that retry mechanism have
 			// chance to react.
+			p.conf.Log.Printf("connection to %s:%d died while sendnig message", topic, partition)
 			p.broker.closeDeadConnection(conn)
 		}
 		return 0, err
@@ -673,7 +677,7 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 		// messages crc is checked by underlying connection so no need to check
 		// those again
 
-		if len(messages) == toSkip {
+		if len(messages) == toSkip && toSkip != 0 {
 			c.conf.Log.Printf("none of %d fetched messages is valid", toSkip)
 		}
 		// ignore all messages that are of index lower than requested
@@ -745,6 +749,7 @@ func (c *Consumer) fetch() ([]*proto.Message, error) {
 			}
 			continue
 		case io.EOF, syscall.EPIPE:
+			c.conf.Log.Printf("connection to %s:%d died while fetching message", c.conf.Topic, c.conf.Partition)
 			c.broker.closeDeadConnection(c.conn)
 			c.conn = nil
 			continue
