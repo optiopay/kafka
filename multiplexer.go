@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/husio/kafka/proto"
+	"github.com/optiopay/kafka/proto"
 )
 
 // ErrMxClosed is returned as a result of closed multiplexer consumtion.

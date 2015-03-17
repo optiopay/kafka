@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/husio/kafka/proto"
+	"github.com/optiopay/kafka/proto"
 )
 
 func TestingMetadataHandler(srv *Server) RequestHandler {

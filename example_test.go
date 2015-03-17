@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/husio/kafka/proto"
+	"github.com/optiopay/kafka/proto"
 )
 
 func ExampleConsumer() {

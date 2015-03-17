@@ -2,8 +2,8 @@ package kafkatest
 
 import (
 	"errors"
-	"github.com/husio/kafka"
-	"github.com/husio/kafka/proto"
+	"github.com/optiopay/kafka"
+	"github.com/optiopay/kafka/proto"
 	"sync"
 	"time"
 )
