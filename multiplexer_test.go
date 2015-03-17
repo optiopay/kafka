@@ -13,7 +13,7 @@ type fetcher struct {
 	errors   []error
 }
 
-func (f *fetcher) Fetch() (*proto.Message, error) {
+func (f *fetcher) Consume() (*proto.Message, error) {
 	// sleep a bit to let the other's work
 	time.Sleep(time.Microsecond * 10)
 
@@ -30,8 +30,8 @@ func (f *fetcher) Fetch() (*proto.Message, error) {
 	panic("not implemented")
 }
 
-func TestMultiplexerFetch(t *testing.T) {
-	fetchers := []Fetcher{
+func TestMultiplexerConsume(t *testing.T) {
+	fetchers := []Consumer{
 		&fetcher{
 			messages: []*proto.Message{
 				&proto.Message{Value: []byte("first")},
@@ -62,7 +62,7 @@ func TestMultiplexerFetch(t *testing.T) {
 	defer mx.Close()
 
 	for i := 0; i < 8; i++ {
-		msg, err := mx.Fetch()
+		msg, err := mx.Consume()
 		if err != nil {
 			results[err.Error()] = true
 		} else {
@@ -87,7 +87,7 @@ func TestMultiplexerFetch(t *testing.T) {
 }
 
 func TestClosingMultiplexer(t *testing.T) {
-	fetchers := []Fetcher{
+	fetchers := []Consumer{
 		&fetcher{errors: []error{errors.New("a1")}},
 		&fetcher{errors: []error{errors.New("b1")}},
 		&fetcher{errors: []error{errors.New("c1")}},
@@ -101,7 +101,7 @@ func TestClosingMultiplexer(t *testing.T) {
 	mx.Close()
 	mx.Close()
 
-	if _, err := mx.Fetch(); err != ErrMxClosed {
+	if _, err := mx.Consume(); err != ErrMxClosed {
 		t.Fatalf("expected %s, got %s", ErrMxClosed, err)
 	}
 }

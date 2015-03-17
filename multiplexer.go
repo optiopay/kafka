@@ -7,19 +7,19 @@ import (
 	"github.com/husio/kafka/proto"
 )
 
-// ErrMxClosed is returned as a result of closed multiplexer fetch.
+// ErrMxClosed is returned as a result of closed multiplexer consumtion.
 var ErrMxClosed = errors.New("closed")
 
-// Mx is multiplexer combining into single stream number of fetchers.
+// Mx is multiplexer combining into single stream number of consumers.
 //
-// It is responsibility of the user of the multiplexer and the fetcher
+// It is responsibility of the user of the multiplexer and the consumer
 // implementation to handle errors. Multiplexer will not do anything except
 // passing them through.
 //
-// It is important to remember that because fetch from every fetcher is done by
-// separate worker, most of the time there is one message consumed by each
+// It is important to remember that because fetch from every consumer is done
+// by separate worker, most of the time there is one message consumed by each
 // worker that is held in memory while waiting for opportuninty to return it
-// once fetch on multiplexer is called.
+// once Consume on multiplexer is called.
 type Mx struct {
 	wg   sync.WaitGroup
 	errc chan error
@@ -30,22 +30,22 @@ type Mx struct {
 	closed bool
 }
 
-// Merge is merging fetch result of any number of fetchers into single stream
+// Merge is merging consume result of any number of consumers into single stream
 // and expose them through returned multiplexer.
-func Merge(fetchers ...Fetcher) *Mx {
+func Merge(consumers ...Consumer) *Mx {
 	p := &Mx{
 		errc: make(chan error),
 		msgc: make(chan *proto.Message),
 		stop: make(chan struct{}),
 	}
 
-	for _, fetcher := range fetchers {
+	for _, consumer := range consumers {
 		p.wg.Add(1)
 
-		go func(f Fetcher) {
+		go func(c Consumer) {
 			defer p.wg.Done()
 			for {
-				msg, err := f.Fetch()
+				msg, err := c.Consume()
 				if err != nil {
 					select {
 					case p.errc <- err:
@@ -60,7 +60,7 @@ func Merge(fetchers ...Fetcher) *Mx {
 					}
 				}
 			}
-		}(fetcher)
+		}(consumer)
 	}
 
 	return p
@@ -85,8 +85,8 @@ func (p *Mx) Close() {
 	close(p.msgc)
 }
 
-// Fetch returns fetch result from any of the merged fetchers.
-func (p *Mx) Fetch() (*proto.Message, error) {
+// Consume returns Consume result from any of the merged consumer.
+func (p *Mx) Consume() (*proto.Message, error) {
 	select {
 	case msg, ok := <-p.msgc:
 		if ok {

@@ -12,9 +12,9 @@ var (
 	ErrTimeout = errors.New("timeout")
 
 	// test implementation should implement the interface
-	_ kafka.Client  = &Broker{}
-	_ kafka.Sender  = &Producer{}
-	_ kafka.Fetcher = &Consumer{}
+	_ kafka.Client   = &Broker{}
+	_ kafka.Producer = &Producer{}
+	_ kafka.Consumer = &Consumer{}
 )
 
 // Broker is mock version of kafka's broker. It's implementing Broker interface
@@ -70,7 +70,7 @@ func (b *Broker) OffsetLatest(topic string, partition int32) (int64, error) {
 // At most one consumer for every topic-partition pair can be created --
 // calling this for the same topic-partition will always return the same
 // consumer instance.
-func (b *Broker) Consumer(conf kafka.ConsumerConf) (kafka.Fetcher, error) {
+func (b *Broker) Consumer(conf kafka.ConsumerConf) (kafka.Consumer, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -93,7 +93,7 @@ func (b *Broker) Consumer(conf kafka.ConsumerConf) (kafka.Fetcher, error) {
 }
 
 // Producer returns producer mock instance.
-func (b *Broker) Producer(kafka.ProducerConf) kafka.Sender {
+func (b *Broker) Producer(kafka.ProducerConf) kafka.Producer {
 	return &Producer{
 		Broker:         b,
 		ResponseOffset: 1,
@@ -112,25 +112,25 @@ func (b *Broker) ReadProducers(timeout time.Duration) (*ProducedMessages, error)
 }
 
 // Consumer mocks kafka's consumer. Use Messages and Errors channels to mock
-// Fetch method results.
+// Consume method results.
 type Consumer struct {
 	conf kafka.ConsumerConf
 
 	Broker *Broker
 
 	// Messages is channel consumed by fetch method call. Pushing message into
-	// this channel will result in Fetch method call returning message data.
+	// this channel will result in Consume method call returning message data.
 	Messages chan *proto.Message
 
 	// Errors is channel consumed by fetch method call. Pushing error into this
-	// channel will result in Fetch method call returning error.
+	// channel will result in Consume method call returning error.
 	Errors chan error
 }
 
-// Fetch returns message or error pushed through consumers Messages and Errors
+// Consume returns message or error pushed through consumers Messages and Errors
 // channel. Function call will block until data on at least one of those
 // channels is available.
-func (c *Consumer) Fetch() (*proto.Message, error) {
+func (c *Consumer) Consume() (*proto.Message, error) {
 	select {
 	case msg := <-c.Messages:
 		msg.Topic = c.conf.Topic

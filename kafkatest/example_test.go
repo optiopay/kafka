@@ -73,11 +73,11 @@ func ExampleBroker_Consumer() {
 	// test broker never fails creating consumer
 	consumer, _ := broker.Consumer(kafka.NewConsumerConf("my-topic", 0))
 
-	m, err := consumer.Fetch()
+	m, err := consumer.Consume()
 	if err == nil {
 		fmt.Printf("Value: %q\n", m.Value)
 	}
-	if _, err = consumer.Fetch(); err != nil {
+	if _, err = consumer.Consume(); err != nil {
 		fmt.Printf("Error: %s\n", err)
 	}
 

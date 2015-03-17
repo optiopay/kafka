@@ -27,7 +27,7 @@ func ExampleConsumer() {
 	}
 
 	for {
-		msg, err := consumer.Fetch()
+		msg, err := consumer.Consume()
 		if err != nil {
 			if err == ErrNoData {
 				break
@@ -70,7 +70,7 @@ func ExampleMultiplexer() {
 	defer broker.Close()
 
 	topics := []string{"fruits", "vegetables"}
-	fetchers := make([]Fetcher, len(topics))
+	fetchers := make([]Consumer, len(topics))
 
 	for i, topic := range topics {
 		conf := NewConsumerConf(topic, 0)
@@ -88,7 +88,7 @@ func ExampleMultiplexer() {
 	defer mx.Close()
 
 	for {
-		msg, err := mx.Fetch()
+		msg, err := mx.Consume()
 		if err != nil {
 			panic(err)
 		}

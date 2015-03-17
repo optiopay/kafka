@@ -29,31 +29,31 @@ var (
 	ErrNoData = errors.New("no data")
 
 	// make sure interfaces are implemented
-	_ Client  = &Broker{}
-	_ Fetcher = &Consumer{}
-	_ Sender  = &Producer{}
+	_ Client   = &Broker{}
+	_ Consumer = &consumer{}
+	_ Producer = &producer{}
 )
 
 // Client is interface implemented by Broker.
 type Client interface {
-	Producer(ProducerConf) Sender
-	Consumer(ConsumerConf) (Fetcher, error)
+	Producer(ProducerConf) Producer
+	Consumer(ConsumerConf) (Consumer, error)
 	OffsetEarliest(string, int32) (int64, error)
 	OffsetLatest(string, int32) (int64, error)
 	Close()
 }
 
-// Fetcher is interface implemented by Consumer.
-type Fetcher interface {
-	Fetch() (*proto.Message, error)
+// Consumer is interface allowing to read messages from kafka.
+type Consumer interface {
+	Consume() (*proto.Message, error)
 }
 
-// Sender is insterface implemented by Producer.
-type Sender interface {
+// Producer is insterface allowing to write messages to kafka.
+type Producer interface {
 	Produce(string, int32, ...*proto.Message) (int64, error)
 }
 
-// Logger is insterface implemented by log.Logger
+// Logger is insterface allowing to log debug messages.
 type Logger interface {
 	Print(...interface{})
 	Printf(string, ...interface{})
@@ -401,18 +401,18 @@ func NewProducerConf() ProducerConf {
 	}
 }
 
-// Producer is link to broker with extra configuration.
-type Producer struct {
+// producer is link to client with extra configuration.
+type producer struct {
 	conf   ProducerConf
 	broker *Broker
 }
 
 // Producer returns new producer instance, bound to broker.
-func (b *Broker) Producer(conf ProducerConf) Sender {
+func (b *Broker) Producer(conf ProducerConf) Producer {
 	if conf.Log == nil {
 		conf.Log = b.conf.Log
 	}
-	return &Producer{
+	return &producer{
 		conf:   conf,
 		broker: b,
 	}
@@ -424,7 +424,7 @@ func (b *Broker) Producer(conf ProducerConf) Sender {
 // configured with RetryLimit and RetryWait producer configuration attributes.
 //
 // Upon successful produce call, messages Offset field is updated.
-func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
+func (p *producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 
 retryLoop:
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
@@ -461,7 +461,7 @@ retryLoop:
 }
 
 // produce send produce request to leader for given destination.
-func (p *Producer) produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
+func (p *producer) produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 	conn, err := p.broker.leaderConnection(topic, partition)
 	if err != nil {
 		return 0, err
@@ -586,7 +586,7 @@ func NewConsumerConf(topic string, partition int32) ConsumerConf {
 
 // Consumer is representing single partition reading buffer. Consumer is also
 // providing limited failures handling and message filtering.
-type Consumer struct {
+type consumer struct {
 	broker *Broker
 	conn   *connection
 	conf   ConsumerConf
@@ -597,7 +597,7 @@ type Consumer struct {
 }
 
 // Consumer creates new consumer instance, bound to broker.
-func (b *Broker) Consumer(conf ConsumerConf) (consumer Fetcher, err error) {
+func (b *Broker) Consumer(conf ConsumerConf) (Consumer, error) {
 	conn, err := b.leaderConnection(conf.Topic, conf.Partition)
 	if err != nil {
 		return nil, err
@@ -635,25 +635,25 @@ func (b *Broker) Consumer(conf ConsumerConf) (consumer Fetcher, err error) {
 			return nil, fmt.Errorf("invalid start offset: %d", conf.StartOffset)
 		}
 	}
-	consumer = &Consumer{
+	c := &consumer{
 		broker: b,
 		conn:   conn,
 		conf:   conf,
 		msgbuf: make([]*proto.Message, 0),
 		offset: offset,
 	}
-	return consumer, nil
+	return c, nil
 }
 
-// Fetch is returning single message from consumed partition. Consumer can
+// Consume is returning single message from consumed partition. Consumer can
 // retry fetching messages even if responses return no new data. Retry
 // behaviour can be configured through RetryLimit and RetryWait consumer
 // parameters.
 //
-// Fetch can retry sending request on common errors. This behaviour can be
+// Consume can retry sending request on common errors. This behaviour can be
 // configured with RetryErrLimit and RetryErrWait consumer configuration
 // attributes.
-func (c *Consumer) Fetch() (*proto.Message, error) {
+func (c *consumer) Consume() (*proto.Message, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -700,10 +700,10 @@ func (c *Consumer) Fetch() (*proto.Message, error) {
 	return msg, nil
 }
 
-// Fetch and return next batch of messages. In case of certain set of errors,
+// fetch and return next batch of messages. In case of certain set of errors,
 // retry sending fetch request. Retry behaviour can be configured with
 // RetryErrLimit and RetryErrWait consumer configuration attributes.
-func (c *Consumer) fetch() ([]*proto.Message, error) {
+func (c *consumer) fetch() ([]*proto.Message, error) {
 	req := proto.FetchReq{
 		ClientID:    c.broker.conf.ClientID,
 		MaxWaitTime: c.conf.RequestTimeout,
