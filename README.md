@@ -10,7 +10,7 @@ server, released under [MIT license](LICENSE]).
 * [godoc](https://godoc.org/github.com/optiopay/kafka) generated documentation,
 * example [consumer](http://godoc.org/github.com/optiopay/kafka#example-Consumer) code,
 * example [producer](http://godoc.org/github.com/optiopay/kafka#example-Producer) code,
-* [consumer and producer](https://github.com/optiopay/kafka-libs-test) speed
+* [consumer and producer](https://github.com/husio/kafka-libs-test) speed
   comparison with [sarama](https://github.com/Shopify/sarama) library.
 
 
