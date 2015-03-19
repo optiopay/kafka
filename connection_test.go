@@ -74,7 +74,7 @@ func TestConnectionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := NewConnection(ln.Addr().String(), time.Second)
+	conn, err := newConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -133,7 +133,7 @@ func TestConnectionProduce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := NewConnection(ln.Addr().String(), time.Second)
+	conn, err := newConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -235,7 +235,7 @@ func TestConnectionFetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := NewConnection(ln.Addr().String(), time.Second)
+	conn, err := newConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -276,7 +276,7 @@ func TestConnectionOffset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := NewConnection(ln.Addr().String(), time.Second)
+	conn, err := newConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -308,7 +308,7 @@ func TestConnectionProduceNoAck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := NewConnection(ln.Addr().String(), time.Second)
+	conn, err := newConnection(ln.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}

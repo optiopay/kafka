@@ -33,7 +33,7 @@ type connection struct {
 }
 
 // newConnection returns new, initialized connection or error
-func NewConnection(address string, timeout time.Duration) (*connection, error) {
+func newConnection(address string, timeout time.Duration) (*connection, error) {
 	conn, err := net.DialTimeout("tcp", address, timeout)
 	if err != nil {
 		return nil, err

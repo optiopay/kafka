@@ -116,7 +116,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 	}
 
 	for _, addr := range nodeAddresses {
-		conn, err := NewConnection(addr, conf.DialTimeout)
+		conn, err := newConnection(addr, conf.DialTimeout)
 		if err != nil {
 			conf.Log.Printf("could not connect to %s: %s", addr, err)
 			continue
@@ -193,7 +193,7 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 		if _, ok := checkednodes[nodeID]; ok {
 			continue
 		}
-		conn, err := NewConnection(addr, b.conf.DialTimeout)
+		conn, err := newConnection(addr, b.conf.DialTimeout)
 		if err != nil {
 			b.conf.Log.Printf("could not connect to %s: %s", addr, err)
 			continue
@@ -270,7 +270,7 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 				b.mu.Unlock()
 				return nil, proto.ErrBrokerNotAvailable
 			}
-			conn, err = NewConnection(addr, b.conf.DialTimeout)
+			conn, err = newConnection(addr, b.conf.DialTimeout)
 			if err != nil {
 				b.conf.Log.Printf("cannot connect to node %s: %s", addr, err)
 				b.mu.Unlock()
