@@ -651,7 +651,26 @@ func ReadConsumerMetadataResp(r io.Reader) (*ConsumerMetadataResp, error) {
 }
 
 func (r *ConsumerMetadataResp) Bytes() ([]byte, error) {
-	return nil, errors.New("not implemented")
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeError(r.Err)
+	enc.Encode(r.CoordinatorID)
+	enc.Encode(r.CoordinatorHost)
+	enc.Encode(r.CoordinatorPort)
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
 }
 
 type OffsetCommitReq struct {
@@ -791,7 +810,32 @@ func ReadOffsetCommitResp(r io.Reader) (*OffsetCommitResp, error) {
 }
 
 func (r *OffsetCommitResp) Bytes() ([]byte, error) {
-	return nil, errors.New("not implemented")
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeArrayLen(len(r.Topics))
+	for _, t := range r.Topics {
+		enc.Encode(t.Name)
+		enc.EncodeArrayLen(len(t.Partitions))
+		for _, p := range t.Partitions {
+			enc.Encode(p.ID)
+			enc.EncodeError(p.Err)
+		}
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+
 }
 
 type OffsetFetchReq struct {
@@ -916,6 +960,36 @@ func ReadOffsetFetchResp(r io.Reader) (*OffsetFetchResp, error) {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+func (r *OffsetFetchResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeArrayLen(len(r.Topics))
+	for _, topic := range r.Topics {
+		enc.Encode(topic.Name)
+		enc.EncodeArrayLen(len(topic.Partitions))
+		for _, part := range topic.Partitions {
+			enc.Encode(part.ID)
+			enc.Encode(part.Offset)
+			enc.Encode(part.Metadata)
+			enc.EncodeError(part.Err)
+		}
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
 }
 
 type ProduceReq struct {

@@ -18,4 +18,3 @@ Missing or nice to have
 -----------------------
 
 * message set compression
-* read offset commit

@@ -179,3 +179,48 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	}
 	return proto.ReadOffsetResp(bytes.NewReader(b))
 }
+
+func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
+	var ok bool
+	if req.CorrelationID, ok = <-c.nextID; !ok {
+		return nil, c.stopErr
+	}
+	if _, err := req.WriteTo(c.conn); err != nil {
+		return nil, err
+	}
+	b, ok := <-c.respc[req.CorrelationID]
+	if !ok {
+		return nil, c.stopErr
+	}
+	return proto.ReadConsumerMetadataResp(bytes.NewReader(b))
+}
+
+func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetCommitResp, error) {
+	var ok bool
+	if req.CorrelationID, ok = <-c.nextID; !ok {
+		return nil, c.stopErr
+	}
+	if _, err := req.WriteTo(c.conn); err != nil {
+		return nil, err
+	}
+	b, ok := <-c.respc[req.CorrelationID]
+	if !ok {
+		return nil, c.stopErr
+	}
+	return proto.ReadOffsetCommitResp(bytes.NewReader(b))
+}
+
+func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchResp, error) {
+	var ok bool
+	if req.CorrelationID, ok = <-c.nextID; !ok {
+		return nil, c.stopErr
+	}
+	if _, err := req.WriteTo(c.conn); err != nil {
+		return nil, err
+	}
+	b, ok := <-c.respc[req.CorrelationID]
+	if !ok {
+		return nil, c.stopErr
+	}
+	return proto.ReadOffsetFetchResp(bytes.NewReader(b))
+}

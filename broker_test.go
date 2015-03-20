@@ -956,6 +956,99 @@ func TestConsumerBrokenPipe(t *testing.T) {
 	}
 }
 
+func TestOffsetCoordinator(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	setOffset := int64(-1)
+
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(ConsumerMetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.ConsumerMetadataReq)
+		host, port := srv.HostPort()
+		return &proto.ConsumerMetadataResp{
+			CorrelationID:   req.CorrelationID,
+			Err:             nil,
+			CoordinatorID:   1,
+			CoordinatorHost: host,
+			CoordinatorPort: int32(port),
+		}
+	})
+	srv.Handle(OffsetCommitRequest, func(request Serializable) Serializable {
+		req := request.(*proto.OffsetCommitReq)
+		setOffset = req.Topics[0].Partitions[0].Offset
+		return &proto.OffsetCommitResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.OffsetCommitRespTopic{
+				proto.OffsetCommitRespTopic{
+					Name: "first-topic",
+					Partitions: []proto.OffsetCommitRespPartition{
+						proto.OffsetCommitRespPartition{
+							ID:  0,
+							Err: nil,
+						},
+					},
+				},
+			},
+		}
+	})
+	srv.Handle(OffsetFetchRequest, func(request Serializable) Serializable {
+		req := request.(*proto.OffsetFetchReq)
+		var partition proto.OffsetFetchRespPartition
+		if setOffset == -1 {
+			partition.Err = proto.ErrUnknownTopicOrPartition
+		} else {
+			partition = proto.OffsetFetchRespPartition{
+				ID:       0,
+				Offset:   int64(setOffset),
+				Err:      nil,
+				Metadata: "random data",
+			}
+		}
+		return &proto.OffsetFetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.OffsetFetchRespTopic{
+				proto.OffsetFetchRespTopic{
+					Name:       "first-topic",
+					Partitions: []proto.OffsetFetchRespPartition{partition},
+				},
+			},
+		}
+	})
+
+	conf := NewBrokerConf("tester")
+	conf.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, conf)
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	coordConf := NewOffsetCoordinatorConf("test-group")
+	coordinator, err := broker.OffsetCoordinator(coordConf)
+	if err != nil {
+		t.Fatalf("cannot create coordinator: %s", err)
+	}
+
+	if off, meta, err := coordinator.Offset("does-not-exists", 1423); err == nil {
+		t.Fatalf("expected error, got %d, %q", off, meta)
+	}
+	if _, _, err := coordinator.Offset("first-topic", 0); err != proto.ErrUnknownTopicOrPartition {
+		t.Fatalf("expected %q error, got %s", proto.ErrUnknownTopicOrPartition, err)
+	}
+
+	if err := coordinator.Commit("first-topic", 0, 421); err != nil {
+		t.Fatalf("expected no error, got %s", err)
+	}
+	off, meta, err := coordinator.Offset("first-topic", 0)
+	if err != nil {
+		t.Fatalf("expected no error, got %s", err)
+	}
+	if off != 421 || meta != "random data" {
+		t.Fatalf("unexpected data %d and %q", off, meta)
+	}
+}
+
 // this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
 func BenchmarkConsumer(b *testing.B) {

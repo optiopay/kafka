@@ -38,6 +38,7 @@ var (
 type Client interface {
 	Producer(ProducerConf) Producer
 	Consumer(ConsumerConf) (Consumer, error)
+	OffsetCoordinator(OffsetCoordinatorConf) (OffsetCoordinator, error)
 	OffsetEarliest(string, int32) (int64, error)
 	OffsetLatest(string, int32) (int64, error)
 	Close()
@@ -51,6 +52,13 @@ type Consumer interface {
 // Producer is insterface allowing to write messages to kafka.
 type Producer interface {
 	Produce(string, int32, ...*proto.Message) (int64, error)
+}
+
+// OffsetCoordinator is interface allowing to store and retrieve message offset
+// for any single consumer group.
+type OffsetCoordinator interface {
+	Commit(topic string, partition int32, offset int64) error
+	Offset(topic string, partition int32) (offset int64, metadata string, err error)
 }
 
 // Logger is insterface allowing to log debug messages.
@@ -283,6 +291,87 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 		return conn, nil
 	}
 	return nil, err
+}
+
+// coordinatorConnection returns connection to offset coordinator for given group.
+//
+// Failed connection retry is controlled by broker configuration.
+func (b *Broker) coordinatorConnection(consumerGroup string) (conn *connection, err error) {
+	// TODO(husio) clean this up
+	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
+		b.mu.Lock()
+
+		// first try all aready existing connections
+		for _, conn := range b.conns {
+			resp, err := conn.ConsumerMetadata(&proto.ConsumerMetadataReq{
+				ClientID:      b.conf.ClientID,
+				ConsumerGroup: consumerGroup,
+			})
+			if err != nil {
+				b.conf.Log.Printf("coordinator for %q metadata fetch error: %s", consumerGroup, err)
+				continue
+			}
+			if resp.Err != nil {
+				b.mu.Unlock()
+				return nil, err
+			}
+
+			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
+			conn, err := newConnection(addr, b.conf.DialTimeout)
+			if err != nil {
+				b.conf.Log.Printf("cannot connect to node %d (%s): %s", resp.CoordinatorID, addr, err)
+				continue
+			}
+			b.conns[resp.CoordinatorID] = conn
+			b.mu.Unlock()
+			return conn, nil
+		}
+
+		// if none of the connections worked out, try with fresh data
+		if err := b.refreshMetadata(); err != nil {
+			return nil, err
+		}
+
+		for nodeID, addr := range b.metadata.nodes {
+			if _, ok := b.conns[nodeID]; ok {
+				// connection to node is cached so it was already checked
+				continue
+			}
+			conn, err := newConnection(addr, b.conf.DialTimeout)
+			if err != nil {
+				b.conf.Log.Printf("cannot connect to node %d (%s): %s", nodeID, addr, err)
+				continue
+			}
+			b.conns[nodeID] = conn
+
+			resp, err := conn.ConsumerMetadata(&proto.ConsumerMetadataReq{
+				ClientID:      b.conf.ClientID,
+				ConsumerGroup: consumerGroup,
+			})
+			if err != nil {
+				b.conf.Log.Printf("coordinator for %q metadata fetch error: %s", consumerGroup, err)
+				continue
+			}
+			if resp.Err != nil {
+				b.mu.Unlock()
+				return nil, err
+			}
+
+			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
+			conn, err = newConnection(addr, b.conf.DialTimeout)
+			if err != nil {
+				b.conf.Log.Printf("cannot connect to node %d (%s): %s", resp.CoordinatorID, addr, err)
+				continue
+			}
+			b.conns[resp.CoordinatorID] = conn
+			b.mu.Unlock()
+			return conn, nil
+		}
+		b.mu.Unlock()
+
+		time.Sleep(b.conf.LeaderRetryWait)
+	}
+	return nil, fmt.Errorf("coordinator for %q not found", consumerGroup)
 }
 
 // closeDeadConnection is closing and removing any reference to given
@@ -774,4 +863,211 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 		}
 		return nil, errors.New("incomplete fetch response")
 	}
+}
+
+type OffsetCoordinatorConf struct {
+	ConsumerGroup string
+
+	// RetryErrLimit limits messages fetch retry upon failure. By default 10.
+	RetryErrLimit int
+
+	// RetryErrWait controls wait duration between retries after failed fetch
+	// request. By default 500ms.
+	RetryErrWait time.Duration
+
+	// Logger used by consumer. By default, reuse logger assigned to broker.
+	Log Logger
+}
+
+// NewOffsetCoordinatorConf returns default OffsetCoordinator configuration.
+func NewOffsetCoordinatorConf(consumerGroup string) OffsetCoordinatorConf {
+	return OffsetCoordinatorConf{
+		ConsumerGroup: consumerGroup,
+		RetryErrLimit: 10,
+		RetryErrWait:  time.Millisecond * 500,
+		Log:           nil,
+	}
+}
+
+type offsetCoordinator struct {
+	conf   OffsetCoordinatorConf
+	broker *Broker
+	conn   *connection
+}
+
+// OffsetCoordinator returns offset management coordinator for single consumer
+// group, bound to broker.
+func (b *Broker) OffsetCoordinator(conf OffsetCoordinatorConf) (OffsetCoordinator, error) {
+	conn, err := b.coordinatorConnection(conf.ConsumerGroup)
+	if err != nil {
+		return nil, err
+	}
+	if conf.Log == nil {
+		conf.Log = b.conf.Log
+	}
+	c := &offsetCoordinator{
+		broker: b,
+		conf:   conf,
+		conn:   conn,
+	}
+	return c, nil
+}
+
+// Commit is saving offset information for given topic and partition.
+//
+// Commit can retry saving offset information on common errors. This behaviour
+// can be configured with with RetryErrLimit and RetryErrWait coordinator
+// configuration attributes.
+func (c *offsetCoordinator) Commit(topic string, partition int32, offset int64) error {
+	return c.commit(topic, partition, offset, "")
+}
+
+// Commit works exactly like Commit method, but store extra metadata string
+// together with offset information.
+func (c *offsetCoordinator) CommitFull(topic string, partition int32, offset int64, metadata string) error {
+	return c.commit(topic, partition, offset, metadata)
+}
+
+// commit is saving offset and metadata information. Provides limited error
+// handling configurable through OffsetCoordinatorConf.
+func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, metadata string) (err error) {
+	var resp *proto.OffsetCommitResp
+
+retryLoop:
+	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		// connection can be set to nil if previously reference connection died
+		if c.conn == nil {
+			conn, err := c.broker.coordinatorConnection(c.conf.ConsumerGroup)
+			if err != nil {
+				if retry == c.conf.RetryErrLimit {
+					c.conf.Log.Printf("cannot connect to coordinator of %q consumer group: %s", c.conf.ConsumerGroup, err)
+					return err
+				}
+				time.Sleep(c.conf.RetryErrWait)
+				continue
+			}
+			c.conn = conn
+		}
+
+		resp, err = c.conn.OffsetCommit(&proto.OffsetCommitReq{
+			ClientID:      c.broker.conf.ClientID,
+			ConsumerGroup: c.conf.ConsumerGroup,
+			Topics: []proto.OffsetCommitReqTopic{
+				proto.OffsetCommitReqTopic{
+					Name: topic,
+					Partitions: []proto.OffsetCommitReqPartition{
+						proto.OffsetCommitReqPartition{ID: partition, Offset: offset, TimeStamp: time.Now(), Metadata: metadata},
+					},
+				},
+			},
+		})
+
+		switch err {
+		case io.EOF, syscall.EPIPE:
+			c.conf.Log.Printf("connection to %s:%d died while commiting %q offset", topic, partition, c.conf.ConsumerGroup)
+			c.broker.closeDeadConnection(c.conn)
+			c.conn = nil
+			continue retryLoop
+		case nil:
+			// all good
+			break retryLoop
+		default:
+			// we cannot help if the error is unknown
+			break retryLoop
+		}
+	}
+
+	if err != nil {
+		c.conf.Log.Printf("cannot commit %s:%d offset for %q: %s", topic, partition, c.conf.ConsumerGroup, err)
+		return err
+	}
+
+	for _, t := range resp.Topics {
+		if t.Name != topic {
+			c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name, topic)
+			continue
+
+		}
+		for _, part := range t.Partitions {
+			if part.ID != partition {
+				c.conf.Log.Printf("unexpected partition information received: %s:%d", topic, part.ID)
+				continue
+			}
+			return part.Err
+		}
+	}
+	return errors.New("response does not contain commit information")
+}
+
+// Offset is returning last offset and metadata information committed for given
+// topic and partition.
+// Offset can retry sending request on common errors. This behaviour can be
+// configured with with RetryErrLimit and RetryErrWait coordinator
+// configuration attributes.
+func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64, metadata string, err error) {
+	var resp *proto.OffsetFetchResp
+
+retryLoop:
+	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		// connection can be set to nil if previously reference connection died
+		if c.conn == nil {
+			conn, err := c.broker.coordinatorConnection(c.conf.ConsumerGroup)
+			if err != nil {
+				if retry == c.conf.RetryErrLimit {
+					c.conf.Log.Printf("cannot connect to coordinator of %q consumer group: %s", c.conf.ConsumerGroup, err)
+					return 0, "", err
+				}
+				time.Sleep(c.conf.RetryErrWait)
+				continue
+			}
+			c.conn = conn
+		}
+		resp, err = c.conn.OffsetFetch(&proto.OffsetFetchReq{
+			ConsumerGroup: c.conf.ConsumerGroup,
+			Topics: []proto.OffsetFetchReqTopic{
+				proto.OffsetFetchReqTopic{
+					Name:       topic,
+					Partitions: []int32{partition},
+				},
+			},
+		})
+
+		switch err {
+		case io.EOF, syscall.EPIPE:
+			c.conf.Log.Printf("connection to %s:%d died while fetching %q offset", topic, partition, c.conf.ConsumerGroup)
+			c.broker.closeDeadConnection(c.conn)
+			c.conn = nil
+			continue retryLoop
+		case nil:
+			// all good
+			break retryLoop
+		default:
+			// we cannot help if the error is unknown
+			break retryLoop
+		}
+	}
+
+	if err != nil {
+		c.conf.Log.Printf("cannot fetch %s:%d offset for %q: %s", topic, partition, c.conf.ConsumerGroup, err)
+		return 0, "", err
+	}
+
+	for _, t := range resp.Topics {
+		if t.Name != topic {
+			c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name, topic)
+			continue
+
+		}
+		for _, part := range t.Partitions {
+			if part.ID != partition {
+				c.conf.Log.Printf("unexpected partition information received: %s:%d", topic, part.ID)
+				continue
+			}
+			if part.Err != nil {
+				return 0, "", part.Err
+			}
+			return part.Offset, part.Metadata, nil
+		}
+	}
+	return 0, "", errors.New("response does not contain offset information")
 }

@@ -2,6 +2,7 @@ package kafkatest
 
 import (
 	"errors"
+	"fmt"
 	"github.com/optiopay/kafka"
 	"github.com/optiopay/kafka/proto"
 	"sync"
@@ -10,6 +11,8 @@ import (
 
 var (
 	ErrTimeout = errors.New("timeout")
+
+	ErrNotImplemented = errors.New("not implemented")
 
 	// test implementation should implement the interface
 	_ kafka.Client   = &Broker{}
@@ -100,6 +103,16 @@ func (b *Broker) Producer(kafka.ProducerConf) kafka.Producer {
 	}
 }
 
+// OffsetCoordinator returns offset coordinator mock instance. It's always
+// successful, so you can always ignore returned error.
+func (b *Broker) OffsetCoordinator(conf kafka.OffsetCoordinatorConf) (kafka.OffsetCoordinator, error) {
+	c := &OffsetCoordinator{
+		Broker: b,
+		conf:   conf,
+	}
+	return c, nil
+}
+
 // ReadProducers return ProduceMessages representing produce call of one of
 // created by broker producers or ErrTimeout.
 func (b *Broker) ReadProducers(timeout time.Duration) (*ProducedMessages, error) {
@@ -183,4 +196,49 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Mes
 	}
 	p.ResponseOffset += int64(len(messages))
 	return off, nil
+}
+
+type OffsetCoordinator struct {
+	conf   kafka.OffsetCoordinatorConf
+	Broker *Broker
+
+	// Offsets is used to store all offset commits when using mocked
+	// coordinator's default behaviour.
+	Offsets map[string]int64
+
+	// CommitHandler is callback function called whenever Commit method of the
+	// OffsetCoordinator is called. If CommitHandler is nil, Commit method will
+	// return data using Offset attribute as store.
+	CommitHandler func(consumerGroup string, topic string, partition int32, offset int64) error
+
+	// OffsetHandler is callback function called whenever Offset method of the
+	// OffsetCoordinator is called. If OffsetHandler is nil, Commit method will
+	// use Offset attribute to retrieve the offset.
+	OffsetHandler func(consumerGroup string, topic string, partition int32) (offset int64, metadata string, err error)
+}
+
+// Commit return result of CommitHandler callback set on coordinator. If
+// handler is nil, this method will use Offsets attribute to store data for
+// further use.
+func (c *OffsetCoordinator) Commit(topic string, partition int32, offset int64) error {
+	if c.CommitHandler != nil {
+		return c.CommitHandler(c.conf.ConsumerGroup, topic, partition, offset)
+	}
+	c.Offsets[fmt.Sprintf("%s:%d", topic, partition)] = offset
+	return nil
+}
+
+// Offset return result of OffsetHandler callback set on coordinator. If
+// handler is nil, this method will use Offsets attribute to retrieve committed
+// offset. If no offset for given topic and partition pair was saved,
+// proto.ErrUnknownTopicOrPartition is returned.
+func (c *OffsetCoordinator) Offset(topic string, partition int32) (offset int64, metadata string, err error) {
+	if c.OffsetHandler != nil {
+		return c.OffsetHandler(c.conf.ConsumerGroup, topic, partition)
+	}
+	off, ok := c.Offsets[fmt.Sprintf("%s:%d", topic, partition)]
+	if !ok {
+		return 0, "", proto.ErrUnknownTopicOrPartition
+	}
+	return off, "", nil
 }
