@@ -7,9 +7,12 @@ kafka
 Kafka is Go client library for [Apache Kafka](https://kafka.apache.org/)
 server, released under [MIT license](LICENSE]).
 
+Kafka provides minimal abstraction over wire protocol, support for transparent
+failover and easy to use blocking API.
+
+
 * [godoc](https://godoc.org/github.com/optiopay/kafka) generated documentation,
-* example [consumer](http://godoc.org/github.com/optiopay/kafka#example-Consumer) code,
-* example [producer](http://godoc.org/github.com/optiopay/kafka#example-Producer) code,
+* [code examples](https://godoc.org/github.com/optiopay/kafka#pkg-examples)
 * [consumer and producer](https://github.com/husio/kafka-libs-test) speed
   comparison with [sarama](https://github.com/Shopify/sarama) library.
 
@@ -18,3 +21,83 @@ Missing or nice to have
 -----------------------
 
 * message set compression
+
+
+
+Example
+-------
+
+Write all messages from stdin to kafka and print all messages from kafka topic
+to stdout.
+
+
+```go
+package main
+
+import (
+        "bufio"
+        "log"
+        "os"
+        "strings"
+
+        "github.com/optiopay/kafka"
+        "github.com/optiopay/kafka/proto"
+)
+
+const (
+        topic     = "my-messages"
+        partition = 0
+)
+
+var addresses = []string{"localhost:9092", "localhost:9093"}
+
+func main() {
+        // connect to kafka cluster
+        broker, err := kafka.Dial(addresses, kafka.NewBrokerConf("test-client"))
+        if err != nil {
+                log.Fatalf("cannot connect to kafka cluster: %s", err)
+        }
+        defer broker.Close()
+
+        // print consumed messages to stdout
+        go func() {
+                conf := kafka.NewConsumerConf(topic, partition)
+                conf.StartOffset = kafka.StartOffsetNewest
+                consumer, err := broker.Consumer(conf)
+                if err != nil {
+                        log.Fatalf("cannot create kafka consumer for %s:%d: %s", topic, partition, err)
+                }
+
+                for {
+                        msg, err := consumer.Consume()
+                        if err != nil {
+                                if err != kafka.ErrNoData {
+                                        log.Printf("cannot consume %q topic message: %s", topic, err)
+                                }
+                                break
+                        }
+                        log.Printf("message %d: %s", msg.Offset, msg.Value)
+                }
+                log.Print("consumer quit")
+        }()
+
+        producer := broker.Producer(kafka.NewProducerConf())
+        // read stdin and send every non empty line as message
+        input := bufio.NewReader(os.Stdin)
+        for {
+                line, err := input.ReadString('\n')
+                if err != nil {
+                        log.Fatalf("input error: %s", err)
+                }
+                line = strings.TrimSpace(line)
+                if line == "" {
+                        continue
+                }
+
+                msg := &proto.Message{Value: []byte(line)}
+                if _, err := producer.Produce(topic, partition, msg); err != nil {
+                        log.Fatalf("cannot produce message to %s:%d: %s", topic, partition, err)
+                }
+        }
+}
+```
