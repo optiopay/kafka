@@ -858,7 +858,7 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 					c.conf.Log.Printf("unexpected partition information received: %s:%d", topic.Name, part.ID)
 					continue
 				}
-				return part.Messages, nil
+				return part.Messages, part.Err
 			}
 		}
 		return nil, errors.New("incomplete fetch response")
