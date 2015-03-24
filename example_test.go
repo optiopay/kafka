@@ -8,7 +8,7 @@ import (
 	"github.com/optiopay/kafka/proto"
 )
 
-func ExampleClient_Consumer() {
+func ExampleConsumer() {
 	// connect to kafka cluster
 	addresses := []string{"localhost:9092", "localhost:9093"}
 	broker, err := Dial(addresses, NewBrokerConf("test"))
@@ -39,7 +39,7 @@ func ExampleClient_Consumer() {
 	}
 }
 
-func ExampleClient_OffsetCoordinator() {
+func ExampleOffsetCoordinator() {
 	// connect to kafka cluster
 	addresses := []string{"localhost:9092", "localhost:9093"}
 	broker, err := Dial(addresses, NewBrokerConf("test"))
@@ -72,7 +72,7 @@ func ExampleClient_OffsetCoordinator() {
 	}
 }
 
-func ExampleClient_Producer() {
+func ExampleProducer() {
 	// connect to kafka cluster
 	addresses := []string{"localhost:9092", "localhost:9093"}
 	broker, err := Dial(addresses, NewBrokerConf("test"))
@@ -122,7 +122,7 @@ func ExampleMerge() {
 		fetchers[i] = consumer
 	}
 
-	// merge all created consumers
+	// merge all created consumers (they don't even have to belong to the same broker!)
 	mx := Merge(fetchers...)
 	defer mx.Close()
 
