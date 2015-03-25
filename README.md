@@ -1,5 +1,5 @@
-kafka
-=====
+# Moved to [github.com/optiopay/kafka](https://github.com/optiopay/kafka)
+
 
 [![Build Status](https://travis-ci.org/optiopay/kafka.svg?branch=master)](https://travis-ci.org/optiopay/kafka)
 [![GoDoc](https://godoc.org/github.com/optiopay/kafka?status.png)](https://godoc.org/github.com/optiopay/kafka)
