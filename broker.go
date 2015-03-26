@@ -222,7 +222,7 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 		return resp, nil
 	}
 
-	return nil, errors.New("cannot fetch metadata")
+	return nil, errors.New("cannot fetch metadata. No topics created?")
 }
 
 // rewriteMetadata creates new internal metadata representation using data from
