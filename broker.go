@@ -29,9 +29,10 @@ var (
 	ErrNoData = errors.New("no data")
 
 	// make sure interfaces are implemented
-	_ Client   = &Broker{}
-	_ Consumer = &consumer{}
-	_ Producer = &producer{}
+	_ Client            = &Broker{}
+	_ Consumer          = &consumer{}
+	_ Producer          = &producer{}
+	_ OffsetCoordinator = &offsetCoordinator{}
 )
 
 // Client is interface implemented by Broker.
