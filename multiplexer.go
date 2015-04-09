@@ -7,7 +7,7 @@ import (
 	"github.com/optiopay/kafka/proto"
 )
 
-// ErrMxClosed is returned as a result of closed multiplexer consumtion.
+// ErrMxClosed is returned as a result of closed multiplexer consumption.
 var ErrMxClosed = errors.New("closed")
 
 // Mx is multiplexer combining into single stream number of consumers.
@@ -18,10 +18,11 @@ var ErrMxClosed = errors.New("closed")
 //
 // It is important to remember that because fetch from every consumer is done
 // by separate worker, most of the time there is one message consumed by each
-// worker that is held in memory while waiting for opportuninty to return it
-// once Consume on multiplexer is called.
+// worker that is held in memory while waiting for opportunity to return it
+// once Consume on multiplexer is called. Closing multiplexer may result in
+// ignoring some of already read, waiting for delivery messages kept internally
+// by every worker.
 type Mx struct {
-	wg   sync.WaitGroup
 	errc chan error
 	msgc chan *proto.Message
 	stop chan struct{}
@@ -40,10 +41,7 @@ func Merge(consumers ...Consumer) *Mx {
 	}
 
 	for _, consumer := range consumers {
-		p.wg.Add(1)
-
 		go func(c Consumer) {
-			defer p.wg.Done()
 			for {
 				msg, err := c.Consume()
 				if err != nil {
@@ -66,37 +64,33 @@ func Merge(consumers ...Consumer) *Mx {
 	return p
 }
 
-// Close is closing multiplexer and stopping all underlying workers. Call is
-// blocking untill all workers are done. Calling Close from several goroutines
-// is safe and will block all of them untill multiplexer is closed. Closing
-// closed multiplexer has no effect.
+// Close is closing multiplexer and stopping all underlying workers.
+//
+// Closing multiplexer will stop all workers as soon as possible, but any
+// consume-in-progress action performed by worker has to be finished first. Any
+// consumption result received after closing multiplexer is ignored.
+//
+// Close is returning without waiting for all the workers to finish.
+//
+// Closing closed multiplexer has no effect.
 func (p *Mx) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.closed {
-		return
+	if !p.closed {
+		p.closed = true
+		close(p.stop)
 	}
-	p.closed = true
-
-	close(p.stop)
-	p.wg.Wait()
-	close(p.errc)
-	close(p.msgc)
 }
 
 // Consume returns Consume result from any of the merged consumer.
 func (p *Mx) Consume() (*proto.Message, error) {
 	select {
-	case msg, ok := <-p.msgc:
-		if ok {
-			return msg, nil
-		}
+	case <-p.stop:
 		return nil, ErrMxClosed
-	case err, ok := <-p.errc:
-		if ok {
-			return nil, err
-		}
-		return nil, ErrMxClosed
+	case msg := <-p.msgc:
+		return msg, nil
+	case err := <-p.errc:
+		return nil, err
 	}
 }

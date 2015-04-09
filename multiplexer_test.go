@@ -105,3 +105,31 @@ func TestClosingMultiplexer(t *testing.T) {
 		t.Fatalf("expected %s, got %s", ErrMxClosed, err)
 	}
 }
+
+type blockingFetcher struct {
+	stop chan struct{}
+}
+
+func (f *blockingFetcher) Consume() (*proto.Message, error) {
+	<-f.stop
+	return nil, errors.New("blocking fetcher is done")
+}
+
+func (f *blockingFetcher) Close() {
+	close(f.stop)
+}
+
+func TestClosingMultiplexerWithBlockingWorkers(t *testing.T) {
+	f1 := &blockingFetcher{make(chan struct{})}
+	defer f1.Close()
+	f2 := &blockingFetcher{make(chan struct{})}
+	defer f2.Close()
+
+	mx := Merge(f1, f2)
+	// close should be instant - without waiting for workers to finish
+	mx.Close()
+
+	if _, err := mx.Consume(); err != ErrMxClosed {
+		t.Fatalf("expected %s, got %s", ErrMxClosed, err)
+	}
+}
