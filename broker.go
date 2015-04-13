@@ -14,28 +14,27 @@ import (
 )
 
 const (
-	// StartOffsetNewest configures consumer to fetch messages produced after
-	// creating the consumer.
+	// StartOffsetNewest configures the consumer to fetch messages produced
+	// after creating the consumer.
 	StartOffsetNewest = -1
 
-	// StartOffsetOldest configures consumer to fetch starting from the oldest
-	// message available
+	// StartOffsetOldest configures the consumer to fetch starting from the
+	// oldest message available.
 	StartOffsetOldest = -2
 )
 
 var (
-	// Returned by consumer Fetch when retry limit was set and exceeded during
-	// single function call
+	// Returned by consumers on Fetch when the retry limit is set and exceeded.
 	ErrNoData = errors.New("no data")
 
-	// make sure interfaces are implemented
+	// Make sure interfaces are implemented
 	_ Client            = &Broker{}
 	_ Consumer          = &consumer{}
 	_ Producer          = &producer{}
 	_ OffsetCoordinator = &offsetCoordinator{}
 )
 
-// Client is interface implemented by Broker.
+// Client is the interface implemented by Broker.
 type Client interface {
 	Producer(ProducerConf) Producer
 	Consumer(ConsumerConf) (Consumer, error)
@@ -45,24 +44,30 @@ type Client interface {
 	Close()
 }
 
-// Consumer is interface allowing to read messages from kafka.
+// Consumer is the interface that wraps the Consume method.
+//
+// Consume reads a message from a consumer, returning an error when
+// encountered.
 type Consumer interface {
 	Consume() (*proto.Message, error)
 }
 
-// Producer is insterface allowing to write messages to kafka.
+// Producer is the interface that wraps the Produce method.
+//
+// Produce writes the messages to the given topic and partition, returning the
+// post-commit offset and any error encountered.  The offset of each message is
+// also updated accordingly.
 type Producer interface {
 	Produce(string, int32, ...*proto.Message) (int64, error)
 }
 
-// OffsetCoordinator is interface allowing to store and retrieve message offset
-// for any single consumer group.
+// OffsetCoordinator is the interface which wraps the Commit and Offset methods.
 type OffsetCoordinator interface {
 	Commit(topic string, partition int32, offset int64) error
 	Offset(topic string, partition int32) (offset int64, metadata string, err error)
 }
 
-// Logger is insterface allowing to log debug messages.
+// Logger is the interface used to wrap logging functionality.
 type Logger interface {
 	Print(...interface{})
 	Printf(string, ...interface{})
@@ -78,20 +83,29 @@ type BrokerConf struct {
 	// Kafka client ID.
 	ClientID string
 
-	// LeaderRetryLimit limits number of connection attempts to single node
-	// before failing. Use LeaderRetryWait to control wait time between
-	// retries. Defaults to 10.
+	// LeaderRetryLimit limits the number of connection attempts to a single
+	// node before failing. Use LeaderRetryWait to control the wait time
+	// between retries.
+	//
+	// Defaults to 10.
 	LeaderRetryLimit int
 
-	// LeaderRetryWait controls duration of wait between trying to connect to
-	// single node after failure. Defaults to 500ms.
-	// Timeout on connection is controlled by DialTimeout setting.
+	// LeaderRetryWait sets a limit to the waiting time when trying to connect
+	// to a single node after failure.
+	//
+	// Defaults to 500ms.
+	//
+	// Timeout on a connection is controlled by the DialTimeout setting.
 	LeaderRetryWait time.Duration
 
-	// Any new connection dial timeout. By default 10 seconds.
+	// Any new connection dial timeout.
+	//
+	// Default is 10 seconds.
 	DialTimeout time.Duration
 
-	// Logger used by the broker. By default all messages are dropped.
+	// Logger used by the broker.
+	//
+	// By default all messages are dropped.
 	Log Logger
 }
 
@@ -105,8 +119,8 @@ func NewBrokerConf(clientID string) BrokerConf {
 	}
 }
 
-// Broker is abstract connection to kafka cluster, managing connections to all
-// kafka nodes.
+// Broker is an abstract connection to kafka cluster, managing connections to
+// all kafka nodes.
 type Broker struct {
 	conf BrokerConf
 
@@ -115,9 +129,10 @@ type Broker struct {
 	conns    map[int32]*connection
 }
 
-// Dial connects to any node from given list of kafka addresses and after
+// Dial connects to any node from a given list of kafka addresses and after
 // successful metadata fetch, returns broker.
-// Returned broker is not initially connected to any kafka node.
+//
+// The returned broker is not initially connected to any kafka node.
 func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 	broker := &Broker{
 		conf:  conf,
@@ -147,7 +162,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 	return nil, errors.New("could not connect")
 }
 
-// Close is closing broker and all active kafka nodes connections.
+// Close closes the broker and all active kafka nodes connections.
 func (b *Broker) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -446,12 +461,12 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 	return offset, err
 }
 
-// OffsetEarliest returns offset of the oldest message available in given partition.
+// OffsetEarliest returns the oldest offset available on the given partition.
 func (b *Broker) OffsetEarliest(topic string, partition int32) (offset int64, err error) {
 	return b.offset(topic, partition, -2)
 }
 
-// OffsetLatest return offset of the next message produced in given partition
+// OffsetLatest return the offset of the next message produced in given partition
 func (b *Broker) OffsetLatest(topic string, partition int32) (offset int64, err error) {
 	return b.offset(topic, partition, -1)
 }
@@ -480,7 +495,7 @@ type ProducerConf struct {
 	Log Logger
 }
 
-// NewProducerConf return default producer configuration
+// NewProducerConf returns a default producer configuration.
 func NewProducerConf() ProducerConf {
 	return ProducerConf{
 		RequestTimeout: time.Second * 5,
@@ -491,13 +506,13 @@ func NewProducerConf() ProducerConf {
 	}
 }
 
-// producer is link to client with extra configuration.
+// producer is the link to the client with extra configuration.
 type producer struct {
 	conf   ProducerConf
 	broker *Broker
 }
 
-// Producer returns new producer instance, bound to broker.
+// Producer returns new producer instance, bound to the broker.
 func (b *Broker) Producer(conf ProducerConf) Producer {
 	if conf.Log == nil {
 		conf.Log = b.conf.Log
@@ -508,12 +523,13 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 	}
 }
 
-// Produce writes messages to given destination. Write within single Produce
-// call are atomic, meaning either all or none of them are written to kafka.
-// Produce can retry sending request on common errors. This behaviour can be
-// configured with RetryLimit and RetryWait producer configuration attributes.
+// Produce writes messages to the given destination. Writes within the call are
+// atomic, meaning either all or none of them are written to kafka.  Produce
+// has a configurable amount of retries which may be attempted when common
+// errors are encountered.  This behaviour can be configured with the
+// RetryLimit and RetryWait attributes.
 //
-// Upon successful produce call, messages Offset field is updated.
+// Upon a successful call, the message's Offset field is updated.
 func (p *producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 
 retryLoop:
@@ -623,41 +639,54 @@ type ConsumerConf struct {
 	// To control fetch function timeout use RetryLimit and RetryWait.
 	RequestTimeout time.Duration
 
-	// RetryLimit limits fetching messages given amount of times before
-	// returning ErrNoData error. By default set to -1, which turns this limit
-	// off.
+	// RetryLimit limits fetching messages a given amount of times before
+	// returning ErrNoData error.
+	//
+	// Default is -1, which turns this limit off.
 	RetryLimit int
 
-	// RetryWait controls duration of wait between fetch request calls, when
-	// no data was returned. Defaults to 50ms.
+	// RetryWait controls the duration of wait between fetch request calls,
+	// when no data was returned.
+	//
+	// Default is 50ms.
 	RetryWait time.Duration
 
-	// RetryErrLimit limits messages fetch retry upon failure. By default 10.
+	// RetryErrLimit limits the number of retry attempts when an error is
+	// encountered.
+	//
+	// Default is 10.
 	RetryErrLimit int
 
-	// RetryErrWait controls wait duration between retries after failed fetch
-	// request. By default 500ms.
+	// RetryErrWait controls the wait duration between retries after failed
+	// fetch request.
+	//
+	// Default is 500ms.
 	RetryErrWait time.Duration
 
-	// MinFetchSize is minimum size of messages to fetch in bytes. By default
-	// set to 1 to fetch any message available.
+	// MinFetchSize is the minimum size of messages to fetch in bytes.
+	//
+	// Default is 1 to fetch any message available.
 	MinFetchSize int32
 
-	// MaxFetchSize is maximum size of data that can be send by kafka node to
-	// consumer. By default set to 2000000 bytes.
+	// MaxFetchSize is the maximum size of data which can be sent by kafka node
+	// to consumer.
+	//
+	// Default is 2000000 bytes.
 	MaxFetchSize int32
 
 	// Consumer cursor starting point. Set to StartOffsetNewest to receive only
 	// newly created messages or StartOffsetOldest to read everything. Assign
-	// any offset value to manually set cursor -- consuming starts with message
-	// which offset is equal to given value. Defaults to StartOffsetOldest
+	// any offset value to manually set cursor -- consuming starts with the
+	// message whose offset is equal to given value.
+	//
+	// Default is StartOffsetOldest.
 	StartOffset int64
 
 	// Logger used by consumer. By default, reuse logger assigned to broker.
 	Log Logger
 }
 
-// NewConsumerConf return default consumer configuration.
+// NewConsumerConf returns the default consumer configuration.
 func NewConsumerConf(topic string, partition int32) ConsumerConf {
 	return ConsumerConf{
 		Topic:          topic,
@@ -674,8 +703,8 @@ func NewConsumerConf(topic string, partition int32) ConsumerConf {
 	}
 }
 
-// Consumer is representing single partition reading buffer. Consumer is also
-// providing limited failures handling and message filtering.
+// Consumer represents a single partition reading buffer. Consumer is also
+// providing limited failure handling and message filtering.
 type consumer struct {
 	broker *Broker
 	conn   *connection
@@ -686,7 +715,7 @@ type consumer struct {
 	msgbuf []*proto.Message
 }
 
-// Consumer creates new consumer instance, bound to broker.
+// Consumer creates a new consumer instance, bound to the broker.
 func (b *Broker) Consumer(conf ConsumerConf) (Consumer, error) {
 	conn, err := b.leaderConnection(conf.Topic, conf.Partition)
 	if err != nil {
