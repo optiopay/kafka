@@ -17,7 +17,7 @@ var (
 	ErrReplicaNotAvailable     = &KafkaError{9, "replica not available"}
 	ErrMessageSizeTooLarge     = &KafkaError{10, "message size too large"}
 	ErrScaleControllerEpoch    = &KafkaError{11, "scale controller epoch"}
-	ErrOffsetMetadataTooLarge  = &KafkaError{12, "ofset metadata too large"}
+	ErrOffsetMetadataTooLarge  = &KafkaError{12, "offset metadata too large"}
 	ErrOffsetLoadInProgress    = &KafkaError{14, "offsets load in progress"}
 	ErrNoCoordinator           = &KafkaError{15, "consumer coordinator not available"}
 	ErrNotCoordinator          = &KafkaError{16, "not coordinator for consumer"}
