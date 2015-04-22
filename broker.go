@@ -677,7 +677,7 @@ type ConsumerConf struct {
 	// Consumer cursor starting point. Set to StartOffsetNewest to receive only
 	// newly created messages or StartOffsetOldest to read everything. Assign
 	// any offset value to manually set cursor -- consuming starts with the
-	// message whose offset is equal to given value.
+	// message whose offset is equal to given value (including first message).
 	//
 	// Default is StartOffsetOldest.
 	StartOffset int64
@@ -709,7 +709,7 @@ type consumer struct {
 	broker *Broker
 	conn   *connection
 	conf   ConsumerConf
-	offset int64
+	offset int64 // offset of next NOT consumed message
 
 	mu     sync.Mutex
 	msgbuf []*proto.Message
@@ -725,31 +725,20 @@ func (b *Broker) Consumer(conf ConsumerConf) (Consumer, error) {
 		conf.Log = b.conf.Log
 	}
 	offset := conf.StartOffset
-	if conf.StartOffset < 0 {
-		switch conf.StartOffset {
+	if offset < 0 {
+		switch offset {
 		case StartOffsetNewest:
 			off, err := b.OffsetLatest(conf.Topic, conf.Partition)
 			if err != nil {
 				return nil, err
 			}
-			// latest offset that next produced message will get, but consumer
-			// offset should be set to the last returned message offset
-			offset = off - 1
+			offset = off
 		case StartOffsetOldest:
 			off, err := b.OffsetEarliest(conf.Topic, conf.Partition)
 			if err != nil {
 				return nil, err
 			}
 			offset = off
-			// this is stange kafka thing: asking about message with offset one
-			// higher than the last existing message is fine, except when there
-			// are no messages in the log -- in such case you should always ask
-			// about offset 0.
-			// Set offset -1 to make fetch request 0 offset message when there
-			// are none.
-			if off == 0 {
-				offset = -1
-			}
 		default:
 			return nil, fmt.Errorf("invalid start offset: %d", conf.StartOffset)
 		}
@@ -815,7 +804,7 @@ func (c *consumer) Consume() (*proto.Message, error) {
 
 	msg := c.msgbuf[0]
 	c.msgbuf = c.msgbuf[1:]
-	c.offset = msg.Offset
+	c.offset = msg.Offset + 1
 	return msg, nil
 }
 
@@ -833,7 +822,7 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 				Partitions: []proto.FetchReqPartition{
 					proto.FetchReqPartition{
 						ID:          c.conf.Partition,
-						FetchOffset: c.offset + 1,
+						FetchOffset: c.offset,
 						MaxBytes:    c.conf.MaxFetchSize,
 					},
 				},

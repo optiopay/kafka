@@ -823,6 +823,55 @@ func TestProducerBrokenPipe(t *testing.T) {
 	}
 }
 
+func TestFetchOffset(t *testing.T) {
+	const offset = 94
+
+	srv := NewServer()
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+		req := request.(*proto.FetchReq)
+		off := req.Topics[0].Partitions[0].FetchOffset
+		if off != offset {
+			panic(fmt.Sprintf("expected fetch offset to be 3, got %d", off))
+		}
+		return &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				proto.FetchRespTopic{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						proto.FetchRespPartition{
+							ID: 0,
+							Messages: []*proto.Message{
+								&proto.Message{Offset: offset},
+							},
+						},
+					},
+				},
+			},
+		}
+	})
+	srv.Start()
+
+	broker, err := Dial([]string{srv.Address()}, NewBrokerConf("test-fetch-offset"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+	conf := NewConsumerConf("test", 0)
+	conf.StartOffset = offset
+	consumer, err := broker.Consumer(conf)
+	if err != nil {
+		t.Fatalf("cannot create consumer: %s", err)
+	}
+	msg, err := consumer.Consume()
+	if err != nil {
+		t.Fatalf("cannot consume message: %s", err)
+	}
+	if msg.Offset != offset {
+		t.Fatalf("expected %d offset, got %d", offset, msg.Offset)
+	}
+}
+
 func TestConsumerBrokenPipe(t *testing.T) {
 	srv1 := NewServer()
 	srv1.Start()
@@ -872,7 +921,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 						proto.FetchRespPartition{
 							ID: 0,
 							Messages: []*proto.Message{
-								&proto.Message{},
+								&proto.Message{Offset: 0},
 							},
 						},
 					},
@@ -923,7 +972,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 						proto.FetchRespPartition{
 							ID: 0,
 							Messages: []*proto.Message{
-								&proto.Message{},
+								&proto.Message{Offset: 1},
 							},
 						},
 					},
