@@ -3,10 +3,11 @@ package kafkatest
 import (
 	"errors"
 	"fmt"
-	"github.com/optiopay/kafka"
-	"github.com/optiopay/kafka/proto"
 	"sync"
 	"time"
+
+	"github.com/optiopay/kafka"
+	"github.com/optiopay/kafka/proto"
 )
 
 var (
