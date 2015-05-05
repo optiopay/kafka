@@ -131,7 +131,9 @@ func (s *Server) Run(addr string) error {
 		log.Printf("cannot listen on address %q: %s", addr, err)
 		return fmt.Errorf("cannot listen: %s", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 	s.ln = ln
 
 	if host, port, err := net.SplitHostPort(ln.Addr().String()); err != nil {
@@ -205,7 +207,9 @@ func (s *Server) MustSpawn() {
 }
 
 func (s *Server) handleClient(nodeID int32, conn net.Conn) {
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	for {
 		kind, b, err := proto.ReadReq(conn)
