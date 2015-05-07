@@ -133,3 +133,19 @@ func TestClosingMultiplexerWithBlockingWorkers(t *testing.T) {
 		t.Fatalf("expected %s, got %s", ErrMxClosed, err)
 	}
 }
+
+func TestErrNoDataCloseMultiplexer(t *testing.T) {
+	fetchers := []Consumer{
+		&fetcher{errors: []error{ErrNoData}},
+		&fetcher{errors: []error{ErrNoData}, messages: []*proto.Message{&proto.Message{}}},
+		&fetcher{errors: []error{ErrNoData}},
+	}
+	mx := Merge(fetchers...)
+
+	if _, err := mx.Consume(); err != nil {
+		t.Fatalf("first consume should succeed, got %s", err)
+	}
+	if _, err := mx.Consume(); err != ErrMxClosed {
+		t.Fatalf("expected %s, got %s", ErrMxClosed, err)
+	}
+}

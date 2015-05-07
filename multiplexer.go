@@ -13,8 +13,11 @@ var ErrMxClosed = errors.New("closed")
 // Mx is multiplexer combining into single stream number of consumers.
 //
 // It is responsibility of the user of the multiplexer and the consumer
-// implementation to handle errors. Multiplexer will not do anything except
-// passing them through.
+// implementation to handle errors.
+// ErrNoData returned by consumer is not passed through by the multiplexer,
+// instead consumer that returned ErrNoData is removed from merged set. When
+// all consumers are removed (set is empty), Mx is automatically closed and any
+// further Consume call will result in ErrMxClosed error.
 //
 // It is important to remember that because fetch from every consumer is done
 // by separate worker, most of the time there is one message consumed by each
@@ -27,24 +30,39 @@ type Mx struct {
 	msgc chan *proto.Message
 	stop chan struct{}
 
-	mu     sync.Mutex
-	closed bool
+	mu      sync.Mutex
+	closed  bool
+	workers int
 }
 
 // Merge is merging consume result of any number of consumers into single stream
 // and expose them through returned multiplexer.
 func Merge(consumers ...Consumer) *Mx {
 	p := &Mx{
-		errc: make(chan error),
-		msgc: make(chan *proto.Message),
-		stop: make(chan struct{}),
+		errc:    make(chan error),
+		msgc:    make(chan *proto.Message),
+		stop:    make(chan struct{}),
+		workers: len(consumers),
 	}
 
 	for _, consumer := range consumers {
 		go func(c Consumer) {
+			defer func() {
+				p.mu.Lock()
+				p.workers -= 1
+				if p.workers == 0 && !p.closed {
+					close(p.stop)
+					p.closed = true
+				}
+				p.mu.Unlock()
+			}()
+
 			for {
 				msg, err := c.Consume()
 				if err != nil {
+					if err == ErrNoData {
+						return
+					}
 					select {
 					case p.errc <- err:
 					case <-p.stop:
