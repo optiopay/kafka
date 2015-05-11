@@ -25,7 +25,7 @@ const (
 )
 
 type Server struct {
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	brokers []proto.MetadataRespBroker
 	topics  map[string]map[int32][]*proto.Message
 	ln      net.Listener
@@ -42,8 +42,8 @@ func NewServer() *Server {
 
 // Addr return server instance address or empty string if not running.
 func (s *Server) Addr() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.ln != nil {
 		return s.ln.Addr().String()
 	}
@@ -118,16 +118,16 @@ func (s *Server) AddMessages(topic string, partition int32, messages ...*proto.M
 func (s *Server) Run(addr string) error {
 	const nodeID = 100
 
-	s.mu.Lock()
+	s.mu.RLock()
 	if s.ln != nil {
-		s.mu.Unlock()
+		s.mu.RUnlock()
 		log.Printf("server already running: %s", s.ln.Addr())
 		return fmt.Errorf("server already running: %s", s.ln.Addr())
 	}
 
 	ln, err := net.Listen("tcp4", addr)
 	if err != nil {
-		s.mu.Unlock()
+		s.mu.RUnlock()
 		log.Printf("cannot listen on address %q: %s", addr, err)
 		return fmt.Errorf("cannot listen: %s", err)
 	}
@@ -137,13 +137,13 @@ func (s *Server) Run(addr string) error {
 	s.ln = ln
 
 	if host, port, err := net.SplitHostPort(ln.Addr().String()); err != nil {
-		s.mu.Unlock()
+		s.mu.RUnlock()
 		log.Printf("cannot extract host/port from %q: %s", ln.Addr(), err)
 		return fmt.Errorf("cannot extract host/port from %q: %s", ln.Addr(), err)
 	} else {
 		prt, err := strconv.Atoi(port)
 		if err != nil {
-			s.mu.Unlock()
+			s.mu.RUnlock()
 			log.Printf("invalid port %q: %s", port, err)
 			return fmt.Errorf("invalid port %q: %s", port, err)
 		}
@@ -153,7 +153,7 @@ func (s *Server) Run(addr string) error {
 			Port:   int32(prt),
 		})
 	}
-	s.mu.Unlock()
+	s.mu.RUnlock()
 
 	for {
 		conn, err := ln.Accept()
@@ -324,8 +324,8 @@ func (s *Server) handleProduceRequest(nodeID int32, conn net.Conn, req *proto.Pr
 }
 
 func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.FetchReq) response {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	resp := &proto.FetchResp{
 		CorrelationID: req.CorrelationID,
@@ -357,8 +357,8 @@ func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.Fetc
 }
 
 func (s *Server) handleOffsetRequest(nodeID int32, conn net.Conn, req *proto.OffsetReq) response {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	resp := &proto.OffsetResp{
 		CorrelationID: req.CorrelationID,
@@ -386,8 +386,8 @@ func (s *Server) handleOffsetRequest(nodeID int32, conn net.Conn, req *proto.Off
 }
 
 func (s *Server) handleMetadataRequest(nodeID int32, conn net.Conn, req *proto.MetadataReq) response {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	resp := &proto.MetadataResp{
 		CorrelationID: req.CorrelationID,
