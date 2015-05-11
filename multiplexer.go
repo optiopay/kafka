@@ -82,6 +82,14 @@ func Merge(consumers ...Consumer) *Mx {
 	return p
 }
 
+// Workers return number of active consumer workers that are pushing messages
+// to multiplexer conumer queue.
+func (p *Mx) Workers() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.workers
+}
+
 // Close is closing multiplexer and stopping all underlying workers.
 //
 // Closing multiplexer will stop all workers as soon as possible, but any
