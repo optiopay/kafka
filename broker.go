@@ -329,7 +329,7 @@ func (b *Broker) coordinatorConnection(consumerGroup string) (conn *connection, 
 			}
 			if resp.Err != nil {
 				b.mu.Unlock()
-				return nil, err
+				return nil, resp.Err
 			}
 
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
@@ -370,7 +370,7 @@ func (b *Broker) coordinatorConnection(consumerGroup string) (conn *connection, 
 			}
 			if resp.Err != nil {
 				b.mu.Unlock()
-				return nil, err
+				return nil, resp.Err
 			}
 
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
