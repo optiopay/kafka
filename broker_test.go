@@ -1098,6 +1098,36 @@ func TestOffsetCoordinator(t *testing.T) {
 	}
 }
 
+func TestOffsetCoordinatorNoCoordinatorError(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(ConsumerMetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.ConsumerMetadataReq)
+		return &proto.ConsumerMetadataResp{
+			CorrelationID:   req.CorrelationID,
+			Err:             proto.ErrNoCoordinator,
+			CoordinatorID:   0,
+			CoordinatorHost: "",
+			CoordinatorPort: 0,
+		}
+	})
+
+	conf := NewBrokerConf("tester")
+	conf.DialTimeout = time.Millisecond * 200
+	broker, err := Dial([]string{srv.Address()}, conf)
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	coordConf := NewOffsetCoordinatorConf("test-group")
+	if _, err := broker.OffsetCoordinator(coordConf); err != proto.ErrNoCoordinator {
+		t.Fatalf("expected %q error, got %v", proto.ErrNoCoordinator, err)
+	}
+}
+
 // this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
 func BenchmarkConsumer(b *testing.B) {
