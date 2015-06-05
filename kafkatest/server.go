@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/optiopay/kafka/proto"
 )
@@ -29,13 +30,18 @@ type Server struct {
 	brokers []proto.MetadataRespBroker
 	topics  map[string]map[int32][]*proto.Message
 	ln      net.Listener
+
+	// For simulating error conditions
+	pendingErrors []error
+	responseDelay time.Duration
 }
 
 // NewServer return new mock server instance.
 func NewServer() *Server {
 	s := &Server{
-		brokers: make([]proto.MetadataRespBroker, 0),
-		topics:  make(map[string]map[int32][]*proto.Message),
+		brokers:       make([]proto.MetadataRespBroker, 0),
+		topics:        make(map[string]map[int32][]*proto.Message),
+		pendingErrors: make([]error, 0),
 	}
 	return s
 }
@@ -221,6 +227,11 @@ func (s *Server) handleClient(nodeID int32, conn net.Conn) {
 		}
 		var resp response
 
+		// If simulating a latent server, do it now
+		if s.responseDelay > 0 {
+			time.Sleep(s.responseDelay)
+		}
+
 		switch kind {
 		case produceReq:
 			req, err := proto.ReadProduceReq(bytes.NewBuffer(b))
@@ -283,6 +294,27 @@ type response interface {
 	Bytes() ([]byte, error)
 }
 
+func (s *Server) SetResponseDelay(delay time.Duration) {
+	s.responseDelay = delay
+}
+
+func (s *Server) AddErrorResponse(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.pendingErrors = append(s.pendingErrors, err)
+}
+
+func (s *Server) getPendingError() error {
+	// NOTE: To be called only in the context of someone holding s.mu's lock.
+	if len(s.pendingErrors) == 0 {
+		return nil
+	}
+	err := s.pendingErrors[0]
+	s.pendingErrors = s.pendingErrors[1:]
+	return err
+}
+
 func (s *Server) handleProduceRequest(nodeID int32, conn net.Conn, req *proto.ProduceReq) response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -318,6 +350,7 @@ func (s *Server) handleProduceRequest(nodeID int32, conn net.Conn, req *proto.Pr
 
 			respParts[pi].ID = part.ID
 			respParts[pi].Offset = int64(len(t[part.ID])) - 1
+			respParts[pi].Err = s.getPendingError()
 		}
 	}
 	return resp
