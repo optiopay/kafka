@@ -86,3 +86,27 @@ func ExampleBroker_Consumer() {
 	// Value: "first"
 	// Error: expected error is expected
 }
+
+func ExampleServer() {
+	// symulate server latency for all fetch requests
+	delayFetch := func(nodeID int32, reqKind int16, content []byte) Response {
+		if reqKind != proto.FetchReqKind {
+			return nil
+		}
+		time.Sleep(time.Millisecond * 500)
+		return nil
+	}
+
+	server := NewServer(delayFetch)
+	server.MustSpawn()
+	defer func() {
+		_ = server.Close()
+	}()
+	fmt.Printf("running server: %s", server.Addr())
+
+	server.AddMessages("my-topic", 0,
+		&proto.Message{Value: []byte("first")},
+		&proto.Message{Value: []byte("second")})
+
+	// connect to server using broker and fetch/write messages
+}

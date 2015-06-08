@@ -18,13 +18,13 @@ https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#
 */
 
 const (
-	produceReq          = 0
-	fetchReq            = 1
-	offsetReq           = 2
-	metadataReq         = 3
-	offsetCommitReq     = 8
-	offsetFetchReq      = 9
-	consumerMetadataReq = 10
+	ProduceReqKind          = 0
+	FetchReqKind            = 1
+	OffsetReqKind           = 2
+	MetadataReqKind         = 3
+	OffsetCommitReqKind     = 8
+	OffsetFetchReqKind      = 9
+	ConsumerMetadataReqKind = 10
 
 	compressionNone   = 0
 	compressionGZIP   = 1
@@ -239,7 +239,7 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(metadataReq))
+	enc.Encode(int16(MetadataReqKind))
 	enc.Encode(int16(0))
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -438,7 +438,7 @@ func (r *FetchReq) Bytes() ([]byte, error) {
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(fetchReq))
+	enc.Encode(int16(FetchReqKind))
 	enc.Encode(int16(0))
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -597,7 +597,7 @@ func (r *ConsumerMetadataReq) Bytes() ([]byte, error) {
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(consumerMetadataReq))
+	enc.Encode(int16(ConsumerMetadataReqKind))
 	enc.Encode(int16(0))
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -729,7 +729,7 @@ func (r *OffsetCommitReq) Bytes() ([]byte, error) {
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(offsetCommitReq))
+	enc.Encode(int16(OffsetCommitReqKind))
 	enc.Encode(int16(0))
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -883,7 +883,7 @@ func (r *OffsetFetchReq) Bytes() ([]byte, error) {
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(offsetFetchReq))
+	enc.Encode(int16(OffsetFetchReqKind))
 	enc.Encode(int16(0))
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -1052,7 +1052,7 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(produceReq))
+	enc.Encode(int16(ProduceReqKind))
 	enc.Encode(int16(0))
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -1216,7 +1216,7 @@ func (r *OffsetReq) Bytes() ([]byte, error) {
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(offsetReq))
+	enc.Encode(int16(OffsetReqKind))
 	enc.Encode(int16(0))
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)

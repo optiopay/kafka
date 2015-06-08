@@ -14,28 +14,35 @@ import (
 	"github.com/optiopay/kafka/proto"
 )
 
-const (
-	produceReq          = 0
-	fetchReq            = 1
-	offsetReq           = 2
-	metadataReq         = 3
-	offsetCommitReq     = 8
-	offsetFetchReq      = 9
-	consumerMetadataReq = 10
-)
-
 type Server struct {
-	mu      sync.RWMutex
-	brokers []proto.MetadataRespBroker
-	topics  map[string]map[int32][]*proto.Message
-	ln      net.Listener
+	mu          sync.RWMutex
+	brokers     []proto.MetadataRespBroker
+	topics      map[string]map[int32][]*proto.Message
+	ln          net.Listener
+	middlewares []Middleware
 }
 
-// NewServer return new mock server instance.
-func NewServer() *Server {
+// Middleware is function that is called for every incomming kafka message,
+// before running default processing handler. Middleware function can return
+// nil or kafka response message.
+type Middleware func(nodeID int32, requestKind int16, content []byte) Response
+
+// Response is any kafka response as defined in kafka/proto package
+type Response interface {
+	Bytes() ([]byte, error)
+}
+
+// NewServer return new mock server instance. Any number of middlewares can be
+// passed to customize request handling. For every incomming request, all
+// middlewares are called one after another in order they were passed. If any
+// middleware return non nil response message, response is instasntly written
+// to the client and no further code execution for the request is made -- no
+// other middleware is called nor the default handler is executed.
+func NewServer(middlewares ...Middleware) *Server {
 	s := &Server{
-		brokers: make([]proto.MetadataRespBroker, 0),
-		topics:  make(map[string]map[int32][]*proto.Message),
+		brokers:     make([]proto.MetadataRespBroker, 0),
+		topics:      make(map[string]map[int32][]*proto.Message),
+		middlewares: middlewares,
 	}
 	return s
 }
@@ -219,49 +226,59 @@ func (s *Server) handleClient(nodeID int32, conn net.Conn) {
 			}
 			return
 		}
+
 		var resp response
 
-		switch kind {
-		case produceReq:
-			req, err := proto.ReadProduceReq(bytes.NewBuffer(b))
-			if err != nil {
-				log.Printf("cannot parse produce request: %s\n%s", err, b)
+		for _, middleware := range s.middlewares {
+			resp = middleware(nodeID, kind, b)
+			if resp != nil {
+				break
+			}
+		}
+
+		if resp == nil {
+			switch kind {
+			case proto.ProduceReqKind:
+				req, err := proto.ReadProduceReq(bytes.NewBuffer(b))
+				if err != nil {
+					log.Printf("cannot parse produce request: %s\n%s", err, b)
+					return
+				}
+				resp = s.handleProduceRequest(nodeID, conn, req)
+			case proto.FetchReqKind:
+				req, err := proto.ReadFetchReq(bytes.NewBuffer(b))
+				if err != nil {
+					log.Printf("cannot parse fetch request: %s\n%s", err, b)
+					return
+				}
+				resp = s.handleFetchRequest(nodeID, conn, req)
+			case proto.OffsetReqKind:
+				req, err := proto.ReadOffsetReq(bytes.NewBuffer(b))
+				if err != nil {
+					log.Printf("cannot parse offset request: %s\n%s", err, b)
+					return
+				}
+				resp = s.handleOffsetRequest(nodeID, conn, req)
+			case proto.MetadataReqKind:
+				req, err := proto.ReadMetadataReq(bytes.NewBuffer(b))
+				if err != nil {
+					log.Printf("cannot parse metadata request: %s\n%s", err, b)
+					return
+				}
+				resp = s.handleMetadataRequest(nodeID, conn, req)
+			case proto.OffsetCommitReqKind:
+				log.Printf("not implemented: %d\n%s", kind, b)
+				return
+			case proto.OffsetFetchReqKind:
+				log.Printf("not implemented: %d\n%s", kind, b)
+				return
+			case proto.ConsumerMetadataReqKind:
+				log.Printf("not implemented: %d\n%s", kind, b)
+				return
+			default:
+				log.Printf("unknown request: %d\n%s", kind, b)
 				return
 			}
-			resp = s.handleProduceRequest(nodeID, conn, req)
-		case fetchReq:
-			req, err := proto.ReadFetchReq(bytes.NewBuffer(b))
-			if err != nil {
-				log.Printf("cannot parse fetch request: %s\n%s", err, b)
-				return
-			}
-			resp = s.handleFetchRequest(nodeID, conn, req)
-		case offsetReq:
-			req, err := proto.ReadOffsetReq(bytes.NewBuffer(b))
-			if err != nil {
-				log.Printf("cannot parse offset request: %s\n%s", err, b)
-				return
-			}
-			resp = s.handleOffsetRequest(nodeID, conn, req)
-		case metadataReq:
-			req, err := proto.ReadMetadataReq(bytes.NewBuffer(b))
-			if err != nil {
-				log.Printf("cannot parse metadata request: %s\n%s", err, b)
-				return
-			}
-			resp = s.handleMetadataRequest(nodeID, conn, req)
-		case offsetCommitReq:
-			log.Printf("not implemented: %d\n%s", kind, b)
-			return
-		case offsetFetchReq:
-			log.Printf("not implemented: %d\n%s", kind, b)
-			return
-		case consumerMetadataReq:
-			log.Printf("not implemented: %d\n%s", kind, b)
-			return
-		default:
-			log.Printf("unknown request: %d\n%s", kind, b)
-			return
 		}
 
 		if resp == nil {
