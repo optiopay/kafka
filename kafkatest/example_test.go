@@ -99,7 +99,9 @@ func ExampleServer() {
 
 	server := NewServer(delayFetch)
 	server.MustSpawn()
-	defer server.Close()
+	defer func() {
+		_ = server.Close()
+	}()
 	fmt.Printf("running server: %s", server.Addr())
 
 	server.AddMessages("my-topic", 0,
