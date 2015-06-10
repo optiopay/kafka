@@ -57,7 +57,15 @@ func (s *Server) Addr() string {
 	return ""
 }
 
-// Close shout down server if running. It is safe to call it more than once.
+// Reset will clear out local messages and topics.
+func (s *Server) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.topics = make(map[string]map[int32][]*proto.Message)
+}
+
+// Close shut down server if running. It is safe to call it more than once.
 func (s *Server) Close() (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
