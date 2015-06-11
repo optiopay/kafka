@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"sync"
 	"syscall"
 	"time"
@@ -58,8 +59,12 @@ type Consumer interface {
 // post-commit offset and any error encountered.  The offset of each message is
 // also updated accordingly.
 type Producer interface {
-	Produce(string, int32, ...*proto.Message) (int64, error)
+	Produce(string, interface{}, ...*proto.Message) (int64, error)
 }
+
+// Partitioner is a type of method that selects a partition. Is passed the topic
+// and the messages that are about to be produced.
+type Partitioner func(string, ...*proto.Message) int
 
 // OffsetCoordinator is the interface which wraps the Commit and Offset methods.
 type OffsetCoordinator interface {
@@ -74,9 +79,10 @@ type Logger interface {
 }
 
 type clusterMetadata struct {
-	created   time.Time
-	nodes     map[int32]string // node ID to address
-	endpoints map[string]int32 // topic:partition to leader node ID
+	created        time.Time
+	nodes          map[int32]string // node ID to address
+	endpoints      map[string]int32 // topic:partition to leader node ID
+	partitionCount map[string]int32 // topic to partition count
 }
 
 type BrokerConf struct {
@@ -127,6 +133,7 @@ type Broker struct {
 	mu       sync.Mutex
 	metadata clusterMetadata
 	conns    map[int32]*connection
+	rand     *rand.Rand
 }
 
 // Dial connects to any node from a given list of kafka addresses and after
@@ -137,6 +144,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 	broker := &Broker{
 		conf:  conf,
 		conns: make(map[int32]*connection),
+		rand:  rand.New(rand.NewSource(time.Now().UTC().UnixNano())),
 	}
 
 	for _, addr := range nodeAddresses {
@@ -248,15 +256,22 @@ func (b *Broker) rewriteMetadata(resp *proto.MetadataResp) {
 		b.conf.Log.Printf("rewriting metadata created %s ago", time.Now().Sub(b.metadata.created))
 	}
 	b.metadata = clusterMetadata{
-		created:   time.Now(),
-		nodes:     make(map[int32]string),
-		endpoints: make(map[string]int32),
+		created:        time.Now(),
+		nodes:          make(map[int32]string),
+		endpoints:      make(map[string]int32),
+		partitionCount: make(map[string]int32),
 	}
 	for _, node := range resp.Brokers {
 		b.metadata.nodes[node.NodeID] = fmt.Sprintf("%s:%d", node.Host, node.Port)
 	}
 	for _, topic := range resp.Topics {
+		b.metadata.partitionCount[topic.Name] = -1
 		for _, part := range topic.Partitions {
+			// Is there a better way to get the 'total number' of partitions in a topic? Also,
+			// are gaps possible? Do we need to track every partition?
+			if part.ID > b.metadata.partitionCount[topic.Name] {
+				b.metadata.partitionCount[topic.Name] = part.ID
+			}
 			b.metadata.endpoints[fmt.Sprintf("%s:%d", topic.Name, part.ID)] = part.Leader
 		}
 	}
@@ -523,6 +538,15 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 	}
 }
 
+// RandomPartition returns a random partition for a given topic..
+func (b *Broker) RandomPartition(topic string, messages ...*proto.Message) int {
+	if partitionCount, _ := b.metadata.partitionCount[topic]; partitionCount > 0 {
+		return b.rand.Intn(int(partitionCount))
+	}
+	b.conf.Log.Printf("failed to select random partition for topic %s", topic)
+	return 0
+}
+
 // Produce writes messages to the given destination. Writes within the call are
 // atomic, meaning either all or none of them are written to kafka.  Produce
 // has a configurable amount of retries which may be attempted when common
@@ -530,11 +554,22 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 // RetryLimit and RetryWait attributes.
 //
 // Upon a successful call, the message's Offset field is updated.
-func (p *producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
+func (p *producer) Produce(topic string, partitionOrFunc interface{}, messages ...*proto.Message) (offset int64, err error) {
+	// User can give either 'int' or 'Partitioner' interface.
+	partition, ok := partitionOrFunc.(int)
+	if !ok {
+		// Wish Go would let me use the Partitioner definition for this type assertion...
+		partitionFunc, ok := partitionOrFunc.(func (string, ...*proto.Message) int)
+		if ok {
+			partition = partitionFunc(topic, messages...)
+		} else {
+			return 0, errors.New(fmt.Sprintf("invalid partitionOrFunc type: %T", partitionOrFunc))
+		}
+	}
 
 retryLoop:
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
-		offset, err = p.produce(topic, partition, messages...)
+		offset, err = p.produce(topic, int32(partition), messages...)
 		switch err {
 		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable, proto.ErrUnknownTopicOrPartition:
 			p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)
@@ -616,7 +651,11 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 			}
 			found = true
 			offset = part.Offset
-			err = part.Err
+
+			// Don't overwrite err if it was already set
+			if err == nil {
+				err = part.Err
+			}
 		}
 	}
 

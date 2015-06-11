@@ -77,7 +77,9 @@ func TestProducer(t *testing.T) {
 		&proto.Message{Value: []byte("first")},
 		&proto.Message{Value: []byte("second")},
 	}
-	_, err = producer.Produce("does-not-exist", 42142, messages...)
+	_, err = producer.Produce("does-not-exist",
+		func(string, ...*proto.Message) int { return 42142 },
+		messages...)
 	if err != proto.ErrUnknownTopicOrPartition {
 		t.Fatalf("expected '%s', got %s", proto.ErrUnknownTopicOrPartition, err)
 	}
@@ -119,7 +121,7 @@ func TestProducer(t *testing.T) {
 		}
 	})
 
-	offset, err := producer.Produce("test", 0, messages...)
+	offset, err := producer.Produce("test", broker.RandomPartition, messages...)
 	if handleErr != nil {
 		t.Fatalf("handling error: %s", handleErr)
 	}
