@@ -11,13 +11,13 @@ import (
 	"github.com/optiopay/kafka/proto"
 )
 
-// DistributedProducer is the interface similar to Producer, but never require
+// DistributingProducer is the interface similar to Producer, but never require
 // to explicitly specify partition.
 //
 // Distribute writes messages to the given topic, automatically choosing
 // partition, returning the post-commit offset and any error encountered. The
 // offset of each message is also updated accordingly.
-type DistributedProducer interface {
+type DistributingProducer interface {
 	Distribute(topic string, messages ...*proto.Message) (offset int64, err error)
 }
 
@@ -27,10 +27,10 @@ type randomProducer struct {
 	partitions int32
 }
 
-// NewRandomProducer wraps given producer and return DistributedProducer that
+// NewRandomProducer wraps given producer and return DistributingProducer that
 // publish messages to kafka, randomly picking partition number from range
 // [0, numPartitions)
-func NewRandomProducer(p Producer, numPartitions int32) DistributedProducer {
+func NewRandomProducer(p Producer, numPartitions int32) DistributingProducer {
 	return &randomProducer{
 		rand:       rand.New(rand.NewSource(time.Now().UnixNano())),
 		producer:   p,
@@ -53,10 +53,10 @@ type roundRobinProducer struct {
 	next       int32
 }
 
-// NewRoundRobinProducer wraps given producer and return DistributedProducer
+// NewRoundRobinProducer wraps given producer and return DistributingProducer
 // that publish messages to kafka, choosing destination partition from cycle
 // build from [0, numPartitions) range.
-func NewRoundRobinProducer(p Producer, numPartitions int32) DistributedProducer {
+func NewRoundRobinProducer(p Producer, numPartitions int32) DistributingProducer {
 	return &roundRobinProducer{
 		producer:   p,
 		partitions: numPartitions,
@@ -84,10 +84,10 @@ type hashProducer struct {
 	partitions int32
 }
 
-// NewHashProducer wraps given producer and return DistributedProducer that
+// NewHashProducer wraps given producer and return DistributingProducer that
 // publish messages to kafka, computing partition number from message key hash,
 // using fnv hash and [0, numPartitions) range.
-func NewHashProducer(p Producer, numPartitions int32) DistributedProducer {
+func NewHashProducer(p Producer, numPartitions int32) DistributingProducer {
 	return &hashProducer{
 		producer:   p,
 		partitions: numPartitions,
