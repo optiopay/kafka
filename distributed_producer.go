@@ -14,11 +14,11 @@ import (
 // PartitionedProducer is the interface similar to Producer, but never require
 // to explicitly specify partition.
 //
-// Produce writes messages to the given topic, automatically choosing
+// Distribute writes messages to the given topic, automatically choosing
 // partition, returning the post-commit offset and any error encountered. The
 // offset of each message is also updated accordingly.
 type PartitionedProducer interface {
-	Produce(topic string, messages ...*proto.Message) (offset int64, err error)
+	Distribute(topic string, messages ...*proto.Message) (offset int64, err error)
 }
 
 type randomProducer struct {
@@ -30,7 +30,7 @@ type randomProducer struct {
 // NewRandomProducer wraps given producer and return PartitionedProducer that
 // publish messages to kafka, randomly picking partition number from range
 // [0, numPartitions)
-func NewRandomPartProducer(p Producer, numPartitions int32) PartitionedProducer {
+func NewRandomProducer(p Producer, numPartitions int32) PartitionedProducer {
 	return &randomProducer{
 		rand:       rand.New(rand.NewSource(time.Now().UnixNano())),
 		producer:   p,
@@ -38,10 +38,10 @@ func NewRandomPartProducer(p Producer, numPartitions int32) PartitionedProducer 
 	}
 }
 
-// Produce write messages to given kafka topic, randomly destination choosing
+// Distribute write messages to given kafka topic, randomly destination choosing
 // partition. All messages written within single Produce call are atomically
 // written to the same destination.
-func (p *randomProducer) Produce(topic string, messages ...*proto.Message) (offset int64, err error) {
+func (p *randomProducer) Distribute(topic string, messages ...*proto.Message) (offset int64, err error) {
 	part := p.rand.Intn(int(p.partitions))
 	return p.producer.Produce(topic, int32(part), messages...)
 }
@@ -64,10 +64,10 @@ func NewRoundRobinProducer(p Producer, numPartitions int32) PartitionedProducer 
 	}
 }
 
-// Produce write messages to given kafka topic, choosing next destination
+// Distribute write messages to given kafka topic, choosing next destination
 // partition from internal cycle. All messages written within single Produce
 // call are atomically written to the same destination.
-func (p *roundRobinProducer) Produce(topic string, messages ...*proto.Message) (offset int64, err error) {
+func (p *roundRobinProducer) Distribute(topic string, messages ...*proto.Message) (offset int64, err error) {
 	p.mu.Lock()
 	part := p.next
 	p.next++
@@ -94,13 +94,13 @@ func NewHashProducer(p Producer, numPartitions int32) PartitionedProducer {
 	}
 }
 
-// Produce write messages to given kafka topic, computing partition number from
+// Distribute write messages to given kafka topic, computing partition number from
 // the message key value. Message key must be not nil and all messages written
 // within single Produce call are atomically written to the same destination.
 //
 // All messages passed within single Produce call must hash to the same
 // destination, otherwise no message is written and error is returned.
-func (p *hashProducer) Produce(topic string, messages ...*proto.Message) (offset int64, err error) {
+func (p *hashProducer) Distribute(topic string, messages ...*proto.Message) (offset int64, err error) {
 	if len(messages) == 0 {
 		return 0, errors.New("no messages")
 	}
