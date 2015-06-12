@@ -4,20 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
+	"log"
+	"math"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/optiopay/kafka/proto"
-)
-
-const (
-	// Size of request-response mapping array for every connection instance.
-	//
-	// Because client is responsible for setting up message correlation ID, we
-	// can use lock free array instead of lock protected map. The only
-	// requirement is that number of unanswered requests at any time has to be
-	// smalled than the response buffer size.
-	responseBufferSize int32 = 256
 )
 
 // ErrClosed is returned as result of any request made using closed connection.
@@ -29,7 +23,9 @@ type connection struct {
 	stopErr error
 	stop    chan struct{}
 	nextID  chan int32
-	respc   [responseBufferSize]chan []byte
+
+	mu    sync.Mutex
+	respc map[int32]chan []byte
 }
 
 // newConnection returns new, initialized connection or error
@@ -42,6 +38,7 @@ func newConnection(address string, timeout time.Duration) (*connection, error) {
 		stop:   make(chan struct{}),
 		nextID: make(chan int32, 4),
 		conn:   conn,
+		respc:  make(map[int32]chan []byte),
 	}
 	go c.nextIDLoop()
 	go c.readRespLoop()
@@ -59,7 +56,7 @@ func (c *connection) nextIDLoop() {
 			return
 		case c.nextID <- id:
 			id++
-			if id == responseBufferSize {
+			if id == math.MaxInt32 {
 				id = 1
 			}
 		}
@@ -70,13 +67,12 @@ func (c *connection) nextIDLoop() {
 // partial parsing, sends byte representation of the whole message to request
 // sending process.
 func (c *connection) readRespLoop() {
-	for i := range c.respc {
-		c.respc[i] = make(chan []byte, 1)
-	}
 	defer func() {
+		c.mu.Lock()
 		for _, cc := range c.respc {
 			close(cc)
 		}
+		c.mu.Unlock()
 	}()
 
 	rd := bufio.NewReader(c.conn)
@@ -87,12 +83,32 @@ func (c *connection) readRespLoop() {
 			return
 		}
 
+		c.mu.Lock()
+		rc, ok := c.respc[correlationID]
+		delete(c.respc, correlationID)
+		c.mu.Unlock()
+		if !ok {
+			log.Panicf("response to unknown request: %d", correlationID)
+		}
+
 		select {
 		case <-c.stop:
 			c.stopErr = ErrClosed
-		case c.respc[correlationID] <- b:
+		case rc <- b:
 		}
 	}
+}
+
+func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, ok := c.respc[correlationID]; ok {
+		return nil, fmt.Errorf("correlation conflict: %d", correlationID)
+	}
+	respc = make(chan []byte)
+	c.respc[correlationID] = respc
+	return respc, nil
 }
 
 func (c *connection) Close() error {
@@ -109,10 +125,15 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 		return nil, c.stopErr
 	}
 
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+
 	if _, err := req.WriteTo(c.conn); err != nil {
 		return nil, err
 	}
-	b, ok := <-c.respc[req.CorrelationID]
+	b, ok := <-respc
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -129,13 +150,22 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 		return nil, c.stopErr
 	}
 
+	if req.RequiredAcks == proto.RequiredAcksNone {
+		if _, err := req.WriteTo(c.conn); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+
 	if _, err := req.WriteTo(c.conn); err != nil {
 		return nil, err
 	}
-	if req.RequiredAcks == proto.RequiredAcksNone {
-		return nil, nil
-	}
-	b, ok := <-c.respc[req.CorrelationID]
+	b, ok := <-respc
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -150,10 +180,15 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		return nil, c.stopErr
 	}
 
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+
 	if _, err := req.WriteTo(c.conn); err != nil {
 		return nil, err
 	}
-	b, ok := <-c.respc[req.CorrelationID]
+	b, ok := <-respc
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -167,13 +202,19 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
+
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+
 	// TODO(husio) documentation is not mentioning this directly, but I assume
 	// -1 is for non node clients
 	req.ReplicaID = -1
 	if _, err := req.WriteTo(c.conn); err != nil {
 		return nil, err
 	}
-	b, ok := <-c.respc[req.CorrelationID]
+	b, ok := <-respc
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -185,10 +226,14 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
 	if _, err := req.WriteTo(c.conn); err != nil {
 		return nil, err
 	}
-	b, ok := <-c.respc[req.CorrelationID]
+	b, ok := <-respc
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -200,10 +245,14 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
 	if _, err := req.WriteTo(c.conn); err != nil {
 		return nil, err
 	}
-	b, ok := <-c.respc[req.CorrelationID]
+	b, ok := <-respc
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -215,10 +264,14 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
 	if _, err := req.WriteTo(c.conn); err != nil {
 		return nil, err
 	}
-	b, ok := <-c.respc[req.CorrelationID]
+	b, ok := <-respc
 	if !ok {
 		return nil, c.stopErr
 	}
