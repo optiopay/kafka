@@ -19,13 +19,13 @@ var ErrClosed = errors.New("closed")
 
 // Low level abstraction over TCP connection to one of kafka nodes.
 type connection struct {
-	conn    net.Conn
-	stopErr error
-	stop    chan struct{}
-	nextID  chan int32
+	conn   net.Conn
+	stop   chan struct{}
+	nextID chan int32
 
-	mu    sync.Mutex
-	respc map[int32]chan []byte
+	mu      sync.Mutex
+	respc   map[int32]chan []byte
+	stopErr error
 }
 
 // newConnection returns new, initialized connection or error
@@ -79,7 +79,9 @@ func (c *connection) readRespLoop() {
 	for {
 		correlationID, b, err := proto.ReadResp(rd)
 		if err != nil {
+			c.mu.Lock()
 			c.stopErr = err
+			c.mu.Unlock()
 			return
 		}
 
@@ -88,12 +90,15 @@ func (c *connection) readRespLoop() {
 		delete(c.respc, correlationID)
 		c.mu.Unlock()
 		if !ok {
+			log.Printf("%#v", c.respc)
 			log.Panicf("response to unknown request: %d", correlationID)
 		}
 
 		select {
 		case <-c.stop:
+			c.mu.Lock()
 			c.stopErr = ErrClosed
+			c.mu.Unlock()
 		case rc <- b:
 		}
 	}
@@ -122,7 +127,10 @@ func (c *connection) Close() error {
 func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
+		c.mu.Lock()
+		err := c.stopErr
+		c.mu.Unlock()
+		return nil, err
 	}
 
 	respc, err := c.respWaiter(req.CorrelationID)
@@ -135,7 +143,10 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 	}
 	b, ok := <-respc
 	if !ok {
-		return nil, c.stopErr
+		c.mu.Lock()
+		err := c.stopErr
+		c.mu.Unlock()
+		return nil, err
 	}
 	return proto.ReadMetadataResp(bytes.NewReader(b))
 }
@@ -151,10 +162,8 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 	}
 
 	if req.RequiredAcks == proto.RequiredAcksNone {
-		if _, err := req.WriteTo(c.conn); err != nil {
-			return nil, err
-		}
-		return nil, nil
+		_, err := req.WriteTo(c.conn)
+		return nil, err
 	}
 
 	respc, err := c.respWaiter(req.CorrelationID)
