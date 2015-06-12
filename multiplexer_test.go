@@ -81,7 +81,7 @@ func TestMultiplexerConsume(t *testing.T) {
 	}
 	for _, name := range expected {
 		if results[name] != true {
-			t.Errorf("%q not found", name)
+			t.Errorf("%q not found: %#v", name, results)
 		}
 	}
 }

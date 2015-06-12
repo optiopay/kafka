@@ -37,6 +37,7 @@ func testServer(messages ...serializableMessage) (net.Listener, error) {
 			}
 
 			go func(conn net.Conn) {
+				time.Sleep(time.Millisecond * 50)
 				for _, resp := range responses {
 					_, _ = cli.Write(resp)
 				}
@@ -171,63 +172,64 @@ func TestConnectionProduce(t *testing.T) {
 	}
 
 	go func() {
-		resp, err := conn.Produce(&proto.ProduceReq{
-			ClientID:     "tester",
-			RequiredAcks: proto.RequiredAcksAll,
-			Timeout:      time.Second,
-			Topics: []proto.ProduceReqTopic{
-				proto.ProduceReqTopic{
-					Name: "first",
-					Partitions: []proto.ProduceReqPartition{
-						proto.ProduceReqPartition{
-							ID: 0,
-							Messages: []*proto.Message{
-								&proto.Message{Key: []byte("key 1"), Value: []byte("value 1")},
-								&proto.Message{Key: []byte("key 2"), Value: []byte("value 2")},
-							},
+		time.Sleep(time.Millisecond * 10)
+		msgs <- resp1
+
+		time.Sleep(time.Millisecond * 10)
+		msgs <- resp2
+	}()
+
+	resp, err := conn.Produce(&proto.ProduceReq{
+		CorrelationID: 1,
+		ClientID:      "tester",
+		RequiredAcks:  proto.RequiredAcksAll,
+		Timeout:       time.Second,
+		Topics: []proto.ProduceReqTopic{
+			proto.ProduceReqTopic{
+				Name: "first",
+				Partitions: []proto.ProduceReqPartition{
+					proto.ProduceReqPartition{
+						ID: 0,
+						Messages: []*proto.Message{
+							&proto.Message{Key: []byte("key 1"), Value: []byte("value 1")},
+							&proto.Message{Key: []byte("key 2"), Value: []byte("value 2")},
 						},
 					},
 				},
 			},
-		})
-		if err != nil {
-			t.Fatalf("could not fetch response: %s", err)
-		}
-		if !reflect.DeepEqual(resp, resp1) {
-			t.Fatalf("expected different response %#v", resp)
-		}
-	}()
-
-	go func() {
-		resp, err := conn.Produce(&proto.ProduceReq{
-			ClientID:     "tester",
-			RequiredAcks: proto.RequiredAcksAll,
-			Timeout:      time.Second,
-			Topics: []proto.ProduceReqTopic{
-				proto.ProduceReqTopic{
-					Name: "first",
-					Partitions: []proto.ProduceReqPartition{
-						proto.ProduceReqPartition{
-							ID: 0,
-							Messages: []*proto.Message{
-								&proto.Message{Key: []byte("key"), Value: []byte("value")},
-							},
+		},
+	})
+	if err != nil {
+		t.Fatalf("could not fetch response: %s", err)
+	}
+	if !reflect.DeepEqual(resp, resp1) {
+		t.Fatalf("expected different response %#v", resp)
+	}
+	resp, err = conn.Produce(&proto.ProduceReq{
+		CorrelationID: 2,
+		ClientID:      "tester",
+		RequiredAcks:  proto.RequiredAcksAll,
+		Timeout:       time.Second,
+		Topics: []proto.ProduceReqTopic{
+			proto.ProduceReqTopic{
+				Name: "first",
+				Partitions: []proto.ProduceReqPartition{
+					proto.ProduceReqPartition{
+						ID: 0,
+						Messages: []*proto.Message{
+							&proto.Message{Key: []byte("key"), Value: []byte("value")},
 						},
 					},
 				},
 			},
-		})
-		if err != nil {
-			t.Fatalf("could not fetch response: %s", err)
-		}
-		if !reflect.DeepEqual(resp, resp2) {
-			t.Fatalf("expected different response %#v", resp)
-		}
-	}()
-
-	// sending in random order should work as well
-	msgs <- resp2
-	msgs <- resp1
+		},
+	})
+	if err != nil {
+		t.Fatalf("could not fetch response: %s", err)
+	}
+	if !reflect.DeepEqual(resp, resp2) {
+		t.Fatalf("expected different response %#v", resp)
+	}
 
 	if err := conn.Close(); err != nil {
 		t.Fatalf("could not close kafka connection: %s", err)
