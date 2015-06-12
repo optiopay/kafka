@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"flag"
 	"fmt"
 	"net"
 	"testing"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/optiopay/kafka/proto"
 )
+
+var brokenPipeTestsFl = flag.Bool("epipe", false, "Run broken pipe tests. Might take a lot of time to complete!")
 
 func TestingMetadataHandler(srv *Server) RequestHandler {
 	return func(request Serializable) Serializable {
@@ -700,6 +703,10 @@ func TestConsumerFailover(t *testing.T) {
 }
 
 func TestProducerBrokenPipe(t *testing.T) {
+	if !*brokenPipeTestsFl {
+		t.Skip("shipping broken pipe test")
+	}
+
 	srv1 := NewServer()
 	srv1.Start()
 	srv2 := NewServer()
@@ -873,6 +880,10 @@ func TestFetchOffset(t *testing.T) {
 }
 
 func TestConsumerBrokenPipe(t *testing.T) {
+	if !*brokenPipeTestsFl {
+		t.Skip("shipping broken pipe test")
+	}
+
 	srv1 := NewServer()
 	srv1.Start()
 	srv2 := NewServer()
