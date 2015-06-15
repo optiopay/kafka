@@ -57,7 +57,7 @@ func TestRoundRobinProducer(t *testing.T) {
 		for _, value := range values {
 			msgs = append(msgs, &proto.Message{Value: value})
 		}
-		p.Distribute("test-topic", msgs...)
+		_, _ = p.Distribute("test-topic", msgs...)
 	}
 
 	// a, [0, 1]

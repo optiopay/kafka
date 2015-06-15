@@ -63,7 +63,7 @@ func testServer2() (net.Listener, chan serializableMessage, error) {
 			}
 
 			go func(conn net.Conn) {
-				defer cli.Close()
+				defer func() { _ = cli.Close() }()
 
 				for msg := range msgs {
 					b, err := msg.Bytes()
