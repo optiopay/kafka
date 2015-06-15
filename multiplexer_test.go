@@ -15,7 +15,7 @@ type fetcher struct {
 
 func (f *fetcher) Consume() (*proto.Message, error) {
 	// sleep a bit to let the other's work
-	time.Sleep(time.Microsecond * 10)
+	time.Sleep(time.Microsecond * 50)
 
 	if len(f.messages) > 0 {
 		msg := f.messages[0]
@@ -72,7 +72,7 @@ func TestMultiplexerConsume(t *testing.T) {
 
 	expected := []string{
 		"first", "second", "e first", "e second",
-		"1", "1", "e 1", "e 2",
+		"1", "2", "e 1", "e 2",
 	}
 
 	// expected 4 messages and 2 errors
