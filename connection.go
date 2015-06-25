@@ -100,10 +100,17 @@ func (c *connection) readRespLoop() {
 			c.stopErr = ErrClosed
 			c.mu.Unlock()
 		case rc <- b:
+			close(rc)
 		}
 	}
 }
 
+// respWaiter register listener to response message with given correlationID
+// and return channel that single response message will be pushed to once it
+// will arrive.
+// After pushing response message, channel is closed.
+//
+// Upon connection close, all unconsumed channels are closed.
 func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
