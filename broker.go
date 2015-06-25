@@ -547,6 +547,7 @@ retryLoop:
 			// p.produce call is closing connection when this error shows up,
 			// but it's also returning it so that retry loop can count this
 			// case
+			p.conf.Log.Printf("failed to produce message (%d): %s", retry, err)
 			continue
 		case proto.ErrRequestTimeout:
 			p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)

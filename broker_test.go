@@ -3,7 +3,9 @@ package kafka
 import (
 	"flag"
 	"fmt"
+	"log"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -704,7 +706,7 @@ func TestConsumerFailover(t *testing.T) {
 
 func TestProducerBrokenPipe(t *testing.T) {
 	if !*brokenPipeTestsFl {
-		t.Skip("shipping broken pipe test")
+		t.Skip("skipping broken pipe test")
 	}
 
 	srv1 := NewServer()
@@ -810,7 +812,9 @@ func TestProducerBrokenPipe(t *testing.T) {
 		}
 	})
 
-	broker, err := Dial([]string{srv1.Address()}, NewBrokerConf("test-epipe"))
+	conf := NewBrokerConf("test-epipe")
+	conf.Log = log.New(os.Stderr, "[kafka] ", log.Lshortfile)
+	broker, err := Dial([]string{srv1.Address()}, conf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
@@ -881,7 +885,7 @@ func TestFetchOffset(t *testing.T) {
 
 func TestConsumerBrokenPipe(t *testing.T) {
 	if !*brokenPipeTestsFl {
-		t.Skip("shipping broken pipe test")
+		t.Skip("skipping broken pipe test")
 	}
 
 	srv1 := NewServer()
