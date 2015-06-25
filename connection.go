@@ -90,8 +90,8 @@ func (c *connection) readRespLoop() {
 		delete(c.respc, correlationID)
 		c.mu.Unlock()
 		if !ok {
-			log.Printf("%#v", c.respc)
-			log.Panicf("response to unknown request: %d", correlationID)
+			log.Printf("response to unknown request: %d", correlationID)
+			continue
 		}
 
 		select {
