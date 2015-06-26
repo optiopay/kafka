@@ -15,7 +15,7 @@ type fetcher struct {
 
 func (f *fetcher) Consume() (*proto.Message, error) {
 	// sleep a bit to let the other's work
-	time.Sleep(time.Microsecond * 50)
+	time.Sleep(time.Microsecond * 500)
 
 	if len(f.messages) > 0 {
 		msg := f.messages[0]
