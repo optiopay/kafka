@@ -1,16 +1,14 @@
 package kafka
 
 import (
-	"flag"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/optiopay/kafka/proto"
 )
-
-var brokenPipeTestsFl = flag.Bool("epipe", false, "Run broken pipe tests. Might take a lot of time to complete!")
 
 // newTestBrokerConf returns BrokerConf with default configuration adjusted for
 // tests
@@ -701,10 +699,6 @@ func TestConsumerFailover(t *testing.T) {
 }
 
 func TestProducerBrokenPipe(t *testing.T) {
-	if !*brokenPipeTestsFl {
-		t.Skip("skipping broken pipe test")
-	}
-
 	srv1 := NewServer()
 	srv1.Start()
 	srv2 := NewServer()
@@ -813,20 +807,25 @@ func TestProducerBrokenPipe(t *testing.T) {
 		t.Fatalf("cannot create broker: %s", err)
 	}
 
+	data := []byte(strings.Repeat(`
+http://stackoverflow.com/questions/11200510/how-to-simulate-abnormal-case-for-socket-tcp-programming-in-linux-such-as-termi
+
+How to get the error EPIPE?
+To get the error EPIPE, you need to send large amount of data after closing the socket on the peer side. You can get more info about EPIPE error from this SO Link. I had asked a question about Broken Pipe Error in the link provided and the accepted answer gives a detailed explanation. It is important to note that to get EPIPE error you should have set the flags parameter of send to MSG_NOSIGNAL. Without that, an abnormal send can generate SIGPIPE signal.
+	`, 1000))
+
 	pconf := NewProducerConf()
 	pconf.RetryWait = time.Millisecond
 	pconf.RequestTimeout = time.Millisecond * 20
 	producer := broker.Producer(pconf)
 	// produce whatever to fill the cache
-	if _, err = producer.Produce("test", 0, &proto.Message{}); err != nil {
+	if _, err = producer.Produce("test", 0, &proto.Message{Value: data}); err != nil {
 		t.Fatalf("cannot produce: %s", err)
 	}
 
 	srv1.Close()
-	// give TCP buffer some time to cool down
-	time.Sleep(pconf.RequestTimeout * 2)
 
-	if _, err = producer.Produce("test", 0, &proto.Message{}); err != nil {
+	if _, err = producer.Produce("test", 0, &proto.Message{Value: data}); err != nil {
 		t.Fatalf("cannot produce: %s", err)
 	}
 }
@@ -881,10 +880,6 @@ func TestFetchOffset(t *testing.T) {
 }
 
 func TestConsumerBrokenPipe(t *testing.T) {
-	if !*brokenPipeTestsFl {
-		t.Skip("skipping broken pipe test")
-	}
-
 	srv1 := NewServer()
 	srv1.Start()
 	srv2 := NewServer()
@@ -892,6 +887,8 @@ func TestConsumerBrokenPipe(t *testing.T) {
 
 	host1, port1 := srv1.HostPort()
 	host2, port2 := srv2.HostPort()
+
+	longBytes := []byte(strings.Repeat(`xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`, 1000))
 
 	srv1.Handle(MetadataRequest, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
@@ -933,7 +930,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 						proto.FetchRespPartition{
 							ID: 0,
 							Messages: []*proto.Message{
-								&proto.Message{Offset: 0},
+								&proto.Message{Offset: 0, Value: longBytes},
 							},
 						},
 					},
@@ -984,7 +981,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 						proto.FetchRespPartition{
 							ID: 0,
 							Messages: []*proto.Message{
-								&proto.Message{Offset: 1},
+								&proto.Message{Offset: 1, Value: longBytes},
 							},
 						},
 					},
@@ -1011,8 +1008,6 @@ func TestConsumerBrokenPipe(t *testing.T) {
 	}
 
 	srv1.Close()
-	// give TCP buffer some time to cool down
-	time.Sleep(time.Millisecond)
 
 	// this should succeed after reconnecting to second node
 	if _, err = consumer.Consume(); err != nil {
