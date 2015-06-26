@@ -42,7 +42,7 @@ func testServer(messages ...serializableMessage) (net.Listener, error) {
 				for _, resp := range responses {
 					_, _ = cli.Write(resp)
 				}
-				cli.Close()
+				_ = cli.Close()
 			}(cli)
 		}
 	}()
