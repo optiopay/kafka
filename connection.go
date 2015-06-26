@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net"
@@ -17,9 +18,9 @@ import (
 // ErrClosed is returned as result of any request made using closed connection.
 var ErrClosed = errors.New("closed")
 
-// Low level abstraction over TCP connection to one of kafka nodes.
+// Low level abstraction over connection to Kafka.
 type connection struct {
-	conn   net.Conn
+	rw     io.ReadWriteCloser
 	stop   chan struct{}
 	nextID chan int32
 
@@ -29,7 +30,7 @@ type connection struct {
 }
 
 // newConnection returns new, initialized connection or error
-func newConnection(address string, timeout time.Duration) (*connection, error) {
+func newTCPConnection(address string, timeout time.Duration) (*connection, error) {
 	conn, err := net.DialTimeout("tcp", address, timeout)
 	if err != nil {
 		return nil, err
@@ -37,7 +38,7 @@ func newConnection(address string, timeout time.Duration) (*connection, error) {
 	c := &connection{
 		stop:   make(chan struct{}),
 		nextID: make(chan int32, 4),
-		conn:   conn,
+		rw:     conn,
 		respc:  make(map[int32]chan []byte),
 	}
 	go c.nextIDLoop()
@@ -75,7 +76,7 @@ func (c *connection) readRespLoop() {
 		c.mu.Unlock()
 	}()
 
-	rd := bufio.NewReader(c.conn)
+	rd := bufio.NewReader(c.rw)
 	for {
 		correlationID, b, err := proto.ReadResp(rd)
 		if err != nil {
@@ -125,7 +126,7 @@ func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err err
 
 func (c *connection) Close() error {
 	close(c.stop)
-	return c.conn.Close()
+	return c.rw.Close()
 }
 
 // Metadata sends given metadata request to kafka node and returns related
@@ -145,7 +146,7 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
-	if _, err := req.WriteTo(c.conn); err != nil {
+	if _, err := req.WriteTo(c.rw); err != nil {
 		return nil, err
 	}
 	b, ok := <-respc
@@ -169,7 +170,7 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 	}
 
 	if req.RequiredAcks == proto.RequiredAcksNone {
-		_, err := req.WriteTo(c.conn)
+		_, err := req.WriteTo(c.rw)
 		return nil, err
 	}
 
@@ -178,7 +179,7 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
-	if _, err := req.WriteTo(c.conn); err != nil {
+	if _, err := req.WriteTo(c.rw); err != nil {
 		return nil, err
 	}
 	b, ok := <-respc
@@ -201,7 +202,7 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
-	if _, err := req.WriteTo(c.conn); err != nil {
+	if _, err := req.WriteTo(c.rw); err != nil {
 		return nil, err
 	}
 	b, ok := <-respc
@@ -227,7 +228,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	// TODO(husio) documentation is not mentioning this directly, but I assume
 	// -1 is for non node clients
 	req.ReplicaID = -1
-	if _, err := req.WriteTo(c.conn); err != nil {
+	if _, err := req.WriteTo(c.rw); err != nil {
 		return nil, err
 	}
 	b, ok := <-respc
@@ -246,7 +247,7 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 	if err != nil {
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if _, err := req.WriteTo(c.conn); err != nil {
+	if _, err := req.WriteTo(c.rw); err != nil {
 		return nil, err
 	}
 	b, ok := <-respc
@@ -265,7 +266,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 	if err != nil {
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if _, err := req.WriteTo(c.conn); err != nil {
+	if _, err := req.WriteTo(c.rw); err != nil {
 		return nil, err
 	}
 	b, ok := <-respc
@@ -284,7 +285,7 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 	if err != nil {
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if _, err := req.WriteTo(c.conn); err != nil {
+	if _, err := req.WriteTo(c.rw); err != nil {
 		return nil, err
 	}
 	b, ok := <-respc

@@ -140,7 +140,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 	}
 
 	for _, addr := range nodeAddresses {
-		conn, err := newConnection(addr, conf.DialTimeout)
+		conn, err := newTCPConnection(addr, conf.DialTimeout)
 		if err != nil {
 			conf.Log.Printf("could not connect to %s: %s", addr, err)
 			continue
@@ -156,7 +156,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 			conf.Log.Printf("could not fetch metadata from %s: %s", addr, err)
 			continue
 		}
-		broker.rewriteMetadata(resp)
+		broker.cacheMetadata(resp)
 		return broker, nil
 	}
 	return nil, errors.New("could not connect")
@@ -186,8 +186,16 @@ func (b *Broker) Metadata() (*proto.MetadataResp, error) {
 func (b *Broker) refreshMetadata() error {
 	meta, err := b.fetchMetadata()
 	if err == nil {
-		b.rewriteMetadata(meta)
+		b.cacheMetadata(meta)
 	}
+	return err
+}
+
+// muRefreshMetadata calls refreshMetadata, but protects it with broker's lock.
+func (b *Broker) muRefreshMetadata() error {
+	b.mu.Lock()
+	err := b.refreshMetadata()
+	b.mu.Unlock()
 	return err
 }
 
@@ -207,7 +215,6 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 		})
 		if err != nil {
 			b.conf.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
-			continue
 		}
 		return resp, nil
 	}
@@ -217,20 +224,19 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 		if _, ok := checkednodes[nodeID]; ok {
 			continue
 		}
-		conn, err := newConnection(addr, b.conf.DialTimeout)
+		conn, err := newTCPConnection(addr, b.conf.DialTimeout)
 		if err != nil {
 			b.conf.Log.Printf("could not connect to %s: %s", addr, err)
 			continue
 		}
-		// we had no active connection to this node, so most likely we don't need it
-		defer func(c *connection) {
-			_ = c.Close()
-		}(conn)
-
 		resp, err := conn.Metadata(&proto.MetadataReq{
 			ClientID: b.conf.ClientID,
 			Topics:   nil,
 		})
+
+		// we had no active connection to this node, so most likely we don't need it
+		_ = conn.Close()
+
 		if err != nil {
 			b.conf.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
 			continue
@@ -241,9 +247,9 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 	return nil, errors.New("cannot fetch metadata. No topics created?")
 }
 
-// rewriteMetadata creates new internal metadata representation using data from
+// cacheMetadata creates new internal metadata representation using data from
 // given response. It's call has to be protected with lock.
-func (b *Broker) rewriteMetadata(resp *proto.MetadataResp) {
+func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 	if !b.metadata.created.IsZero() {
 		b.conf.Log.Printf("rewriting metadata created %s ago", time.Now().Sub(b.metadata.created))
 	}
@@ -262,27 +268,35 @@ func (b *Broker) rewriteMetadata(resp *proto.MetadataResp) {
 	}
 }
 
-// leaderConnection returns connection to leader for given partition. If
+// muLeaderConnection returns connection to leader for given partition. If
 // connection does not exist, broker will try to connect first and add store
 // connection for any further use.
 // Failed connection retry is controlled by broker configuration.
-func (b *Broker) leaderConnection(topic string, partition int32) (conn *connection, err error) {
+func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connection, err error) {
 	endpoint := fmt.Sprintf("%s:%d", topic, partition)
 
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
-		b.mu.Lock()
+		if retry != 0 {
+			b.mu.Unlock()
+			time.Sleep(b.conf.LeaderRetryWait)
+			b.mu.Lock()
+		}
 
 		nodeID, ok := b.metadata.endpoints[endpoint]
 		if !ok {
-			if err := b.refreshMetadata(); err != nil {
-				b.conf.Log.Printf("cannot refresh metadata: %s", err)
-				b.mu.Unlock()
-				return nil, err
+			err = b.refreshMetadata()
+			if err != nil {
+				b.conf.Log.Printf("cannot get leader connection: cannot refresh metadata: %s", err)
+				continue
 			}
 			nodeID, ok = b.metadata.endpoints[endpoint]
 			if !ok {
-				b.mu.Unlock()
-				return nil, proto.ErrUnknownTopicOrPartition
+				b.conf.Log.Printf("cannot get leader connection: unknown topic or partition: %s", endpoint)
+				err = proto.ErrUnknownTopicOrPartition
+				continue
 			}
 		}
 
@@ -290,20 +304,17 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 		if !ok {
 			addr, ok := b.metadata.nodes[nodeID]
 			if !ok {
-				b.conf.Log.Printf("no information about node %d", nodeID)
-				b.mu.Unlock()
-				return nil, proto.ErrBrokerNotAvailable
+				b.conf.Log.Printf("cannot get leader connection: no information about node %d", nodeID)
+				err = proto.ErrBrokerNotAvailable
+				continue
 			}
-			conn, err = newConnection(addr, b.conf.DialTimeout)
+			conn, err = newTCPConnection(addr, b.conf.DialTimeout)
 			if err != nil {
-				b.conf.Log.Printf("cannot connect to node %s: %s", addr, err)
-				b.mu.Unlock()
-				time.Sleep(b.conf.LeaderRetryWait)
+				b.conf.Log.Printf("cannot get leader connection: cannot connect to node %s: %s", addr, err)
 				continue
 			}
 			b.conns[nodeID] = conn
 		}
-		b.mu.Unlock()
 		return conn, nil
 	}
 	return nil, err
@@ -312,10 +323,16 @@ func (b *Broker) leaderConnection(topic string, partition int32) (conn *connecti
 // coordinatorConnection returns connection to offset coordinator for given group.
 //
 // Failed connection retry is controlled by broker configuration.
-func (b *Broker) coordinatorConnection(consumerGroup string) (conn *connection, err error) {
-	// TODO(husio) clean this up
+func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection, resErr error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
-		b.mu.Lock()
+		if retry != 0 {
+			b.mu.Unlock()
+			time.Sleep(b.conf.LeaderRetryWait)
+			b.mu.Lock()
+		}
 
 		// first try all aready existing connections
 		for _, conn := range b.conns {
@@ -324,28 +341,32 @@ func (b *Broker) coordinatorConnection(consumerGroup string) (conn *connection, 
 				ConsumerGroup: consumerGroup,
 			})
 			if err != nil {
-				b.conf.Log.Printf("coordinator for %q metadata fetch error: %s", consumerGroup, err)
+				b.conf.Log.Printf("coordinator connection: coordinator for %q metadata fetch error: %s", consumerGroup, err)
+				resErr = err
 				continue
 			}
 			if resp.Err != nil {
-				b.mu.Unlock()
-				return nil, resp.Err
+				b.conf.Log.Printf("coordinator connection: request for %q error: %s", consumerGroup, resp.Err)
+				resErr = err
+				continue
 			}
 
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
-			conn, err := newConnection(addr, b.conf.DialTimeout)
+			conn, err := newTCPConnection(addr, b.conf.DialTimeout)
 			if err != nil {
-				b.conf.Log.Printf("cannot connect to node %d (%s): %s", resp.CoordinatorID, addr, err)
+				b.conf.Log.Printf("coordinator connection: cannot connect to node %d (%s): %s", resp.CoordinatorID, addr, err)
+				resErr = err
 				continue
 			}
 			b.conns[resp.CoordinatorID] = conn
-			b.mu.Unlock()
 			return conn, nil
 		}
 
 		// if none of the connections worked out, try with fresh data
 		if err := b.refreshMetadata(); err != nil {
-			return nil, err
+			b.conf.Log.Printf("coordinator connection: cannot refresh metadata: %s", err)
+			resErr = err
+			continue
 		}
 
 		for nodeID, addr := range b.metadata.nodes {
@@ -353,9 +374,10 @@ func (b *Broker) coordinatorConnection(consumerGroup string) (conn *connection, 
 				// connection to node is cached so it was already checked
 				continue
 			}
-			conn, err := newConnection(addr, b.conf.DialTimeout)
+			conn, err := newTCPConnection(addr, b.conf.DialTimeout)
 			if err != nil {
-				b.conf.Log.Printf("cannot connect to node %d (%s): %s", nodeID, addr, err)
+				b.conf.Log.Printf("coordinator connection: cannot connect to node %d (%s): %s", nodeID, addr, err)
+				resErr = err
 				continue
 			}
 			b.conns[nodeID] = conn
@@ -365,44 +387,48 @@ func (b *Broker) coordinatorConnection(consumerGroup string) (conn *connection, 
 				ConsumerGroup: consumerGroup,
 			})
 			if err != nil {
-				b.conf.Log.Printf("coordinator for %q metadata fetch error: %s", consumerGroup, err)
+				b.conf.Log.Printf("coordinator connection: coordinator for %q metadata fetch error: %s", consumerGroup, err)
+				resErr = err
 				continue
 			}
 			if resp.Err != nil {
-				b.mu.Unlock()
-				return nil, resp.Err
+				b.conf.Log.Printf("coordinator connection: request for %q error: %s", consumerGroup, resp.Err)
+				resErr = err
+				continue
 			}
 
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
-			conn, err = newConnection(addr, b.conf.DialTimeout)
+			conn, err = newTCPConnection(addr, b.conf.DialTimeout)
 			if err != nil {
-				b.conf.Log.Printf("cannot connect to node %d (%s): %s", resp.CoordinatorID, addr, err)
+				b.conf.Log.Printf("coordinator connection: cannot connect to node %d (%s): %s", resp.CoordinatorID, addr, err)
+				resErr = err
 				continue
 			}
 			b.conns[resp.CoordinatorID] = conn
-			b.mu.Unlock()
 			return conn, nil
 		}
-		b.mu.Unlock()
-
-		time.Sleep(b.conf.LeaderRetryWait)
+		resErr = proto.ErrNoCoordinator
 	}
-	return nil, fmt.Errorf("coordinator for %q not found", consumerGroup)
+	return nil, resErr
 }
 
-// closeDeadConnection is closing and removing any reference to given
+// muCloseDeadConnection is closing and removing any reference to given
 // connection. Because we remove dead connection, additional request to refresh
 // metadata is made
-func (b *Broker) closeDeadConnection(conn *connection) {
+//
+// muCloseDeadConnection call it protected with broker's lock.
+func (b *Broker) muCloseDeadConnection(conn *connection) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	for nid, c := range b.conns {
 		if c == conn {
+			b.conf.Log.Printf("closing dead connection to %d", nid)
 			delete(b.conns, nid)
 			_ = c.Close()
-			_ = b.refreshMetadata()
-			b.conf.Log.Printf("closing dead connection to %d", nid)
+			if err := b.refreshMetadata(); err != nil {
+				b.conf.Log.Printf("closing dead connection: cannot refresh metadata: %s", err)
+			}
 			return
 		}
 	}
@@ -411,7 +437,7 @@ func (b *Broker) closeDeadConnection(conn *connection) {
 // offset will return offset value for given partition. Use timems to specify
 // which offset value should be returned.
 func (b *Broker) offset(topic string, partition int32, timems int64) (offset int64, err error) {
-	conn, err := b.leaderConnection(topic, partition)
+	conn, err := b.muLeaderConnection(topic, partition)
 	if err != nil {
 		return 0, err
 	}
@@ -534,27 +560,26 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 
 retryLoop:
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
+		if retry != 0 {
+			time.Sleep(p.conf.RetryWait)
+		}
+
 		offset, err = p.produce(topic, partition, messages...)
 		switch err {
 		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable, proto.ErrUnknownTopicOrPartition:
-			p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)
-			time.Sleep(p.conf.RetryWait)
-			// TODO(husio) possible thundering herd
-			if err := p.broker.refreshMetadata(); err != nil {
+			if err := p.broker.muRefreshMetadata(); err != nil {
 				p.conf.Log.Printf("failed to refresh metadata: %s", err)
 			}
 		case io.EOF, syscall.EPIPE:
 			// p.produce call is closing connection when this error shows up,
 			// but it's also returning it so that retry loop can count this
 			// case
-			p.conf.Log.Printf("failed to produce message (%d): %s", retry, err)
-			continue
-		case proto.ErrRequestTimeout:
-			p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)
-			time.Sleep(p.conf.RetryWait)
-		default:
+			// we cannot handle this error here, because there is no direct
+			// access to connection
+		case nil:
 			break retryLoop
 		}
+		p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)
 	}
 
 	if err == nil {
@@ -569,7 +594,7 @@ retryLoop:
 
 // produce send produce request to leader for given destination.
 func (p *producer) produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
-	conn, err := p.broker.leaderConnection(topic, partition)
+	conn, err := p.broker.muLeaderConnection(topic, partition)
 	if err != nil {
 		return 0, err
 	}
@@ -598,7 +623,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 			// still valid and should be returned so that retry mechanism have
 			// chance to react.
 			p.conf.Log.Printf("connection to %s:%d died while sendnig message", topic, partition)
-			p.broker.closeDeadConnection(conn)
+			p.broker.muCloseDeadConnection(conn)
 		}
 		return 0, err
 	}
@@ -708,17 +733,17 @@ func NewConsumerConf(topic string, partition int32) ConsumerConf {
 // providing limited failure handling and message filtering.
 type consumer struct {
 	broker *Broker
-	conn   *connection
 	conf   ConsumerConf
-	offset int64 // offset of next NOT consumed message
 
 	mu     sync.Mutex
+	offset int64 // offset of next NOT consumed message
+	conn   *connection
 	msgbuf []*proto.Message
 }
 
 // Consumer creates a new consumer instance, bound to the broker.
 func (b *Broker) Consumer(conf ConsumerConf) (Consumer, error) {
-	conn, err := b.leaderConnection(conf.Topic, conf.Partition)
+	conn, err := b.muLeaderConnection(conf.Topic, conf.Partition)
 	if err != nil {
 		return nil, err
 	}
@@ -831,58 +856,58 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 		},
 	}
 
-	for retry := 0; ; retry++ {
+	var resErr error
+	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if retry != 0 {
+			// fetch call is protected by consumer lock - release it for the
+			// time of sleep so that other threads can continue using
+			// connection
+			c.mu.Unlock()
+			time.Sleep(c.conf.RetryErrWait)
+			c.mu.Lock()
+		}
+
 		if c.conn == nil {
-			conn, err := c.broker.leaderConnection(c.conf.Topic, c.conf.Partition)
+			conn, err := c.broker.muLeaderConnection(c.conf.Topic, c.conf.Partition)
 			if err != nil {
-				if retry == c.conf.RetryErrLimit {
-					return nil, err
-				}
+				resErr = err
 				continue
 			}
 			c.conn = conn
 		}
 
 		resp, err := c.conn.Fetch(&req)
-		if err != nil && retry == c.conf.RetryErrLimit {
-			return nil, err
-		}
+		resErr = err
 
 		switch err {
 		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
 			c.conf.Log.Printf("failed to fetch messages (%d): %s", retry, err)
-			time.Sleep(c.conf.RetryErrWait)
-			// TODO(husio) possible thundering herd
-			if err := c.broker.refreshMetadata(); err != nil {
+			if err := c.broker.muRefreshMetadata(); err != nil {
 				c.conf.Log.Printf("failed to refresh metadata: %s", err)
 			}
-			continue
 		case io.EOF, syscall.EPIPE:
 			c.conf.Log.Printf("connection to %s:%d died while fetching message", c.conf.Topic, c.conf.Partition)
-			c.broker.closeDeadConnection(c.conn)
+			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
-			continue
 		case nil:
-			// everything's fine, proceed
-		default:
-			return nil, err
-		}
-
-		for _, topic := range resp.Topics {
-			if topic.Name != c.conf.Topic {
-				c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", topic.Name, c.conf.Topic)
-				continue
-			}
-			for _, part := range topic.Partitions {
-				if part.ID != c.conf.Partition {
-					c.conf.Log.Printf("unexpected partition information received: %s:%d", topic.Name, part.ID)
+			for _, topic := range resp.Topics {
+				if topic.Name != c.conf.Topic {
+					c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", topic.Name, c.conf.Topic)
 					continue
 				}
-				return part.Messages, part.Err
+				for _, part := range topic.Partitions {
+					if part.ID != c.conf.Partition {
+						c.conf.Log.Printf("unexpected partition information received: %s:%d", topic.Name, part.ID)
+						continue
+					}
+					return part.Messages, part.Err
+				}
 			}
+			return nil, errors.New("incomplete fetch response")
 		}
-		return nil, errors.New("incomplete fetch response")
 	}
+
+	return nil, resErr
 }
 
 type OffsetCoordinatorConf struct {
@@ -912,13 +937,15 @@ func NewOffsetCoordinatorConf(consumerGroup string) OffsetCoordinatorConf {
 type offsetCoordinator struct {
 	conf   OffsetCoordinatorConf
 	broker *Broker
-	conn   *connection
+
+	mu   sync.Mutex
+	conn *connection
 }
 
 // OffsetCoordinator returns offset management coordinator for single consumer
 // group, bound to broker.
 func (b *Broker) OffsetCoordinator(conf OffsetCoordinatorConf) (OffsetCoordinator, error) {
-	conn, err := b.coordinatorConnection(conf.ConsumerGroup)
+	conn, err := b.muCoordinatorConnection(conf.ConsumerGroup)
 	if err != nil {
 		return nil, err
 	}
@@ -950,26 +977,29 @@ func (c *offsetCoordinator) CommitFull(topic string, partition int32, offset int
 
 // commit is saving offset and metadata information. Provides limited error
 // handling configurable through OffsetCoordinatorConf.
-func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, metadata string) (err error) {
-	var resp *proto.OffsetCommitResp
+func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, metadata string) (resErr error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-retryLoop:
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if retry != 0 {
+			c.mu.Unlock()
+			time.Sleep(c.conf.RetryErrWait)
+			c.mu.Lock()
+		}
+
 		// connection can be set to nil if previously reference connection died
 		if c.conn == nil {
-			conn, err := c.broker.coordinatorConnection(c.conf.ConsumerGroup)
+			conn, err := c.broker.muCoordinatorConnection(c.conf.ConsumerGroup)
 			if err != nil {
-				if retry == c.conf.RetryErrLimit {
-					c.conf.Log.Printf("cannot connect to coordinator of %q consumer group: %s", c.conf.ConsumerGroup, err)
-					return err
-				}
-				time.Sleep(c.conf.RetryErrWait)
+				resErr = err
+				c.conf.Log.Printf("cannot connect to coordinator of %q consumer group: %s", c.conf.ConsumerGroup, err)
 				continue
 			}
 			c.conn = conn
 		}
 
-		resp, err = c.conn.OffsetCommit(&proto.OffsetCommitReq{
+		resp, err := c.conn.OffsetCommit(&proto.OffsetCommitReq{
 			ClientID:      c.broker.conf.ClientID,
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetCommitReqTopic{
@@ -981,42 +1011,32 @@ retryLoop:
 				},
 			},
 		})
+		resErr = err
 
 		switch err {
 		case io.EOF, syscall.EPIPE:
 			c.conf.Log.Printf("connection to %s:%d died while commiting %q offset", topic, partition, c.conf.ConsumerGroup)
-			c.broker.closeDeadConnection(c.conn)
+			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
-			continue retryLoop
 		case nil:
-			// all good
-			break retryLoop
-		default:
-			// we cannot help if the error is unknown
-			break retryLoop
-		}
-	}
+			for _, t := range resp.Topics {
+				if t.Name != topic {
+					c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name, topic)
+					continue
 
-	if err != nil {
-		c.conf.Log.Printf("cannot commit %s:%d offset for %q: %s", topic, partition, c.conf.ConsumerGroup, err)
-		return err
-	}
-
-	for _, t := range resp.Topics {
-		if t.Name != topic {
-			c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name, topic)
-			continue
-
-		}
-		for _, part := range t.Partitions {
-			if part.ID != partition {
-				c.conf.Log.Printf("unexpected partition information received: %s:%d", topic, part.ID)
-				continue
+				}
+				for _, part := range t.Partitions {
+					if part.ID != partition {
+						c.conf.Log.Printf("unexpected partition information received: %s:%d", topic, part.ID)
+						continue
+					}
+					return part.Err
+				}
 			}
-			return part.Err
+			return errors.New("response does not contain commit information")
 		}
 	}
-	return errors.New("response does not contain commit information")
+	return resErr
 }
 
 // Offset is returning last offset and metadata information committed for given
@@ -1024,25 +1044,28 @@ retryLoop:
 // Offset can retry sending request on common errors. This behaviour can be
 // configured with with RetryErrLimit and RetryErrWait coordinator
 // configuration attributes.
-func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64, metadata string, err error) {
-	var resp *proto.OffsetFetchResp
+func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64, metadata string, resErr error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-retryLoop:
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if retry != 0 {
+			c.mu.Unlock()
+			time.Sleep(c.conf.RetryErrWait)
+			c.mu.Lock()
+		}
+
 		// connection can be set to nil if previously reference connection died
 		if c.conn == nil {
-			conn, err := c.broker.coordinatorConnection(c.conf.ConsumerGroup)
+			conn, err := c.broker.muCoordinatorConnection(c.conf.ConsumerGroup)
 			if err != nil {
-				if retry == c.conf.RetryErrLimit {
-					c.conf.Log.Printf("cannot connect to coordinator of %q consumer group: %s", c.conf.ConsumerGroup, err)
-					return 0, "", err
-				}
-				time.Sleep(c.conf.RetryErrWait)
+				c.conf.Log.Printf("cannot connect to coordinator of %q consumer group: %s", c.conf.ConsumerGroup, err)
+				resErr = err
 				continue
 			}
 			c.conn = conn
 		}
-		resp, err = c.conn.OffsetFetch(&proto.OffsetFetchReq{
+		resp, err := c.conn.OffsetFetch(&proto.OffsetFetchReq{
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetFetchReqTopic{
 				proto.OffsetFetchReqTopic{
@@ -1051,43 +1074,33 @@ retryLoop:
 				},
 			},
 		})
+		resErr = err
 
 		switch err {
 		case io.EOF, syscall.EPIPE:
 			c.conf.Log.Printf("connection to %s:%d died while fetching %q offset", topic, partition, c.conf.ConsumerGroup)
-			c.broker.closeDeadConnection(c.conn)
+			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
-			continue retryLoop
 		case nil:
-			// all good
-			break retryLoop
-		default:
-			// we cannot help if the error is unknown
-			break retryLoop
-		}
-	}
-
-	if err != nil {
-		c.conf.Log.Printf("cannot fetch %s:%d offset for %q: %s", topic, partition, c.conf.ConsumerGroup, err)
-		return 0, "", err
-	}
-
-	for _, t := range resp.Topics {
-		if t.Name != topic {
-			c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name, topic)
-			continue
-
-		}
-		for _, part := range t.Partitions {
-			if part.ID != partition {
-				c.conf.Log.Printf("unexpected partition information received: %s:%d", topic, part.ID)
-				continue
+			for _, t := range resp.Topics {
+				if t.Name != topic {
+					c.conf.Log.Printf("unexpected topic information received: %s (expecting %s)", t.Name, topic)
+					continue
+				}
+				for _, part := range t.Partitions {
+					if part.ID != partition {
+						c.conf.Log.Printf("unexpected partition information received: %s:%d", topic, part.ID)
+						continue
+					}
+					if part.Err != nil {
+						return 0, "", part.Err
+					}
+					return part.Offset, part.Metadata, nil
+				}
 			}
-			if part.Err != nil {
-				return 0, "", part.Err
-			}
-			return part.Offset, part.Metadata, nil
+			return 0, "", errors.New("response does not contain offset information")
 		}
 	}
-	return 0, "", errors.New("response does not contain offset information")
+
+	return 0, "", resErr
 }

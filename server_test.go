@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/optiopay/kafka/proto"
 )
@@ -29,16 +30,16 @@ type RequestHandler func(request Serializable) (response Serializable)
 
 type Server struct {
 	Processed int
-	stop      chan struct{}
 
 	mu       sync.RWMutex
 	ln       net.Listener
+	clients  map[int64]net.Conn
 	handlers map[int16]RequestHandler
 }
 
 func NewServer() *Server {
 	srv := &Server{
-		stop:     make(chan struct{}),
+		clients:  make(map[int64]net.Conn),
 		handlers: make(map[int16]RequestHandler),
 	}
 	srv.handlers[AnyRequest] = srv.defaultRequestHandler
@@ -100,25 +101,28 @@ func (srv *Server) Start() {
 func (srv *Server) Close() {
 	srv.mu.Lock()
 	_ = srv.ln.Close()
-	close(srv.stop)
+	for _, cli := range srv.clients {
+		_ = cli.Close()
+	}
+	srv.clients = make(map[int64]net.Conn)
 	srv.mu.Unlock()
 }
 
 func (srv *Server) handleClient(c net.Conn) {
-	stop := make(chan struct{})
+	clientID := time.Now().UnixNano()
+	srv.mu.Lock()
+	srv.clients[clientID] = c
+	srv.mu.Unlock()
 
-	go func() {
-		select {
-		case <-srv.stop:
-		case <-stop:
-		}
-		_ = c.Close()
+	defer func() {
+		srv.mu.Lock()
+		delete(srv.clients, clientID)
+		srv.mu.Unlock()
 	}()
 
 	for {
 		kind, b, err := proto.ReadReq(c)
 		if err != nil {
-			close(stop)
 			return
 		}
 		srv.mu.RLock()
