@@ -430,6 +430,8 @@ func TestClosedConnectionWriter(t *testing.T) {
 
 	// although we produced ten requests, because connection is closed, no
 	// response channel should be registered
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
 	if len(conn.respc) != 0 {
 		t.Fatalf("expected 0 waiting responses, got %d", len(conn.respc))
 	}
@@ -473,6 +475,8 @@ func TestClosedConnectionReader(t *testing.T) {
 
 	// although we produced ten requests, because connection is closed, no
 	// response channel should be registered
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
 	if len(conn.respc) != 0 {
 		t.Fatalf("expected 0 waiting responses, got %d", len(conn.respc))
 	}

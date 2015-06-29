@@ -82,7 +82,10 @@ func (c *connection) readRespLoop() {
 		correlationID, b, err := proto.ReadResp(rd)
 		if err != nil {
 			c.mu.Lock()
-			c.stopErr = err
+			if c.stopErr == nil {
+				c.stopErr = err
+				close(c.stop)
+			}
 			c.mu.Unlock()
 			return
 		}
@@ -99,7 +102,9 @@ func (c *connection) readRespLoop() {
 		select {
 		case <-c.stop:
 			c.mu.Lock()
-			c.stopErr = ErrClosed
+			if c.stopErr == nil {
+				c.stopErr = ErrClosed
+			}
 			c.mu.Unlock()
 		case rc <- b:
 		}
@@ -117,6 +122,9 @@ func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err err
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.stopErr != nil {
+		return nil, c.stopErr
+	}
 	if _, ok := c.respc[correlationID]; ok {
 		return nil, fmt.Errorf("correlation conflict: %d", correlationID)
 	}
@@ -140,7 +148,12 @@ func (c *connection) releaseWaiter(correlationID int32) {
 // Close close underlying transport connection and cancel all pending response
 // waiters.
 func (c *connection) Close() error {
-	close(c.stop)
+	c.mu.Lock()
+	if c.stopErr == nil {
+		c.stopErr = ErrClosed
+		close(c.stop)
+	}
+	c.mu.Unlock()
 	return c.rw.Close()
 }
 
@@ -164,10 +177,7 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 	}
 	b, ok := <-respc
 	if !ok {
-		c.mu.Lock()
-		err := c.stopErr
-		c.mu.Unlock()
-		return nil, err
+		return nil, c.stopErr
 	}
 	return proto.ReadMetadataResp(bytes.NewReader(b))
 }

@@ -103,6 +103,19 @@ type BrokerConf struct {
 	// Default is 10 seconds.
 	DialTimeout time.Duration
 
+	// DialRetryLimit limits the number of connection attempts to every node in
+	// cluster before failing. Use DialRetryWait to control the wait time
+	// between retries.
+	//
+	// Defaults to 10.
+	DialRetryLimit int
+
+	// DialRetryWait sets a limit to the waiting time when trying to establish
+	// broker connection to single node to fetch cluster metadata.
+	//
+	// Defaults to 500ms.
+	DialRetryWait time.Duration
+
 	// Logger used by the broker.
 	//
 	// By default all messages are dropped.
@@ -112,9 +125,11 @@ type BrokerConf struct {
 func NewBrokerConf(clientID string) BrokerConf {
 	return BrokerConf{
 		ClientID:         clientID,
-		DialTimeout:      time.Second * 10,
+		DialTimeout:      10 * time.Second,
+		DialRetryLimit:   10,
+		DialRetryWait:    500 * time.Millisecond,
 		LeaderRetryLimit: 10,
-		LeaderRetryWait:  time.Millisecond * 500,
+		LeaderRetryWait:  500 * time.Millisecond,
 		Log:              log.New(ioutil.Discard, "kafka", log.LstdFlags),
 	}
 }
@@ -139,25 +154,36 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 		conns: make(map[int32]*connection),
 	}
 
-	for _, addr := range nodeAddresses {
-		conn, err := newTCPConnection(addr, conf.DialTimeout)
-		if err != nil {
-			conf.Log.Printf("could not connect to %s: %s", addr, err)
-			continue
+	for i := 0; i < conf.DialRetryLimit; i++ {
+		if i > 0 {
+			conf.Log.Printf("could not fetch metadata from any connection, retrying (%d)", i)
+			time.Sleep(conf.DialRetryWait)
 		}
-		defer func(c *connection) {
-			_ = c.Close()
-		}(conn)
-		resp, err := conn.Metadata(&proto.MetadataReq{
-			ClientID: broker.conf.ClientID,
-			Topics:   nil,
-		})
-		if err != nil {
-			conf.Log.Printf("could not fetch metadata from %s: %s", addr, err)
-			continue
+
+		for _, addr := range nodeAddresses {
+			conn, err := newTCPConnection(addr, conf.DialTimeout)
+			if err != nil {
+				conf.Log.Printf("could not connect to %s: %s", addr, err)
+				continue
+			}
+			defer func(c *connection) {
+				_ = c.Close()
+			}(conn)
+			resp, err := conn.Metadata(&proto.MetadataReq{
+				ClientID: broker.conf.ClientID,
+				Topics:   nil,
+			})
+			if err != nil {
+				conf.Log.Printf("could not fetch metadata from %s: %s", addr, err)
+				continue
+			}
+			if len(resp.Brokers) == 0 {
+				conf.Log.Printf("got response with no broker data from %s", addr)
+				continue
+			}
+			broker.cacheMetadata(resp)
+			return broker, nil
 		}
-		broker.cacheMetadata(resp)
-		return broker, nil
 	}
 	return nil, errors.New("could not connect")
 }
@@ -215,6 +241,7 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 		})
 		if err != nil {
 			b.conf.Log.Printf("cannot fetch metadata from node %d: %s", nodeID, err)
+			continue
 		}
 		return resp, nil
 	}
@@ -510,7 +537,7 @@ type ProducerConf struct {
 
 	// RetryLimit specify how many times message producing should be retried in
 	// case of failure, before returning the error to the caller. By default
-	// set to 5.
+	// set to 10.
 	RetryLimit int
 
 	// RetryWait specify wait duration before produce retry after failure. By
@@ -524,10 +551,10 @@ type ProducerConf struct {
 // NewProducerConf returns a default producer configuration.
 func NewProducerConf() ProducerConf {
 	return ProducerConf{
-		RequestTimeout: time.Second * 5,
+		RequestTimeout: 5 * time.Second,
 		RequiredAcks:   proto.RequiredAcksAll,
-		RetryLimit:     5,
-		RetryWait:      time.Millisecond * 200,
+		RetryLimit:     10,
+		RetryWait:      200 * time.Millisecond,
 		Log:            nil,
 	}
 }
