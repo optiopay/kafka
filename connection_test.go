@@ -509,7 +509,9 @@ func TestConnectionReaderAfterEOF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	defer ln.Close()
+	defer func() {
+		_ = ln.Close()
+	}()
 
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
 	if err != nil {
