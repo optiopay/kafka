@@ -37,7 +37,7 @@ func newTCPConnection(address string, timeout time.Duration) (*connection, error
 	}
 	c := &connection{
 		stop:   make(chan struct{}),
-		nextID: make(chan int32, 4),
+		nextID: make(chan int32),
 		rw:     conn,
 		respc:  make(map[int32]chan []byte),
 	}
@@ -80,9 +80,7 @@ func (c *connection) readRespLoop() {
 	for {
 		correlationID, b, err := proto.ReadResp(rd)
 		if err != nil {
-			c.mu.Lock()
-			c.stopErr = err
-			c.mu.Unlock()
+			_ = c.closeConnection(err)
 			return
 		}
 
@@ -95,14 +93,8 @@ func (c *connection) readRespLoop() {
 			continue
 		}
 
-		select {
-		case <-c.stop:
-			c.mu.Lock()
-			c.stopErr = ErrClosed
-			c.mu.Unlock()
-		case rc <- b:
-			close(rc)
-		}
+		rc <- b
+		close(rc)
 	}
 }
 
@@ -124,9 +116,24 @@ func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err err
 	return respc, nil
 }
 
-func (c *connection) Close() error {
+func (c *connection) closeConnection(err error) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.stopErr != nil {
+		return c.stopErr
+	}
+
+	c.stopErr = err
+
+	c.stop <- struct{}{}
 	close(c.stop)
+
 	return c.rw.Close()
+}
+
+func (c *connection) Close() error {
+	return c.closeConnection(ErrClosed)
 }
 
 // Metadata sends given metadata request to kafka node and returns related

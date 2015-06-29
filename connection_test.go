@@ -80,6 +80,28 @@ func testServer2() (net.Listener, chan serializableMessage, error) {
 	return ln, msgs, nil
 }
 
+func testServer3() (net.Listener, error) {
+	ln, err := net.Listen("tcp", "")
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		for {
+			cli, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			go func(conn net.Conn) {
+				_, _ = cli.Read(make([]byte, 1024))
+				_ = cli.Close()
+			}(cli)
+		}
+	}()
+	return ln, nil
+}
+
 func TestConnectionMetadata(t *testing.T) {
 	resp1 := &proto.MetadataResp{
 		CorrelationID: 1,
@@ -386,5 +408,47 @@ func TestConnectionProduceNoAck(t *testing.T) {
 	}
 	if err := ln.Close(); err != nil {
 		t.Fatalf("could not close test server: %s", err)
+	}
+}
+
+func TestConnectionReaderAfterEOF(t *testing.T) {
+	ln, err := testServer3()
+	if err != nil {
+		t.Fatalf("test server error: %s", err)
+	}
+	defer ln.Close()
+
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatalf("could not conect to test server: %s", err)
+	}
+
+	req := &proto.FetchReq{
+		ClientID:    "test-client",
+		MaxWaitTime: 100,
+		MinBytes:    0,
+		Topics: []proto.FetchReqTopic{
+			proto.FetchReqTopic{
+				Name: "my-topic",
+				Partitions: []proto.FetchReqPartition{
+					proto.FetchReqPartition{
+						ID:          0,
+						FetchOffset: 1,
+						MaxBytes:    100000,
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := conn.Fetch(req); err == nil {
+		t.Fatal("fetching from closed connection succeeded")
+	}
+
+	// Wait until testServer3 closes connection
+	time.Sleep(time.Millisecond * 50)
+
+	if _, err := conn.Fetch(req); err == nil {
+		t.Fatal("fetching from closed connection succeeded")
 	}
 }
