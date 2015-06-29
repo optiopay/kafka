@@ -18,7 +18,9 @@ func TestProducerBrokenConnection(t *testing.T) {
 	if err := cluster.Start(); err != nil {
 		t.Fatalf("cannot start kafka cluster: %s", err)
 	}
-	defer cluster.Stop()
+	defer func() {
+		_ = cluster.Stop()
+	}()
 
 	bconf := kafka.NewBrokerConf("producer-broken-connection")
 	bconf.Log = &testLogger{t}
