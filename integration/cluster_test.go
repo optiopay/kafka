@@ -2,6 +2,7 @@ package integration
 
 import (
 	"os"
+	"os/exec"
 	"strconv"
 	"testing"
 )
@@ -9,9 +10,23 @@ import (
 // Integration test skip test if WITH_INTEGRATION environment variable was not
 // set to true.
 func IntegrationTest(t *testing.T) {
+	if !hasDocker() {
+		t.Skip("Integration test. docker and/or docker-compose tools not available")
+	}
+
 	if ok, _ := strconv.ParseBool(os.Getenv("WITH_INTEGRATION")); !ok {
 		t.Skip("Integration test. Set WITH_INTEGRATION=true to run.")
 	}
+}
+
+func hasDocker() bool {
+	if err := exec.Command("docker", "--version").Run(); err != nil {
+		return false
+	}
+	if err := exec.Command("docker-compose", "--version").Run(); err != nil {
+		return false
+	}
+	return true
 }
 
 func TestKafkaCluster(t *testing.T) {
