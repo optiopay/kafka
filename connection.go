@@ -37,7 +37,7 @@ func newTCPConnection(address string, timeout time.Duration) (*connection, error
 	}
 	c := &connection{
 		stop:   make(chan struct{}),
-		nextID: make(chan int32, 4),
+		nextID: make(chan int32),
 		rw:     conn,
 		respc:  make(map[int32]chan []byte),
 	}
@@ -73,6 +73,7 @@ func (c *connection) readRespLoop() {
 		for _, cc := range c.respc {
 			close(cc)
 		}
+		c.respc = make(map[int32]chan []byte)
 		c.mu.Unlock()
 	}()
 
@@ -81,7 +82,10 @@ func (c *connection) readRespLoop() {
 		correlationID, b, err := proto.ReadResp(rd)
 		if err != nil {
 			c.mu.Lock()
-			c.stopErr = err
+			if c.stopErr == nil {
+				c.stopErr = err
+				close(c.stop)
+			}
 			c.mu.Unlock()
 			return
 		}
@@ -98,11 +102,13 @@ func (c *connection) readRespLoop() {
 		select {
 		case <-c.stop:
 			c.mu.Lock()
-			c.stopErr = ErrClosed
+			if c.stopErr == nil {
+				c.stopErr = ErrClosed
+			}
 			c.mu.Unlock()
 		case rc <- b:
-			close(rc)
 		}
+		close(rc)
 	}
 }
 
@@ -116,6 +122,9 @@ func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err err
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.stopErr != nil {
+		return nil, c.stopErr
+	}
 	if _, ok := c.respc[correlationID]; ok {
 		return nil, fmt.Errorf("correlation conflict: %d", correlationID)
 	}
@@ -124,8 +133,27 @@ func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err err
 	return respc, nil
 }
 
+// releaseWaiter removes response channel from waiters pool and close it.
+// Calling this method for unknown correlationID has no effect.
+func (c *connection) releaseWaiter(correlationID int32) {
+	c.mu.Lock()
+	rc, ok := c.respc[correlationID]
+	if ok {
+		delete(c.respc, correlationID)
+		close(rc)
+	}
+	c.mu.Unlock()
+}
+
+// Close close underlying transport connection and cancel all pending response
+// waiters.
 func (c *connection) Close() error {
-	close(c.stop)
+	c.mu.Lock()
+	if c.stopErr == nil {
+		c.stopErr = ErrClosed
+		close(c.stop)
+	}
+	c.mu.Unlock()
 	return c.rw.Close()
 }
 
@@ -135,10 +163,7 @@ func (c *connection) Close() error {
 func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
-		c.mu.Lock()
-		err := c.stopErr
-		c.mu.Unlock()
-		return nil, err
+		return nil, c.stopErr
 	}
 
 	respc, err := c.respWaiter(req.CorrelationID)
@@ -147,14 +172,12 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 	}
 
 	if _, err := req.WriteTo(c.rw); err != nil {
+		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
 	b, ok := <-respc
 	if !ok {
-		c.mu.Lock()
-		err := c.stopErr
-		c.mu.Unlock()
-		return nil, err
+		return nil, c.stopErr
 	}
 	return proto.ReadMetadataResp(bytes.NewReader(b))
 }
@@ -180,6 +203,7 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 	}
 
 	if _, err := req.WriteTo(c.rw); err != nil {
+		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
 	b, ok := <-respc
@@ -203,6 +227,7 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 	}
 
 	if _, err := req.WriteTo(c.rw); err != nil {
+		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
 	b, ok := <-respc
@@ -229,6 +254,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	// -1 is for non node clients
 	req.ReplicaID = -1
 	if _, err := req.WriteTo(c.rw); err != nil {
+		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
 	b, ok := <-respc
@@ -248,6 +274,7 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 	if _, err := req.WriteTo(c.rw); err != nil {
+		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
 	b, ok := <-respc
@@ -267,6 +294,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 	if _, err := req.WriteTo(c.rw); err != nil {
+		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
 	b, ok := <-respc
@@ -286,6 +314,7 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 	if _, err := req.WriteTo(c.rw); err != nil {
+		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
 	b, ok := <-respc

@@ -3,6 +3,7 @@ package kafka
 import (
 	"net"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +42,7 @@ func testServer(messages ...serializableMessage) (net.Listener, error) {
 				for _, resp := range responses {
 					_, _ = cli.Write(resp)
 				}
+				_ = cli.Close()
 			}(cli)
 		}
 	}()
@@ -78,6 +80,28 @@ func testServer2() (net.Listener, chan serializableMessage, error) {
 		}
 	}()
 	return ln, msgs, nil
+}
+
+func testServer3() (net.Listener, error) {
+	ln, err := net.Listen("tcp", "")
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		for {
+			cli, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			go func(conn net.Conn) {
+				_, _ = cli.Read(make([]byte, 1024))
+				_ = cli.Close()
+			}(cli)
+		}
+	}()
+	return ln, nil
 }
 
 func TestConnectionMetadata(t *testing.T) {
@@ -386,5 +410,140 @@ func TestConnectionProduceNoAck(t *testing.T) {
 	}
 	if err := ln.Close(); err != nil {
 		t.Fatalf("could not close test server: %s", err)
+	}
+}
+
+func TestClosedConnectionWriter(t *testing.T) {
+	// create test server with no messages, so that any client connection will
+	// be immediately closed
+	ln, err := testServer()
+	if err != nil {
+		t.Fatalf("test server error: %s", err)
+	}
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatalf("could not conect to test server: %s", err)
+	}
+
+	longBytes := []byte(strings.Repeat("xxxxxxxxxxxxxxxxxxxxxx", 1000))
+	req := proto.ProduceReq{
+		ClientID:     "test-client",
+		RequiredAcks: proto.RequiredAcksAll,
+		Timeout:      100,
+		Topics: []proto.ProduceReqTopic{
+			proto.ProduceReqTopic{
+				Name: "test-topic",
+				Partitions: []proto.ProduceReqPartition{
+					proto.ProduceReqPartition{
+						ID: 0,
+						Messages: []*proto.Message{
+							&proto.Message{Value: longBytes},
+						},
+					},
+				},
+			},
+		},
+	}
+	for i := 0; i < 10; i++ {
+		if _, err := conn.Produce(&req); err == nil {
+			t.Fatal("message publishing after closing connection should not be possible")
+		}
+	}
+
+	// although we produced ten requests, because connection is closed, no
+	// response channel should be registered
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	if len(conn.respc) != 0 {
+		t.Fatalf("expected 0 waiting responses, got %d", len(conn.respc))
+	}
+}
+
+func TestClosedConnectionReader(t *testing.T) {
+	// create test server with no messages, so that any client connection will
+	// be immediately closed
+	ln, err := testServer()
+	if err != nil {
+		t.Fatalf("test server error: %s", err)
+	}
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatalf("could not conect to test server: %s", err)
+	}
+
+	req := &proto.FetchReq{
+		ClientID:    "test-client",
+		MaxWaitTime: 100,
+		MinBytes:    0,
+		Topics: []proto.FetchReqTopic{
+			proto.FetchReqTopic{
+				Name: "my-topic",
+				Partitions: []proto.FetchReqPartition{
+					proto.FetchReqPartition{
+						ID:          0,
+						FetchOffset: 1,
+						MaxBytes:    100000,
+					},
+				},
+			},
+		},
+	}
+
+	for i := 0; i < 10; i++ {
+		if _, err := conn.Fetch(req); err == nil {
+			t.Fatal("fetching from closed connection succeeded")
+		}
+	}
+
+	// although we produced ten requests, because connection is closed, no
+	// response channel should be registered
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	if len(conn.respc) != 0 {
+		t.Fatalf("expected 0 waiting responses, got %d", len(conn.respc))
+	}
+}
+
+func TestConnectionReaderAfterEOF(t *testing.T) {
+	ln, err := testServer3()
+	if err != nil {
+		t.Fatalf("test server error: %s", err)
+	}
+	defer func() {
+		_ = ln.Close()
+	}()
+
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatalf("could not conect to test server: %s", err)
+	}
+
+	req := &proto.FetchReq{
+		ClientID:    "test-client",
+		MaxWaitTime: 100,
+		MinBytes:    0,
+		Topics: []proto.FetchReqTopic{
+			proto.FetchReqTopic{
+				Name: "my-topic",
+				Partitions: []proto.FetchReqPartition{
+					proto.FetchReqPartition{
+						ID:          0,
+						FetchOffset: 1,
+						MaxBytes:    100000,
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := conn.Fetch(req); err == nil {
+		t.Fatal("fetching from closed connection succeeded")
+	}
+
+	// Wait until testServer3 closes connection
+	time.Sleep(time.Millisecond * 50)
+
+	if _, err := conn.Fetch(req); err == nil {
+		t.Fatal("fetching from closed connection succeeded")
 	}
 }
