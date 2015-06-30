@@ -593,18 +593,18 @@ retryLoop:
 
 		offset, err = p.produce(topic, partition, messages...)
 		switch err {
-		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable, proto.ErrUnknownTopicOrPartition:
-			if err := p.broker.muRefreshMetadata(); err != nil {
-				p.conf.Log.Printf("failed to refresh metadata: %s", err)
-			}
+		case nil:
+			break retryLoop
 		case io.EOF, syscall.EPIPE:
 			// p.produce call is closing connection when this error shows up,
 			// but it's also returning it so that retry loop can count this
 			// case
 			// we cannot handle this error here, because there is no direct
 			// access to connection
-		case nil:
-			break retryLoop
+		default:
+			if err := p.broker.muRefreshMetadata(); err != nil {
+				p.conf.Log.Printf("failed to refresh metadata: %s", err)
+			}
 		}
 		p.conf.Log.Printf("failed to produce messages (%d): %s", retry, err)
 	}
@@ -931,6 +931,10 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 				}
 			}
 			return nil, errors.New("incomplete fetch response")
+		default:
+			c.conf.Log.Printf("failed to fetch messages (%d), unknown error: %s", retry, err)
+			c.broker.muCloseDeadConnection(c.conn)
+			c.conn = nil
 		}
 	}
 
