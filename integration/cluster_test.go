@@ -6,9 +6,11 @@ import (
 	"testing"
 )
 
+// Integration test skip test if WITH_INTEGRATION environment variable was not
+// set to true.
 func IntegrationTest(t *testing.T) {
-	if ok, _ := strconv.ParseBool(os.Getenv("WITH_INTEGRATION")); ok {
-		t.Skip("integration test")
+	if ok, _ := strconv.ParseBool(os.Getenv("WITH_INTEGRATION")); !ok {
+		t.Skip("Integration test. Set WITH_INTEGRATION=true to run.")
 	}
 }
 
