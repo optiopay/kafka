@@ -485,6 +485,13 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 		},
 	})
 	if err != nil {
+		if err == io.EOF || err == syscall.EPIPE {
+			// Connection is broken, so should be closed, but the error is
+			// still valid and should be returned so that retry mechanism have
+			// chance to react.
+			b.conf.Log.Printf("connection to %s:%d died while sending message", topic, partition)
+			b.muCloseDeadConnection(conn)
+		}
 		return 0, err
 	}
 	found := false
@@ -649,7 +656,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 			// Connection is broken, so should be closed, but the error is
 			// still valid and should be returned so that retry mechanism have
 			// chance to react.
-			p.conf.Log.Printf("connection to %s:%d died while sendnig message", topic, partition)
+			p.conf.Log.Printf("connection to %s:%d died while sending message", topic, partition)
 			p.broker.muCloseDeadConnection(conn)
 		}
 		return 0, err
