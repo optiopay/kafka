@@ -434,6 +434,154 @@ func TestPartitionOffset(t *testing.T) {
 	}
 }
 
+func TestPartitionOffsetClosedConnection(t *testing.T) {
+	srv1 := NewServer()
+	srv1.Start()
+	srv2 := NewServer()
+	srv2.Start()
+
+	host1, port1 := srv1.HostPort()
+	host2, port2 := srv2.HostPort()
+
+	var handlerErr error
+	srv1.Handle(MetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.MetadataReq)
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
+				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+			},
+			Topics: []proto.MetadataRespTopic{
+				proto.MetadataRespTopic{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						proto.MetadataRespPartition{
+							ID:       0,
+							Leader:   1,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+						proto.MetadataRespPartition{
+							ID:       1,
+							Leader:   1,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+					},
+				},
+			},
+		}
+	})
+	srv1.Handle(OffsetRequest, func(request Serializable) Serializable {
+		req := request.(*proto.OffsetReq)
+		if req.ReplicaID != -1 {
+			handlerErr = fmt.Errorf("expected -1 replica id, got %d", req.ReplicaID)
+		}
+		if req.Topics[0].Partitions[0].TimeMs != -2 {
+			handlerErr = fmt.Errorf("expected -2 timems, got %d", req.Topics[0].Partitions[0].TimeMs)
+		}
+		return &proto.OffsetResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.OffsetRespTopic{
+				proto.OffsetRespTopic{
+					Name: "test",
+					Partitions: []proto.OffsetRespPartition{
+						proto.OffsetRespPartition{
+							ID:      1,
+							Offsets: []int64{123, 0},
+						},
+					},
+				},
+			},
+		}
+	})
+	// after closing first server, which started as leader, broker should ask
+	// other nodes about the leader and refresh connections
+	srv2.Handle(MetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.MetadataReq)
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
+				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+			},
+			Topics: []proto.MetadataRespTopic{
+				proto.MetadataRespTopic{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						proto.MetadataRespPartition{
+							ID:       0,
+							Leader:   2,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+						proto.MetadataRespPartition{
+							ID:       1,
+							Leader:   2,
+							Replicas: []int32{1, 2},
+							Isrs:     []int32{1, 2},
+						},
+					},
+				},
+			},
+		}
+	})
+	srv2.Handle(OffsetRequest, func(request Serializable) Serializable {
+		req := request.(*proto.OffsetReq)
+		if req.ReplicaID != -1 {
+			handlerErr = fmt.Errorf("expected -1 replica id, got %d", req.ReplicaID)
+		}
+		if req.Topics[0].Partitions[0].TimeMs != -2 {
+			handlerErr = fmt.Errorf("expected -2 timems, got %d", req.Topics[0].Partitions[0].TimeMs)
+		}
+		return &proto.OffsetResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.OffsetRespTopic{
+				proto.OffsetRespTopic{
+					Name: "test",
+					Partitions: []proto.OffsetRespPartition{
+						proto.OffsetRespPartition{
+							ID:      1,
+							Offsets: []int64{234, 0},
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv1.Address()}, newTestBrokerConf("tester"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	offset, err := broker.offset("test", 1, -2)
+	if handlerErr != nil {
+		t.Fatalf("handler error: %s", handlerErr)
+	}
+	if err != nil {
+		t.Fatalf("cannot fetch offset: %s", err)
+	}
+	if offset != 123 {
+		t.Fatalf("expected 123 offset, got %d", offset)
+	}
+
+	srv1.Close()
+	defer srv2.Close()
+
+	offset, err = broker.offset("test", 1, -2)
+	if handlerErr != nil {
+		t.Fatalf("handler error: %s", handlerErr)
+	}
+	if err != nil {
+		t.Fatalf("cannot fetch offset: %s", err)
+	}
+	if offset != 234 {
+		t.Fatalf("expected 234 offset, got %d", offset)
+	}
+}
+
 func TestLeaderConnectionFailover(t *testing.T) {
 	srv := NewServer()
 	srv.Start()
