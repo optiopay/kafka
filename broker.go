@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"sync"
 	"syscall"
 	"time"
@@ -485,7 +486,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 		},
 	})
 	if err != nil {
-		if err == io.EOF || err == syscall.EPIPE {
+		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
 			// Connection is broken, so should be closed, but the error is
 			// still valid and should be returned so that retry mechanism have
 			// chance to react.
