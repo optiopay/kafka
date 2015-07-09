@@ -2,7 +2,6 @@ package kafka
 
 import (
 	"fmt"
-	"io"
 	"net"
 	"strings"
 	"testing"
@@ -574,8 +573,8 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 	if handlerErr != nil {
 		t.Fatalf("handler error: %s", handlerErr)
 	}
-	if err != io.EOF {
-		t.Fatalf("expected EOF, got %s", err)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
 	}
 
 	offset, err = broker.offset("test", 1, -2)
