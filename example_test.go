@@ -2,8 +2,6 @@ package kafka
 
 import (
 	"fmt"
-	"log"
-	"os"
 
 	"github.com/optiopay/kafka/proto"
 )
@@ -50,7 +48,7 @@ func ExampleOffsetCoordinator() {
 
 	// create offset coordinator and customize configuration
 	conf := NewOffsetCoordinatorConf("my-consumer-group")
-	conf.Log = log.New(os.Stderr, "[my-group-coordinator]", log.LstdFlags)
+	conf.RetryErrLimit = 20
 	coordinator, err := broker.OffsetCoordinator(conf)
 	if err != nil {
 		panic(err)
@@ -83,7 +81,6 @@ func ExampleProducer() {
 
 	// create new producer
 	conf := NewProducerConf()
-	conf.Log = log.New(os.Stderr, "[producer]", log.LstdFlags)
 	conf.RequiredAcks = proto.RequiredAcksLocal
 
 	// write two messages to kafka using single call to make it atomic
@@ -113,7 +110,6 @@ func ExampleMerge() {
 	for i, topic := range topics {
 		conf := NewConsumerConf(topic, 0)
 		conf.RetryLimit = 20
-		conf.Log = log.New(os.Stderr, fmt.Sprintf("[consumer:%s]", topic), log.LstdFlags)
 		conf.StartOffset = StartOffsetNewest
 		consumer, err := broker.Consumer(conf)
 		if err != nil {
