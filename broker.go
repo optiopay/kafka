@@ -157,8 +157,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 
 	for i := 0; i < conf.DialRetryLimit; i++ {
 		if i > 0 {
-			conf.Logger.Debug(
-				"msg", "cannot fetch metadata from any connection",
+			conf.Logger.Debug("cannot fetch metadata from any connection",
 				"retry", i,
 				"sleep", conf.DialRetryWait)
 			time.Sleep(conf.DialRetryWait)
@@ -167,8 +166,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 		for _, addr := range nodeAddresses {
 			conn, err := newTCPConnection(addr, conf.DialTimeout)
 			if err != nil {
-				conf.Logger.Debug(
-					"msg", "cannot connect",
+				conf.Logger.Debug("cannot connect",
 					"address", addr,
 					"err", err)
 				continue
@@ -181,15 +179,13 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 				Topics:   nil,
 			})
 			if err != nil {
-				conf.Logger.Debug(
-					"msg", "cannot fetch metadata",
+				conf.Logger.Debug("cannot fetch metadata",
 					"address", addr,
 					"err", err)
 				continue
 			}
 			if len(resp.Brokers) == 0 {
-				conf.Logger.Debug(
-					"msg", "response with no broker data",
+				conf.Logger.Debug("response with no broker data",
 					"address", addr)
 				continue
 			}
@@ -206,8 +202,7 @@ func (b *Broker) Close() {
 	defer b.mu.Unlock()
 	for nodeID, conn := range b.conns {
 		if err := conn.Close(); err != nil {
-			b.conf.Logger.Info(
-				"msg", "cannot close node connection",
+			b.conf.Logger.Info("cannot close node connection",
 				"nodeID", nodeID,
 				"err", err)
 		}
@@ -255,8 +250,7 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 			Topics:   nil,
 		})
 		if err != nil {
-			b.conf.Logger.Debug(
-				"msg", "cannot fetch metadata from node",
+			b.conf.Logger.Debug("cannot fetch metadata from node",
 				"nodeID", nodeID,
 				"err", err)
 			continue
@@ -271,8 +265,7 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 		}
 		conn, err := newTCPConnection(addr, b.conf.DialTimeout)
 		if err != nil {
-			b.conf.Logger.Debug(
-				"msg", "cannot connect",
+			b.conf.Logger.Debug("cannot connect",
 				"address", addr,
 				"err", err)
 			continue
@@ -286,8 +279,7 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 		_ = conn.Close()
 
 		if err != nil {
-			b.conf.Logger.Debug(
-				"msg", "cannot fetch metadata from node",
+			b.conf.Logger.Debug("cannot fetch metadata from node",
 				"nodeID", nodeID,
 				"err", err)
 			continue
@@ -302,8 +294,7 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 // given response. It's call has to be protected with lock.
 func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 	if !b.metadata.created.IsZero() {
-		b.conf.Logger.Debug(
-			"msg", "rewriting old metadata",
+		b.conf.Logger.Debug("rewriting old metadata",
 			"age", time.Now().Sub(b.metadata.created))
 	}
 	b.metadata = clusterMetadata{
@@ -311,7 +302,7 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 		nodes:     make(map[int32]string),
 		endpoints: make(map[string]int32),
 	}
-	debugmsg := []interface{}{"msg", "new metadata cached"}
+	debugmsg := make([]interface{}, 0)
 	for _, node := range resp.Brokers {
 		addr := fmt.Sprintf("%s:%d", node.Host, node.Port)
 		b.metadata.nodes[node.NodeID] = addr
@@ -324,7 +315,7 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 			debugmsg = append(debugmsg, dest, part.Leader)
 		}
 	}
-	b.conf.Logger.Debug(debugmsg...)
+	b.conf.Logger.Debug("new metadata cached", debugmsg...)
 }
 
 // muLeaderConnection returns connection to leader for given partition. If
@@ -340,8 +331,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
 		if retry != 0 {
 			b.mu.Unlock()
-			b.conf.Logger.Debug(
-				"msg", "cannot get leader connection",
+			b.conf.Logger.Debug("cannot get leader connection",
 				"retry", retry,
 				"sleep", b.conf.LeaderRetryWait)
 			time.Sleep(b.conf.LeaderRetryWait)
@@ -352,15 +342,13 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 		if !ok {
 			err = b.refreshMetadata()
 			if err != nil {
-				b.conf.Logger.Info(
-					"msg", "cannot get leader connection: cannot refresh metadata",
+				b.conf.Logger.Info("cannot get leader connection: cannot refresh metadata",
 					"err", err)
 				continue
 			}
 			nodeID, ok = b.metadata.endpoints[endpoint]
 			if !ok {
-				b.conf.Logger.Info(
-					"msg", "cannot get leader connection: unknown topic or partition",
+				b.conf.Logger.Info("cannot get leader connection: unknown topic or partition",
 					"topic", topic,
 					"partition", partition,
 					"endpoint", endpoint)
@@ -373,16 +361,14 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 		if !ok {
 			addr, ok := b.metadata.nodes[nodeID]
 			if !ok {
-				b.conf.Logger.Info(
-					"msg", "cannot get leader connection: no information about node",
+				b.conf.Logger.Info("cannot get leader connection: no information about node",
 					"nodeID", nodeID)
 				err = proto.ErrBrokerNotAvailable
 				continue
 			}
 			conn, err = newTCPConnection(addr, b.conf.DialTimeout)
 			if err != nil {
-				b.conf.Logger.Info(
-					"msg", "cannot get leader connection: cannot connect to node",
+				b.conf.Logger.Info("cannot get leader connection: cannot connect to node",
 					"address", addr,
 					"err", err)
 				continue
@@ -415,16 +401,14 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 				ConsumerGroup: consumerGroup,
 			})
 			if err != nil {
-				b.conf.Logger.Debug(
-					"msg", "cannot fetch coordinator metadata",
+				b.conf.Logger.Debug("cannot fetch coordinator metadata",
 					"consumGrp", consumerGroup,
 					"err", err)
 				resErr = err
 				continue
 			}
 			if resp.Err != nil {
-				b.conf.Logger.Debug(
-					"msg", "coordinator metadata response error",
+				b.conf.Logger.Debug("coordinator metadata response error",
 					"consumGrp", consumerGroup,
 					"err", resp.Err)
 				resErr = err
@@ -434,8 +418,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
 			conn, err := newTCPConnection(addr, b.conf.DialTimeout)
 			if err != nil {
-				b.conf.Logger.Debug(
-					"msg", "cannot connect to node",
+				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
 					"address", addr,
 					"err", err)
@@ -448,8 +431,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 
 		// if none of the connections worked out, try with fresh data
 		if err := b.refreshMetadata(); err != nil {
-			b.conf.Logger.Debug(
-				"msg", "cannot refresh metadata",
+			b.conf.Logger.Debug("cannot refresh metadata",
 				"err", err)
 			resErr = err
 			continue
@@ -462,8 +444,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			}
 			conn, err := newTCPConnection(addr, b.conf.DialTimeout)
 			if err != nil {
-				b.conf.Logger.Debug(
-					"msg", "cannot connect to node",
+				b.conf.Logger.Debug("cannot connect to node",
 					"nodeID", nodeID,
 					"address", addr,
 					"err", err)
@@ -477,16 +458,14 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 				ConsumerGroup: consumerGroup,
 			})
 			if err != nil {
-				b.conf.Logger.Debug(
-					"msg", "cannot fetch metadata",
+				b.conf.Logger.Debug("cannot fetch metadata",
 					"consumGrp", consumerGroup,
 					"err", err)
 				resErr = err
 				continue
 			}
 			if resp.Err != nil {
-				b.conf.Logger.Debug(
-					"msg", "metadata response error",
+				b.conf.Logger.Debug("metadata response error",
 					"consumGrp", consumerGroup,
 					"err", resp.Err)
 				resErr = err
@@ -496,8 +475,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
 			conn, err = newTCPConnection(addr, b.conf.DialTimeout)
 			if err != nil {
-				b.conf.Logger.Debug(
-					"msg", "cannot connect to node",
+				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
 					"address", addr,
 					"err", err)
@@ -523,14 +501,12 @@ func (b *Broker) muCloseDeadConnection(conn *connection) {
 
 	for nid, c := range b.conns {
 		if c == conn {
-			b.conf.Logger.Debug(
-				"msg", "closing dead connection",
+			b.conf.Logger.Debug("closing dead connection",
 				"nodeID", nid)
 			delete(b.conns, nid)
 			_ = c.Close()
 			if err := b.refreshMetadata(); err != nil {
-				b.conf.Logger.Debug(
-					"msg", "cannot refresh metadata",
+				b.conf.Logger.Debug("cannot refresh metadata",
 					"err", err)
 			}
 			return
@@ -566,8 +542,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 			// Connection is broken, so should be closed, but the error is
 			// still valid and should be returned so that retry mechanism have
 			// chance to react.
-			b.conf.Logger.Debug(
-				"msg", "connection died while sending message",
+			b.conf.Logger.Debug("connection died while sending message",
 				"topic", topic,
 				"partition", partition,
 				"err", err)
@@ -578,16 +553,14 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 	found := false
 	for _, t := range resp.Topics {
 		if t.Name != topic {
-			b.conf.Logger.Debug(
-				"msg", "unexpected topic information",
+			b.conf.Logger.Debug("unexpected topic information",
 				"expected", topic,
 				"got", t.Name)
 			continue
 		}
 		for _, part := range t.Partitions {
 			if part.ID != partition {
-				b.conf.Logger.Debug(
-					"msg", "unexpected partition information",
+				b.conf.Logger.Debug("unexpected partition information",
 					"topic", t.Name,
 					"expected", partition,
 					"got", part.ID)
@@ -698,13 +671,11 @@ retryLoop:
 			// access to connection
 		default:
 			if err := p.broker.muRefreshMetadata(); err != nil {
-				p.conf.Logger.Debug(
-					"msg", "cannot refresh metadata",
+				p.conf.Logger.Debug("cannot refresh metadata",
 					"err", err)
 			}
 		}
-		p.conf.Logger.Debug(
-			"msg", "cannot produce messages",
+		p.conf.Logger.Debug("cannot produce messages",
 			"retry", retry,
 			"err", err)
 	}
@@ -749,8 +720,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 			// Connection is broken, so should be closed, but the error is
 			// still valid and should be returned so that retry mechanism have
 			// chance to react.
-			p.conf.Logger.Debug(
-				"msg", "connection died while sendnig message",
+			p.conf.Logger.Debug("connection died while sendnig message",
 				"topic", topic,
 				"partition", partition,
 				"err", err)
@@ -763,16 +733,14 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 	found := false
 	for _, t := range resp.Topics {
 		if t.Name != topic {
-			p.conf.Logger.Debug(
-				"msg", "unexpected topic information received",
+			p.conf.Logger.Debug("unexpected topic information received",
 				"expected", topic,
 				"got", t.Name)
 			continue
 		}
 		for _, part := range t.Partitions {
 			if part.ID != partition {
-				p.conf.Logger.Debug(
-					"msg", "unexpected partition information received",
+				p.conf.Logger.Debug("unexpected partition information received",
 					"topic", t.Name,
 					"expected", partition,
 					"got", part.ID)
@@ -950,8 +918,7 @@ func (c *consumer) Consume() (*proto.Message, error) {
 		// those again
 
 		if len(messages) == toSkip && toSkip != 0 {
-			c.conf.Logger.Debug(
-				"msg", "no valid message fetched",
+			c.conf.Logger.Debug("no valid message fetched",
 				"skipped", toSkip)
 		}
 		// ignore all messages that are of index lower than requested
@@ -1021,18 +988,15 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 
 		switch err {
 		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
-			c.conf.Logger.Debug(
-				"msg", "cannot fetch messages",
+			c.conf.Logger.Debug("cannot fetch messages",
 				"retry", retry,
 				"err", err)
 			if err := c.broker.muRefreshMetadata(); err != nil {
-				c.conf.Logger.Debug(
-					"msg", "cannot refresh metadata",
+				c.conf.Logger.Debug("cannot refresh metadata",
 					"err", err)
 			}
 		case io.EOF, syscall.EPIPE:
-			c.conf.Logger.Debug(
-				"msg", "connection died while fetching message",
+			c.conf.Logger.Debug("connection died while fetching message",
 				"topic", c.conf.Topic,
 				"partition", c.conf.Partition,
 				"err", err)
@@ -1041,16 +1005,14 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 		case nil:
 			for _, topic := range resp.Topics {
 				if topic.Name != c.conf.Topic {
-					c.conf.Logger.Warn(
-						"msg", "unexpected topic information received",
+					c.conf.Logger.Warn("unexpected topic information received",
 						"got", topic.Name,
 						"expected", c.conf.Topic)
 					continue
 				}
 				for _, part := range topic.Partitions {
 					if part.ID != c.conf.Partition {
-						c.conf.Logger.Warn(
-							"msg", "unexpected partition information received",
+						c.conf.Logger.Warn("unexpected partition information received",
 							"topic", topic.Name,
 							"expected", c.conf.Partition,
 							"got", part.ID)
@@ -1061,8 +1023,7 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 			}
 			return nil, errors.New("incomplete fetch response")
 		default:
-			c.conf.Logger.Debug(
-				"msg", "cannot fetch messages: unknown error",
+			c.conf.Logger.Debug("cannot fetch messages: unknown error",
 				"retry", retry,
 				"err", err)
 			c.broker.muCloseDeadConnection(c.conn)
@@ -1156,8 +1117,7 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 			conn, err := c.broker.muCoordinatorConnection(c.conf.ConsumerGroup)
 			if err != nil {
 				resErr = err
-				c.conf.Logger.Debug(
-					"msg", "cannot connect to coordinator",
+				c.conf.Logger.Debug("cannot connect to coordinator",
 					"consumGrp", c.conf.ConsumerGroup,
 					"err", err)
 				continue
@@ -1181,8 +1141,7 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 
 		switch err {
 		case io.EOF, syscall.EPIPE:
-			c.conf.Logger.Debug(
-				"msg", "connection died while commiting",
+			c.conf.Logger.Debug("connection died while commiting",
 				"topic", topic,
 				"partition", partition,
 				"consumGrp", c.conf.ConsumerGroup)
@@ -1191,8 +1150,7 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 		case nil:
 			for _, t := range resp.Topics {
 				if t.Name != topic {
-					c.conf.Logger.Debug(
-						"msg", "unexpected topic information received",
+					c.conf.Logger.Debug("unexpected topic information received",
 						"got", t.Name,
 						"expected", topic)
 					continue
@@ -1200,8 +1158,7 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 				}
 				for _, part := range t.Partitions {
 					if part.ID != partition {
-						c.conf.Logger.Debug(
-							"msg", "unexpected partition information received",
+						c.conf.Logger.Debug("unexpected partition information received",
 							"topic", topic,
 							"got", part.ID,
 							"expected", partition)
@@ -1236,8 +1193,7 @@ func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64,
 		if c.conn == nil {
 			conn, err := c.broker.muCoordinatorConnection(c.conf.ConsumerGroup)
 			if err != nil {
-				c.conf.Logger.Debug(
-					"msg", "cannot connect to coordinator",
+				c.conf.Logger.Debug("cannot connect to coordinator",
 					"consumGrp", c.conf.ConsumerGroup,
 					"err", err)
 				resErr = err
@@ -1258,8 +1214,7 @@ func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64,
 
 		switch err {
 		case io.EOF, syscall.EPIPE:
-			c.conf.Logger.Debug(
-				"msg", "connection died while fetching offset",
+			c.conf.Logger.Debug("connection died while fetching offset",
 				"topic", topic,
 				"partition", partition,
 				"consumGrp", c.conf.ConsumerGroup)
@@ -1268,16 +1223,14 @@ func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64,
 		case nil:
 			for _, t := range resp.Topics {
 				if t.Name != topic {
-					c.conf.Logger.Debug(
-						"msg", "unexpected topic information received",
+					c.conf.Logger.Debug("unexpected topic information received",
 						"got", t.Name,
 						"expected", topic)
 					continue
 				}
 				for _, part := range t.Partitions {
 					if part.ID != partition {
-						c.conf.Logger.Debug(
-							"msg", "unexpected partition information received",
+						c.conf.Logger.Debug("unexpected partition information received",
 							"topic", topic,
 							"expected", partition,
 							"get", part.ID)
