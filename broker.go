@@ -35,11 +35,11 @@ var (
 
 // Client is the interface implemented by Broker.
 type Client interface {
-	Producer(ProducerConf) Producer
-	Consumer(ConsumerConf) (Consumer, error)
-	OffsetCoordinator(OffsetCoordinatorConf) (OffsetCoordinator, error)
-	OffsetEarliest(string, int32) (int64, error)
-	OffsetLatest(string, int32) (int64, error)
+	Producer(conf ProducerConf) Producer
+	Consumer(conf ConsumerConf) (Consumer, error)
+	OffsetCoordinator(conf OffsetCoordinatorConf) (OffsetCoordinator, error)
+	OffsetEarliest(topic string, partition int32) (offset int64, err error)
+	OffsetLatest(topic string, partition int32) (offset int64, err error)
 	Close()
 }
 
@@ -57,7 +57,7 @@ type Consumer interface {
 // post-commit offset and any error encountered.  The offset of each message is
 // also updated accordingly.
 type Producer interface {
-	Produce(string, int32, ...*proto.Message) (int64, error)
+	Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error)
 }
 
 // OffsetCoordinator is the interface which wraps the Commit and Offset methods.
