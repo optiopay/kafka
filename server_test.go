@@ -248,7 +248,7 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host, Port: int32(port)},
+				{NodeID: 1, Host: host, Port: int32(port)},
 			},
 			Topics: []proto.MetadataRespTopic{},
 		}

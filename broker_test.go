@@ -27,19 +27,19 @@ func TestingMetadataHandler(srv *Server) RequestHandler {
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host, Port: int32(port)},
+				{NodeID: 1, Host: host, Port: int32(port)},
 			},
 			Topics: []proto.MetadataRespTopic{
-				proto.MetadataRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.MetadataRespPartition{
-						proto.MetadataRespPartition{
+						{
 							ID:       0,
 							Leader:   1,
 							Replicas: []int32{1},
 							Isrs:     []int32{1},
 						},
-						proto.MetadataRespPartition{
+						{
 							ID:       1,
 							Leader:   1,
 							Replicas: []int32{1},
@@ -81,8 +81,8 @@ func TestProducer(t *testing.T) {
 	prodConf.RetryWait = time.Millisecond
 	producer := broker.Producer(prodConf)
 	messages := []*proto.Message{
-		&proto.Message{Value: []byte("first")},
-		&proto.Message{Value: []byte("second")},
+		{Value: []byte("first")},
+		{Value: []byte("second")},
 	}
 	_, err = producer.Produce("does-not-exist", 42142, messages...)
 	if err != proto.ErrUnknownTopicOrPartition {
@@ -113,10 +113,10 @@ func TestProducer(t *testing.T) {
 		return &proto.ProduceResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.ProduceRespTopic{
-				proto.ProduceRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.ProduceRespPartition{
-						proto.ProduceRespPartition{
+						{
 							ID:     0,
 							Offset: 5,
 						},
@@ -158,13 +158,13 @@ func TestConsumer(t *testing.T) {
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host, Port: int32(port)},
+				{NodeID: 1, Host: host, Port: int32(port)},
 			},
 			Topics: []proto.MetadataRespTopic{
-				proto.MetadataRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.MetadataRespPartition{
-						proto.MetadataRespPartition{
+						{
 							ID:       413,
 							Leader:   1,
 							Replicas: []int32{1},
@@ -183,10 +183,10 @@ func TestConsumer(t *testing.T) {
 			return &proto.FetchResp{
 				CorrelationID: req.CorrelationID,
 				Topics: []proto.FetchRespTopic{
-					proto.FetchRespTopic{
+					{
 						Name: "test",
 						Partitions: []proto.FetchRespPartition{
-							proto.FetchRespPartition{
+							{
 								ID:        413,
 								TipOffset: 0,
 								Messages:  []*proto.Message{},
@@ -198,18 +198,18 @@ func TestConsumer(t *testing.T) {
 		}
 
 		messages := []*proto.Message{
-			&proto.Message{Offset: 3, Key: []byte("1"), Value: []byte("first")},
-			&proto.Message{Offset: 4, Key: []byte("2"), Value: []byte("second")},
-			&proto.Message{Offset: 5, Key: []byte("3"), Value: []byte("three")},
+			{Offset: 3, Key: []byte("1"), Value: []byte("first")},
+			{Offset: 4, Key: []byte("2"), Value: []byte("second")},
+			{Offset: 5, Key: []byte("3"), Value: []byte("three")},
 		}
 
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.FetchRespTopic{
-				proto.FetchRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.FetchRespPartition{
-						proto.FetchRespPartition{
+						{
 							ID:        413,
 							TipOffset: 2,
 							Messages:  messages,
@@ -270,13 +270,13 @@ func TestConsumerRetry(t *testing.T) {
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host, Port: int32(port)},
+				{NodeID: 1, Host: host, Port: int32(port)},
 			},
 			Topics: []proto.MetadataRespTopic{
-				proto.MetadataRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.MetadataRespPartition{
-						proto.MetadataRespPartition{
+						{
 							ID:       0,
 							Leader:   1,
 							Replicas: []int32{1},
@@ -294,10 +294,10 @@ func TestConsumerRetry(t *testing.T) {
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.FetchRespTopic{
-				proto.FetchRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.FetchRespPartition{
-						proto.FetchRespPartition{
+						{
 							ID:        0,
 							TipOffset: 0,
 							Messages:  []*proto.Message{},
@@ -342,17 +342,17 @@ func TestConsumeInvalidOffset(t *testing.T) {
 		req := request.(*proto.FetchReq)
 		messages := []*proto.Message{
 			// return message with offset lower than requested
-			&proto.Message{Offset: 3, Key: []byte("1"), Value: []byte("first")},
-			&proto.Message{Offset: 4, Key: []byte("2"), Value: []byte("second")},
-			&proto.Message{Offset: 5, Key: []byte("3"), Value: []byte("three")},
+			{Offset: 3, Key: []byte("1"), Value: []byte("first")},
+			{Offset: 4, Key: []byte("2"), Value: []byte("second")},
+			{Offset: 5, Key: []byte("3"), Value: []byte("three")},
 		}
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.FetchRespTopic{
-				proto.FetchRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.FetchRespPartition{
-						proto.FetchRespPartition{
+						{
 							ID:        0,
 							TipOffset: 2,
 							Messages:  messages,
@@ -404,10 +404,10 @@ func TestPartitionOffset(t *testing.T) {
 		return &proto.OffsetResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.OffsetRespTopic{
-				proto.OffsetRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.OffsetRespPartition{
-						proto.OffsetRespPartition{
+						{
 							ID:      1,
 							Offsets: []int64{123, 0},
 						},
@@ -449,20 +449,20 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
-				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+				{NodeID: 1, Host: host1, Port: int32(port1)},
+				{NodeID: 2, Host: host2, Port: int32(port2)},
 			},
 			Topics: []proto.MetadataRespTopic{
-				proto.MetadataRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.MetadataRespPartition{
-						proto.MetadataRespPartition{
+						{
 							ID:       0,
 							Leader:   1,
 							Replicas: []int32{1, 2},
 							Isrs:     []int32{1, 2},
 						},
-						proto.MetadataRespPartition{
+						{
 							ID:       1,
 							Leader:   1,
 							Replicas: []int32{1, 2},
@@ -484,10 +484,10 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 		return &proto.OffsetResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.OffsetRespTopic{
-				proto.OffsetRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.OffsetRespPartition{
-						proto.OffsetRespPartition{
+						{
 							ID:      1,
 							Offsets: []int64{123, 0},
 						},
@@ -503,20 +503,20 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
-				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+				{NodeID: 1, Host: host1, Port: int32(port1)},
+				{NodeID: 2, Host: host2, Port: int32(port2)},
 			},
 			Topics: []proto.MetadataRespTopic{
-				proto.MetadataRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.MetadataRespPartition{
-						proto.MetadataRespPartition{
+						{
 							ID:       0,
 							Leader:   2,
 							Replicas: []int32{1, 2},
 							Isrs:     []int32{1, 2},
 						},
-						proto.MetadataRespPartition{
+						{
 							ID:       1,
 							Leader:   2,
 							Replicas: []int32{1, 2},
@@ -538,10 +538,10 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 		return &proto.OffsetResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.OffsetRespTopic{
-				proto.OffsetRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.OffsetRespPartition{
-						proto.OffsetRespPartition{
+						{
 							ID:      1,
 							Offsets: []int64{234, 0},
 						},
@@ -667,10 +667,10 @@ func TestProducerFailoverRequestTimeout(t *testing.T) {
 		return &proto.ProduceResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.ProduceRespTopic{
-				proto.ProduceRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.ProduceRespPartition{
-						proto.ProduceRespPartition{
+						{
 							ID:  0,
 							Err: proto.ErrRequestTimeout,
 						},
@@ -715,10 +715,10 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 			return &proto.ProduceResp{
 				CorrelationID: req.CorrelationID,
 				Topics: []proto.ProduceRespTopic{
-					proto.ProduceRespTopic{
+					{
 						Name: "test",
 						Partitions: []proto.ProduceRespPartition{
-							proto.ProduceRespPartition{
+							{
 								ID:     0,
 								Offset: 11,
 							},
@@ -731,10 +731,10 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 		return &proto.ProduceResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.ProduceRespTopic{
-				proto.ProduceRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.ProduceRespPartition{
-						proto.ProduceRespPartition{
+						{
 							ID:  0,
 							Err: proto.ErrLeaderNotAvailable,
 						},
@@ -769,8 +769,8 @@ func TestConsumerFailover(t *testing.T) {
 	defer srv.Close()
 
 	messages := []*proto.Message{
-		&proto.Message{Value: []byte("first")},
-		&proto.Message{Value: []byte("second")},
+		{Value: []byte("first")},
+		{Value: []byte("second")},
 	}
 
 	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
@@ -784,10 +784,10 @@ func TestConsumerFailover(t *testing.T) {
 			return &proto.FetchResp{
 				CorrelationID: req.CorrelationID,
 				Topics: []proto.FetchRespTopic{
-					proto.FetchRespTopic{
+					{
 						Name: "test",
 						Partitions: []proto.FetchRespPartition{
-							proto.FetchRespPartition{
+							{
 								ID:  1,
 								Err: nil,
 							},
@@ -799,10 +799,10 @@ func TestConsumerFailover(t *testing.T) {
 		resp := &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.FetchRespTopic{
-				proto.FetchRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.FetchRespPartition{
-						proto.FetchRespPartition{
+						{
 							ID:       1,
 							Messages: messages,
 						},
@@ -869,20 +869,20 @@ func TestProducerBrokenPipe(t *testing.T) {
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
-				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+				{NodeID: 1, Host: host1, Port: int32(port1)},
+				{NodeID: 2, Host: host2, Port: int32(port2)},
 			},
 			Topics: []proto.MetadataRespTopic{
-				proto.MetadataRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.MetadataRespPartition{
-						proto.MetadataRespPartition{
+						{
 							ID:       0,
 							Leader:   1,
 							Replicas: []int32{1, 2},
 							Isrs:     []int32{1, 2},
 						},
-						proto.MetadataRespPartition{
+						{
 							ID:       1,
 							Leader:   1,
 							Replicas: []int32{1, 2},
@@ -898,10 +898,10 @@ func TestProducerBrokenPipe(t *testing.T) {
 		return &proto.ProduceResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.ProduceRespTopic{
-				proto.ProduceRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.ProduceRespPartition{
-						proto.ProduceRespPartition{
+						{
 							ID:     0,
 							Offset: 12345,
 						},
@@ -917,20 +917,20 @@ func TestProducerBrokenPipe(t *testing.T) {
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
-				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+				{NodeID: 1, Host: host1, Port: int32(port1)},
+				{NodeID: 2, Host: host2, Port: int32(port2)},
 			},
 			Topics: []proto.MetadataRespTopic{
-				proto.MetadataRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.MetadataRespPartition{
-						proto.MetadataRespPartition{
+						{
 							ID:       0,
 							Leader:   2,
 							Replicas: []int32{1, 2},
 							Isrs:     []int32{1, 2},
 						},
-						proto.MetadataRespPartition{
+						{
 							ID:       1,
 							Leader:   2,
 							Replicas: []int32{1, 2},
@@ -946,10 +946,10 @@ func TestProducerBrokenPipe(t *testing.T) {
 		return &proto.ProduceResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.ProduceRespTopic{
-				proto.ProduceRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.ProduceRespPartition{
-						proto.ProduceRespPartition{
+						{
 							ID:     0,
 							Offset: 12346,
 						},
@@ -1001,13 +1001,13 @@ func TestFetchOffset(t *testing.T) {
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.FetchRespTopic{
-				proto.FetchRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.FetchRespPartition{
-						proto.FetchRespPartition{
+						{
 							ID: 0,
 							Messages: []*proto.Message{
-								&proto.Message{Offset: offset},
+								{Offset: offset},
 							},
 						},
 					},
@@ -1052,20 +1052,20 @@ func TestConsumerBrokenPipe(t *testing.T) {
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
-				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+				{NodeID: 1, Host: host1, Port: int32(port1)},
+				{NodeID: 2, Host: host2, Port: int32(port2)},
 			},
 			Topics: []proto.MetadataRespTopic{
-				proto.MetadataRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.MetadataRespPartition{
-						proto.MetadataRespPartition{
+						{
 							ID:       0,
 							Leader:   1,
 							Replicas: []int32{1, 2},
 							Isrs:     []int32{1, 2},
 						},
-						proto.MetadataRespPartition{
+						{
 							ID:       1,
 							Leader:   1,
 							Replicas: []int32{1, 2},
@@ -1081,13 +1081,13 @@ func TestConsumerBrokenPipe(t *testing.T) {
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.FetchRespTopic{
-				proto.FetchRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.FetchRespPartition{
-						proto.FetchRespPartition{
+						{
 							ID: 0,
 							Messages: []*proto.Message{
-								&proto.Message{Offset: 0, Value: longBytes},
+								{Offset: 0, Value: longBytes},
 							},
 						},
 					},
@@ -1103,20 +1103,20 @@ func TestConsumerBrokenPipe(t *testing.T) {
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				proto.MetadataRespBroker{NodeID: 1, Host: host1, Port: int32(port1)},
-				proto.MetadataRespBroker{NodeID: 2, Host: host2, Port: int32(port2)},
+				{NodeID: 1, Host: host1, Port: int32(port1)},
+				{NodeID: 2, Host: host2, Port: int32(port2)},
 			},
 			Topics: []proto.MetadataRespTopic{
-				proto.MetadataRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.MetadataRespPartition{
-						proto.MetadataRespPartition{
+						{
 							ID:       0,
 							Leader:   2,
 							Replicas: []int32{1, 2},
 							Isrs:     []int32{1, 2},
 						},
-						proto.MetadataRespPartition{
+						{
 							ID:       1,
 							Leader:   2,
 							Replicas: []int32{1, 2},
@@ -1132,13 +1132,13 @@ func TestConsumerBrokenPipe(t *testing.T) {
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.FetchRespTopic{
-				proto.FetchRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.FetchRespPartition{
-						proto.FetchRespPartition{
+						{
 							ID: 0,
 							Messages: []*proto.Message{
-								&proto.Message{Offset: 1, Value: longBytes},
+								{Offset: 1, Value: longBytes},
 							},
 						},
 					},
@@ -1197,10 +1197,10 @@ func TestOffsetCoordinator(t *testing.T) {
 		return &proto.OffsetCommitResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.OffsetCommitRespTopic{
-				proto.OffsetCommitRespTopic{
+				{
 					Name: "first-topic",
 					Partitions: []proto.OffsetCommitRespPartition{
-						proto.OffsetCommitRespPartition{
+						{
 							ID:  0,
 							Err: nil,
 						},
@@ -1225,7 +1225,7 @@ func TestOffsetCoordinator(t *testing.T) {
 		return &proto.OffsetFetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.OffsetFetchRespTopic{
-				proto.OffsetFetchRespTopic{
+				{
 					Name:       "first-topic",
 					Partitions: []proto.OffsetFetchRespPartition{partition},
 				},
@@ -1320,10 +1320,10 @@ func BenchmarkConsumer(b *testing.B) {
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.FetchRespTopic{
-				proto.FetchRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.FetchRespPartition{
-						proto.FetchRespPartition{
+						{
 							ID:        0,
 							TipOffset: msgOffset - int64(len(messages)),
 							Messages:  messages,
@@ -1372,10 +1372,10 @@ func BenchmarkProducer(b *testing.B) {
 		return &proto.ProduceResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.ProduceRespTopic{
-				proto.ProduceRespTopic{
+				{
 					Name: "test",
 					Partitions: []proto.ProduceRespPartition{
-						proto.ProduceRespPartition{
+						{
 							ID:     0,
 							Offset: msgOffset,
 						},

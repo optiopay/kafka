@@ -86,8 +86,8 @@ func ExampleProducer() {
 	// write two messages to kafka using single call to make it atomic
 	producer := broker.Producer(conf)
 	messages := []*proto.Message{
-		&proto.Message{Value: []byte("first")},
-		&proto.Message{Value: []byte("second")},
+		{Value: []byte("first")},
+		{Value: []byte("second")},
 	}
 	if _, err := producer.Produce("my-messages", 0, messages...); err != nil {
 		panic(err)

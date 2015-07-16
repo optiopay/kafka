@@ -525,10 +525,10 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 		ClientID:  b.conf.ClientID,
 		ReplicaID: -1, // any client
 		Topics: []proto.OffsetReqTopic{
-			proto.OffsetReqTopic{
+			{
 				Name: topic,
 				Partitions: []proto.OffsetReqPartition{
-					proto.OffsetReqPartition{
+					{
 						ID:         partition,
 						TimeMs:     timems,
 						MaxOffsets: 2,
@@ -702,10 +702,10 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 		RequiredAcks: p.conf.RequiredAcks,
 		Timeout:      p.conf.RequestTimeout,
 		Topics: []proto.ProduceReqTopic{
-			proto.ProduceReqTopic{
+			{
 				Name: topic,
 				Partitions: []proto.ProduceReqPartition{
-					proto.ProduceReqPartition{
+					{
 						ID:       partition,
 						Messages: messages,
 					},
@@ -950,10 +950,10 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 		MaxWaitTime: c.conf.RequestTimeout,
 		MinBytes:    c.conf.MinFetchSize,
 		Topics: []proto.FetchReqTopic{
-			proto.FetchReqTopic{
+			{
 				Name: c.conf.Topic,
 				Partitions: []proto.FetchReqPartition{
-					proto.FetchReqPartition{
+					{
 						ID:          c.conf.Partition,
 						FetchOffset: c.offset,
 						MaxBytes:    c.conf.MaxFetchSize,
@@ -1129,10 +1129,10 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 			ClientID:      c.broker.conf.ClientID,
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetCommitReqTopic{
-				proto.OffsetCommitReqTopic{
+				{
 					Name: topic,
 					Partitions: []proto.OffsetCommitReqPartition{
-						proto.OffsetCommitReqPartition{ID: partition, Offset: offset, TimeStamp: time.Now(), Metadata: metadata},
+						{ID: partition, Offset: offset, TimeStamp: time.Now(), Metadata: metadata},
 					},
 				},
 			},
@@ -1204,7 +1204,7 @@ func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64,
 		resp, err := c.conn.OffsetFetch(&proto.OffsetFetchReq{
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetFetchReqTopic{
-				proto.OffsetFetchReqTopic{
+				{
 					Name:       topic,
 					Partitions: []int32{partition},
 				},
