@@ -53,9 +53,9 @@ type Consumer interface {
 
 // Producer is the interface that wraps the Produce method.
 //
-// Produce writes the messages to the given topic and partition, returning the
-// post-commit offset and any error encountered.  The offset of each message is
-// also updated accordingly.
+// Produce writes the messages to the given topic and partition.
+// It returns the offset of the first message and any error encountered.
+// The offset of each message is also updated accordingly.
 type Producer interface {
 	Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error)
 }
