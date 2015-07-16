@@ -394,7 +394,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			b.mu.Lock()
 		}
 
-		// first try all aready existing connections
+		// first try all already existing connections
 		for _, conn := range b.conns {
 			resp, err := conn.ConsumerMetadata(&proto.ConsumerMetadataReq{
 				ClientID:      b.conf.ClientID,
@@ -567,7 +567,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 				continue
 			}
 			found = true
-			// happends when there are no messages
+			// happens when there are no messages
 			if len(part.Offsets) == 0 {
 				offset = 0
 			} else {
@@ -720,7 +720,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 			// Connection is broken, so should be closed, but the error is
 			// still valid and should be returned so that retry mechanism have
 			// chance to react.
-			p.conf.Logger.Debug("connection died while sendnig message",
+			p.conf.Logger.Debug("connection died while sending message",
 				"topic", topic,
 				"partition", partition,
 				"err", err)
