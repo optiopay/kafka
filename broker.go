@@ -716,7 +716,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 
 	resp, err := conn.Produce(&req)
 	if err != nil {
-		if err == io.EOF || err == syscall.EPIPE {
+		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
 			// Connection is broken, so should be closed, but the error is
 			// still valid and should be returned so that retry mechanism have
 			// chance to react.
@@ -986,48 +986,50 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 		resp, err := c.conn.Fetch(&req)
 		resErr = err
 
-		switch err {
-		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
-			c.conf.Logger.Debug("cannot fetch messages",
-				"retry", retry,
-				"err", err)
-			if err := c.broker.muRefreshMetadata(); err != nil {
-				c.conf.Logger.Debug("cannot refresh metadata",
-					"err", err)
-			}
-		case io.EOF, syscall.EPIPE:
+		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
 			c.conf.Logger.Debug("connection died while fetching message",
 				"topic", c.conf.Topic,
 				"partition", c.conf.Partition,
 				"err", err)
 			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
-		case nil:
-			for _, topic := range resp.Topics {
-				if topic.Name != c.conf.Topic {
-					c.conf.Logger.Warn("unexpected topic information received",
-						"got", topic.Name,
-						"expected", c.conf.Topic)
-					continue
+		} else {
+			switch err {
+			case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
+				c.conf.Logger.Debug("cannot fetch messages",
+					"retry", retry,
+					"err", err)
+				if err := c.broker.muRefreshMetadata(); err != nil {
+					c.conf.Logger.Debug("cannot refresh metadata",
+						"err", err)
 				}
-				for _, part := range topic.Partitions {
-					if part.ID != c.conf.Partition {
-						c.conf.Logger.Warn("unexpected partition information received",
-							"topic", topic.Name,
-							"expected", c.conf.Partition,
-							"got", part.ID)
+			case nil:
+				for _, topic := range resp.Topics {
+					if topic.Name != c.conf.Topic {
+						c.conf.Logger.Warn("unexpected topic information received",
+							"got", topic.Name,
+							"expected", c.conf.Topic)
 						continue
 					}
-					return part.Messages, part.Err
+					for _, part := range topic.Partitions {
+						if part.ID != c.conf.Partition {
+							c.conf.Logger.Warn("unexpected partition information received",
+								"topic", topic.Name,
+								"expected", c.conf.Partition,
+								"got", part.ID)
+							continue
+						}
+						return part.Messages, part.Err
+					}
 				}
+				return nil, errors.New("incomplete fetch response")
+			default:
+				c.conf.Logger.Debug("cannot fetch messages: unknown error",
+					"retry", retry,
+					"err", err)
+				c.broker.muCloseDeadConnection(c.conn)
+				c.conn = nil
 			}
-			return nil, errors.New("incomplete fetch response")
-		default:
-			c.conf.Logger.Debug("cannot fetch messages: unknown error",
-				"retry", retry,
-				"err", err)
-			c.broker.muCloseDeadConnection(c.conn)
-			c.conn = nil
 		}
 	}
 
@@ -1139,15 +1141,14 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 		})
 		resErr = err
 
-		switch err {
-		case io.EOF, syscall.EPIPE:
+		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
 			c.conf.Logger.Debug("connection died while commiting",
 				"topic", topic,
 				"partition", partition,
 				"consumGrp", c.conf.ConsumerGroup)
 			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
-		case nil:
+		} else if err == nil {
 			for _, t := range resp.Topics {
 				if t.Name != topic {
 					c.conf.Logger.Debug("unexpected topic information received",
