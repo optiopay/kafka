@@ -357,7 +357,7 @@ func TestSerializeEmptyMessageSet(t *testing.T) {
 	}
 }
 
-func TestReadIncomleteMessage(t *testing.T) {
+func TestReadIncompleteMessage(t *testing.T) {
 	var buf bytes.Buffer
 	err := writeMessageSet(&buf, []*Message{
 		{Value: []byte("111111111111111")},
