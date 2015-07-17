@@ -2,12 +2,15 @@ package proto
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
+	"io/ioutil"
 	"time"
+
+	"github.com/golang/snappy"
 )
 
 /*
@@ -25,10 +28,6 @@ const (
 	OffsetCommitReqKind     = 8
 	OffsetFetchReqKind      = 9
 	ConsumerMetadataReqKind = 10
-
-	compressionNone   = 0
-	compressionGZIP   = 1
-	compressionSnappy = 2
 
 	// receive the latest offset (i.e. the offset of the next coming message)
 	OffsetReqTimeLatest = -1
@@ -48,6 +47,14 @@ const (
 	// Server will wait the data is written to the local log before sending a
 	// response.
 	RequiredAcksLocal = 1
+)
+
+type Compression int8
+
+const (
+	CompressionNone   Compression = 0
+	CompressionGzip   Compression = 1
+	CompressionSnappy Compression = 2
 )
 
 // ReadReq returns request kind ID and byte representation of the whole message
@@ -100,56 +107,80 @@ type Message struct {
 }
 
 // ComputeCrc returns crc32 hash for given message content.
-func ComputeCrc(m *Message) uint32 {
+func ComputeCrc(m *Message, compression Compression) uint32 {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 	enc.Encode(int8(0)) // magic byte is always 0
-	enc.Encode(int8(0)) // no compression support
+	enc.Encode(int8(compression))
 	enc.Encode(m.Key)
 	enc.Encode(m.Value)
 	return crc32.ChecksumIEEE(buf.Bytes())
 }
 
-// writeMessageSet writes given set of messages into writer, prefixed with
-// total set size.
-func writeMessageSet(w io.Writer, messages []*Message) error {
-	enc := NewEncoder(w)
-
-	totalSize := 0
-	for _, m := range messages {
-		totalSize += 26 + len(m.Key) + len(m.Value)
+// writeMessageSet writes a Message Set into w.
+// It returns the number of bytes written and any error.
+func writeMessageSet(w io.Writer, messages []*Message, compression Compression) (int, error) {
+	if len(messages) == 0 {
+		return 0, nil
 	}
-	enc.Encode(int32(totalSize))
+	// NOTE(caleb): it doesn't appear to be documented, but I observed that the
+	// Java client sets the offset of the synthesized message set for a group of
+	// compressed messages to be the offset of the last message in the set.
+	compressOffset := messages[len(messages)-1].Offset
+	switch compression {
+	case CompressionGzip:
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		if _, err := writeMessageSet(gz, messages, CompressionNone); err != nil {
+			return 0, err
+		}
+		if err := gz.Close(); err != nil {
+			return 0, err
+		}
+		messages = []*Message{
+			{
+				Value:  buf.Bytes(),
+				Offset: compressOffset,
+			},
+		}
+	case CompressionSnappy:
+		var buf bytes.Buffer
+		if _, err := writeMessageSet(&buf, messages, CompressionNone); err != nil {
+			return 0, err
+		}
+		messages = []*Message{
+			{
+				Value:  snappy.Encode(nil, buf.Bytes()),
+				Offset: compressOffset,
+			},
+		}
+	}
 
+	enc := NewEncoder(w)
+	totalSize := 0
 	for _, message := range messages {
+		totalSize += 26 + len(message.Key) + len(message.Value)
 		enc.Encode(int64(message.Offset))
 		messageSize := 14 + len(message.Key) + len(message.Value)
 		enc.Encode(int32(messageSize))
-		enc.Encode(ComputeCrc(message))
+		enc.Encode(ComputeCrc(message, compression))
 		enc.Encode(int8(0)) // magic byte
-		enc.Encode(int8(0)) // attributes
+		enc.Encode(int8(compression))
 		enc.Encode(message.Key)
 		enc.Encode(message.Value)
 	}
-	return enc.Err()
+	return totalSize, enc.Err()
 }
 
-// readMessageSet reads and return messages from the stream. Messages set
-// should be prefixed with message set size, that will also be consumed by this
-// function.
+// readMessageSet reads and return messages from the stream.
+// The size is known before a message set is decoded.
 // Because kafka is sending message set directly from the drive, it might cut
 // off part of the last message. This also means that the last message can be
 // shorter than the header is saying. In such case just ignore the last
 // malformed message from the set and returned earlier data.
-func readMessageSet(r io.Reader) ([]*Message, error) {
-	dec := NewDecoder(r)
-	messagesSetSize := dec.DecodeInt32()
-	if err := dec.Err(); err != nil {
-		return nil, err
-	}
-
-	rd := io.LimitReader(r, int64(messagesSetSize))
-	dec = NewDecoder(rd)
+func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
+	rd := io.LimitReader(r, int64(size))
+	dec := NewDecoder(rd)
 	set := make([]*Message, 0, 32)
 	for {
 		offset := dec.DecodeInt64()
@@ -191,18 +222,47 @@ func readMessageSet(r io.Reader) ([]*Message, error) {
 		_ = msgdec.DecodeInt8()
 
 		attributes := msgdec.DecodeInt8()
-		if attributes != compressionNone {
-			// TODO(husio)
-			return nil, errors.New("cannot read compressed message")
+		switch compression := Compression(attributes & 3); compression {
+		case CompressionNone:
+			msg.Key = msgdec.DecodeBytes()
+			msg.Value = msgdec.DecodeBytes()
+			if err := msgdec.Err(); err != nil {
+				return nil, fmt.Errorf("cannot decode message: %s", err)
+			}
+			set = append(set, msg)
+		case CompressionGzip, CompressionSnappy:
+			_ = msgdec.DecodeBytes() // ignore key
+			val := msgdec.DecodeBytes()
+			if err := msgdec.Err(); err != nil {
+				return nil, fmt.Errorf("cannot decode message: %s", err)
+			}
+			var decoded []byte
+			switch compression {
+			case CompressionGzip:
+				cr, err := gzip.NewReader(bytes.NewReader(val))
+				if err != nil {
+					return nil, fmt.Errorf("error decoding gzip message: %s", err)
+				}
+				decoded, err = ioutil.ReadAll(cr)
+				if err != nil {
+					return nil, fmt.Errorf("error decoding gzip message: %s", err)
+				}
+				_ = cr.Close()
+			case CompressionSnappy:
+				var err error
+				decoded, err = snappyDecode(val)
+				if err != nil {
+					return nil, fmt.Errorf("error decoding snappy message: %s", err)
+				}
+			}
+			msgs, err := readMessageSet(bytes.NewReader(decoded), int32(len(decoded)))
+			if err != nil {
+				return nil, err
+			}
+			set = append(set, msgs...)
+		default:
+			return nil, fmt.Errorf("cannot handle compression method: %d", compression)
 		}
-
-		msg.Key = msgdec.DecodeBytes()
-		msg.Value = msgdec.DecodeBytes()
-
-		if err := msgdec.Err(); err != nil {
-			return nil, fmt.Errorf("cannot decode message: %s", err)
-		}
-		set = append(set, msg)
 	}
 }
 
@@ -497,11 +557,10 @@ type FetchRespPartition struct {
 }
 
 func (r *FetchResp) Bytes() ([]byte, error) {
-	var buf bytes.Buffer
+	var buf buffer
 	enc := NewEncoder(&buf)
 
-	// message size - for now just placeholder
-	enc.Encode(int32(0))
+	enc.Encode(int32(0)) // placeholder
 	enc.Encode(r.CorrelationID)
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
@@ -511,9 +570,15 @@ func (r *FetchResp) Bytes() ([]byte, error) {
 			enc.Encode(part.ID)
 			enc.EncodeError(part.Err)
 			enc.Encode(part.TipOffset)
-			if err := writeMessageSet(&buf, part.Messages); err != nil {
+			i := len(buf)
+			enc.Encode(int32(0)) // placeholder
+			// NOTE(caleb): writing compressed fetch response isn't implemented
+			// for now, since that's not needed for clients.
+			n, err := writeMessageSet(&buf, part.Messages, CompressionNone)
+			if err != nil {
 				return nil, err
 			}
+			binary.BigEndian.PutUint32(buf[i:i+4], uint32(n))
 		}
 	}
 
@@ -521,11 +586,8 @@ func (r *FetchResp) Bytes() ([]byte, error) {
 		return nil, enc.Err()
 	}
 
-	// update the message size information
-	b := buf.Bytes()
-	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
-
-	return b, nil
+	binary.BigEndian.PutUint32(buf[:4], uint32(len(buf)-4))
+	return []byte(buf), nil
 }
 
 func ReadFetchResp(r io.Reader) (*FetchResp, error) {
@@ -551,7 +613,11 @@ func ReadFetchResp(r io.Reader) (*FetchResp, error) {
 			if dec.Err() != nil {
 				return nil, dec.Err()
 			}
-			if part.Messages, err = readMessageSet(r); err != nil {
+			msgSetSize := dec.DecodeInt32()
+			if dec.Err() != nil {
+				return nil, dec.Err()
+			}
+			if part.Messages, err = readMessageSet(r, msgSetSize); err != nil {
 				return nil, err
 			}
 			for _, msg := range part.Messages {
@@ -995,6 +1061,7 @@ func (r *OffsetFetchResp) Bytes() ([]byte, error) {
 type ProduceReq struct {
 	CorrelationID int32
 	ClientID      string
+	Compression   Compression // only used when sending ProduceReqs
 	RequiredAcks  int16
 	Timeout       time.Duration
 	Topics        []ProduceReqTopic
@@ -1030,11 +1097,15 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 		for pi := range topic.Partitions {
 			var part = &topic.Partitions[pi]
 			part.ID = dec.DecodeInt32()
-			err := dec.Err()
-			if err != nil {
+			if dec.Err() != nil {
 				return nil, dec.Err()
 			}
-			if part.Messages, err = readMessageSet(r); err != nil {
+			msgSetSize := dec.DecodeInt32()
+			if dec.Err() != nil {
+				return nil, dec.Err()
+			}
+			var err error
+			if part.Messages, err = readMessageSet(r, msgSetSize); err != nil {
 				return nil, err
 			}
 		}
@@ -1047,11 +1118,10 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 }
 
 func (r *ProduceReq) Bytes() ([]byte, error) {
-	var buf bytes.Buffer
+	var buf buffer
 	enc := NewEncoder(&buf)
 
-	// message size - for now just placeholder
-	enc.Encode(int32(0))
+	enc.Encode(int32(0)) // placeholder
 	enc.Encode(int16(ProduceReqKind))
 	enc.Encode(int16(0))
 	enc.Encode(r.CorrelationID)
@@ -1065,9 +1135,13 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 		enc.EncodeArrayLen(len(t.Partitions))
 		for _, p := range t.Partitions {
 			enc.Encode(p.ID)
-			if err := writeMessageSet(&buf, p.Messages); err != nil {
+			i := len(buf)
+			enc.Encode(int32(0)) // placeholder
+			n, err := writeMessageSet(&buf, p.Messages, r.Compression)
+			if err != nil {
 				return nil, err
 			}
+			binary.BigEndian.PutUint32(buf[i:i+4], uint32(n))
 		}
 	}
 
@@ -1075,11 +1149,8 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 		return nil, enc.Err()
 	}
 
-	// update the message size information
-	b := buf.Bytes()
-	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
-
-	return b, nil
+	binary.BigEndian.PutUint32(buf[0:4], uint32(len(buf)-4))
+	return []byte(buf), nil
 }
 
 func (r *ProduceReq) WriteTo(w io.Writer) (int64, error) {
@@ -1328,4 +1399,11 @@ func (r *OffsetResp) Bytes() ([]byte, error) {
 	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
 
 	return b, nil
+}
+
+type buffer []byte
+
+func (b *buffer) Write(p []byte) (int, error) {
+	*b = append(*b, p...)
+	return len(p), nil
 }

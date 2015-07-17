@@ -244,7 +244,32 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadFetchResp(bytes.NewReader(b))
+	resp, err := proto.ReadFetchResp(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+
+	// Compressed messages are returned in full batches for efficiency
+	// (the broker doesn't need to decompress).
+	// This means that it's possible to get some leading messages
+	// with a smaller offset than requested. Trim those.
+	for ti := range resp.Topics {
+		topic := &resp.Topics[ti]
+		reqTopic := &req.Topics[ti]
+		for pi := range topic.Partitions {
+			partition := &topic.Partitions[pi]
+			reqPartition := &reqTopic.Partitions[pi]
+			i := 0
+			for _, msg := range partition.Messages {
+				if msg.Offset >= reqPartition.FetchOffset {
+					break
+				}
+				i++
+			}
+			partition.Messages = partition.Messages[i:]
+		}
+	}
+	return resp, nil
 }
 
 // Offset sends given offset request to kafka node and returns related response.

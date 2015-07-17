@@ -13,14 +13,6 @@ failover and easy to use blocking API.
 * [consumer and producer](https://github.com/husio/kafka-libs-test) speed
   comparison with [sarama](https://github.com/Shopify/sarama) library.
 
-
-Missing or nice to have
------------------------
-
-* message set compression
-
-
-
 Example
 -------
 

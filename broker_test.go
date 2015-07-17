@@ -104,7 +104,7 @@ func TestProducer(t *testing.T) {
 		messages := req.Topics[0].Partitions[0].Messages
 		for _, msg := range messages {
 			createdMsgs++
-			crc := proto.ComputeCrc(msg)
+			crc := proto.ComputeCrc(msg, proto.CompressionNone)
 			if msg.Crc != crc {
 				handleErr = fmt.Errorf("expected '%d' crc, got %d", crc, msg.Crc)
 				return nil

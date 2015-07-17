@@ -187,7 +187,7 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Mes
 
 	for i, msg := range messages {
 		msg.Offset = off + int64(i)
-		msg.Crc = proto.ComputeCrc(msg)
+		msg.Crc = proto.ComputeCrc(msg, proto.CompressionNone)
 	}
 
 	p.Broker.produced <- &ProducedMessages{

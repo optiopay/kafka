@@ -593,6 +593,9 @@ func (b *Broker) OffsetLatest(topic string, partition int32) (offset int64, err 
 }
 
 type ProducerConf struct {
+	// Compression method to use, defaulting to proto.CompressionNone.
+	Compression proto.Compression
+
 	// Timeout of single produce request. By default, 5 seconds.
 	RequestTimeout time.Duration
 
@@ -619,6 +622,7 @@ type ProducerConf struct {
 // NewProducerConf returns a default producer configuration.
 func NewProducerConf() ProducerConf {
 	return ProducerConf{
+		Compression:    proto.CompressionNone,
 		RequestTimeout: 5 * time.Second,
 		RequiredAcks:   proto.RequiredAcksAll,
 		RetryLimit:     10,
@@ -699,6 +703,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 
 	req := proto.ProduceReq{
 		ClientID:     p.broker.conf.ClientID,
+		Compression:  p.conf.Compression,
 		RequiredAcks: p.conf.RequiredAcks,
 		Timeout:      p.conf.RequestTimeout,
 		Topics: []proto.ProduceReqTopic{
