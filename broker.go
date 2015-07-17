@@ -66,10 +66,19 @@ type OffsetCoordinator interface {
 	Offset(topic string, partition int32) (offset int64, metadata string, err error)
 }
 
+type topicPartition struct {
+	topic     string
+	partition int32
+}
+
+func (tp topicPartition) String() string {
+	return fmt.Sprintf("%s:%d", tp.topic, tp.partition)
+}
+
 type clusterMetadata struct {
 	created   time.Time
-	nodes     map[int32]string // node ID to address
-	endpoints map[string]int32 // topic:partition to leader node ID
+	nodes     map[int32]string         // node ID to address
+	endpoints map[topicPartition]int32 // partition to leader node ID
 }
 
 type BrokerConf struct {
@@ -300,7 +309,7 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 	b.metadata = clusterMetadata{
 		created:   time.Now(),
 		nodes:     make(map[int32]string),
-		endpoints: make(map[string]int32),
+		endpoints: make(map[topicPartition]int32),
 	}
 	debugmsg := make([]interface{}, 0)
 	for _, node := range resp.Brokers {
@@ -310,7 +319,7 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 	}
 	for _, topic := range resp.Topics {
 		for _, part := range topic.Partitions {
-			dest := fmt.Sprintf("%s:%d", topic.Name, part.ID)
+			dest := topicPartition{topic.Name, part.ID}
 			b.metadata.endpoints[dest] = part.Leader
 			debugmsg = append(debugmsg, dest, part.Leader)
 		}
@@ -323,7 +332,7 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 // connection for any further use.
 // Failed connection retry is controlled by broker configuration.
 func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connection, err error) {
-	endpoint := fmt.Sprintf("%s:%d", topic, partition)
+	tp := topicPartition{topic, partition}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -338,7 +347,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 			b.mu.Lock()
 		}
 
-		nodeID, ok := b.metadata.endpoints[endpoint]
+		nodeID, ok := b.metadata.endpoints[tp]
 		if !ok {
 			err = b.refreshMetadata()
 			if err != nil {
@@ -346,12 +355,12 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 					"err", err)
 				continue
 			}
-			nodeID, ok = b.metadata.endpoints[endpoint]
+			nodeID, ok = b.metadata.endpoints[tp]
 			if !ok {
 				b.conf.Logger.Info("cannot get leader connection: unknown topic or partition",
 					"topic", topic,
 					"partition", partition,
-					"endpoint", endpoint)
+					"endpoint", tp)
 				err = proto.ErrUnknownTopicOrPartition
 				continue
 			}
