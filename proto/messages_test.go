@@ -10,7 +10,7 @@ import (
 
 type Request interface {
 	Bytes() ([]byte, error)
-	WriteTo(io.Writer) (int64, error)
+	WriteTo(w io.Writer) (int64, error)
 }
 
 var _ Request = &MetadataReq{}
@@ -79,30 +79,30 @@ func TestMetadataResponse(t *testing.T) {
 	expected := &MetadataResp{
 		CorrelationID: 123,
 		Brokers: []MetadataRespBroker{
-			MetadataRespBroker{NodeID: 49168, Host: "172.17.42.1", Port: 49168},
-			MetadataRespBroker{NodeID: 49170, Host: "172.17.42.1", Port: 49170},
-			MetadataRespBroker{NodeID: 49169, Host: "172.17.42.1", Port: 49169},
-			MetadataRespBroker{NodeID: 49171, Host: "172.17.42.1", Port: 49171},
+			{NodeID: 49168, Host: "172.17.42.1", Port: 49168},
+			{NodeID: 49170, Host: "172.17.42.1", Port: 49170},
+			{NodeID: 49169, Host: "172.17.42.1", Port: 49169},
+			{NodeID: 49171, Host: "172.17.42.1", Port: 49171},
 		},
 		Topics: []MetadataRespTopic{
-			MetadataRespTopic{
+			{
 				Name: "foo",
 				Err:  error(nil),
 				Partitions: []MetadataRespPartition{
-					MetadataRespPartition{Err: error(nil), ID: 2, Leader: 49171, Replicas: []int32{49171, 49168, 49169}, Isrs: []int32{49171, 49168, 49169}},
-					MetadataRespPartition{Err: error(nil), ID: 5, Leader: 49170, Replicas: []int32{49170, 49168, 49169}, Isrs: []int32{49170, 49168, 49169}},
-					MetadataRespPartition{Err: error(nil), ID: 4, Leader: 49169, Replicas: []int32{49169, 49171, 49168}, Isrs: []int32{49169, 49171, 49168}},
-					MetadataRespPartition{Err: error(nil), ID: 1, Leader: 49170, Replicas: []int32{49170, 49171, 49168}, Isrs: []int32{49170, 49171, 49168}},
-					MetadataRespPartition{Err: error(nil), ID: 3, Leader: 49168, Replicas: []int32{49168, 49169, 49170}, Isrs: []int32{49168, 49169, 49170}},
-					MetadataRespPartition{Err: error(nil), ID: 0, Leader: 49169, Replicas: []int32{49169, 49170, 49171}, Isrs: []int32{49169, 49170, 49171}},
+					{Err: error(nil), ID: 2, Leader: 49171, Replicas: []int32{49171, 49168, 49169}, Isrs: []int32{49171, 49168, 49169}},
+					{Err: error(nil), ID: 5, Leader: 49170, Replicas: []int32{49170, 49168, 49169}, Isrs: []int32{49170, 49168, 49169}},
+					{Err: error(nil), ID: 4, Leader: 49169, Replicas: []int32{49169, 49171, 49168}, Isrs: []int32{49169, 49171, 49168}},
+					{Err: error(nil), ID: 1, Leader: 49170, Replicas: []int32{49170, 49171, 49168}, Isrs: []int32{49170, 49171, 49168}},
+					{Err: error(nil), ID: 3, Leader: 49168, Replicas: []int32{49168, 49169, 49170}, Isrs: []int32{49168, 49169, 49170}},
+					{Err: error(nil), ID: 0, Leader: 49169, Replicas: []int32{49169, 49170, 49171}, Isrs: []int32{49169, 49170, 49171}},
 				},
 			},
-			MetadataRespTopic{
+			{
 				Name: "test",
 				Err:  error(nil),
 				Partitions: []MetadataRespPartition{
-					MetadataRespPartition{Err: error(nil), ID: 1, Leader: 49169, Replicas: []int32{49169, 49170, 49171}, Isrs: []int32{49169, 49170, 49171}},
-					MetadataRespPartition{Err: error(nil), ID: 0, Leader: 49168, Replicas: []int32{49168, 49169, 49170}, Isrs: []int32{49168, 49169, 49170}},
+					{Err: error(nil), ID: 1, Leader: 49169, Replicas: []int32{49169, 49170, 49171}, Isrs: []int32{49169, 49170, 49171}},
+					{Err: error(nil), ID: 0, Leader: 49168, Replicas: []int32{49168, 49169, 49170}, Isrs: []int32{49168, 49169, 49170}},
 				},
 			},
 		},
@@ -128,13 +128,13 @@ func TestProduceRequest(t *testing.T) {
 		RequiredAcks:  RequiredAcksAll,
 		Timeout:       time.Second,
 		Topics: []ProduceReqTopic{
-			ProduceReqTopic{
+			{
 				Name: "foo",
 				Partitions: []ProduceReqPartition{
-					ProduceReqPartition{
+					{
 						ID: 0,
 						Messages: []*Message{
-							&Message{
+							{
 								Offset: 0,
 								Crc:    3099221847,
 								Key:    []byte("foo"),
@@ -169,10 +169,10 @@ func TestProduceResponse(t *testing.T) {
 	expected1 := &ProduceResp{
 		CorrelationID: 241,
 		Topics: []ProduceRespTopic{
-			ProduceRespTopic{
+			{
 				Name: "fruits",
 				Partitions: []ProduceRespPartition{
-					ProduceRespPartition{
+					{
 						ID:     93,
 						Err:    ErrUnknownTopicOrPartition,
 						Offset: -1,
@@ -201,10 +201,10 @@ func TestProduceResponse(t *testing.T) {
 	expected2 := &ProduceResp{
 		CorrelationID: 241,
 		Topics: []ProduceRespTopic{
-			ProduceRespTopic{
+			{
 				Name: "foo",
 				Partitions: []ProduceRespPartition{
-					ProduceRespPartition{
+					{
 						ID:     0,
 						Err:    error(nil),
 						Offset: 1,
@@ -232,11 +232,11 @@ func TestFetchRequest(t *testing.T) {
 		MaxWaitTime:   time.Second * 2,
 		MinBytes:      12454,
 		Topics: []FetchReqTopic{
-			FetchReqTopic{
+			{
 				Name: "foo",
 				Partitions: []FetchReqPartition{
-					FetchReqPartition{ID: 421, FetchOffset: 529, MaxBytes: 4921},
-					FetchReqPartition{ID: 0, FetchOffset: 11, MaxBytes: 92},
+					{ID: 421, FetchOffset: 529, MaxBytes: 4921},
+					{ID: 0, FetchOffset: 11, MaxBytes: 92},
 				},
 			},
 		},
@@ -264,19 +264,19 @@ func TestFetchResponse(t *testing.T) {
 	expected := &FetchResp{
 		CorrelationID: 241,
 		Topics: []FetchRespTopic{
-			FetchRespTopic{
+			{
 				Name: "foo",
 				Partitions: []FetchRespPartition{
-					FetchRespPartition{
+					{
 						ID:        0,
 						Err:       error(nil),
 						TipOffset: 4,
 						Messages: []*Message{
-							&Message{Offset: 2, Crc: 0xb8ba5f57, Key: []byte("foo"), Value: []byte("bar"), Topic: "foo", Partition: 0},
-							&Message{Offset: 3, Crc: 0xb8ba5f57, Key: []byte("foo"), Value: []byte("bar"), Topic: "foo", Partition: 0},
+							{Offset: 2, Crc: 0xb8ba5f57, Key: []byte("foo"), Value: []byte("bar"), Topic: "foo", Partition: 0},
+							{Offset: 3, Crc: 0xb8ba5f57, Key: []byte("foo"), Value: []byte("bar"), Topic: "foo", Partition: 0},
 						},
 					},
-					FetchRespPartition{
+					{
 						ID:        1,
 						Err:       ErrUnknownTopicOrPartition,
 						TipOffset: -1,
@@ -307,22 +307,22 @@ func TestFetchResponse2(t *testing.T) {
 	expected := &FetchResp{
 		CorrelationID: 241,
 		Topics: []FetchRespTopic{
-			FetchRespTopic{
+			{
 				Name: "test",
 				Partitions: []FetchRespPartition{
-					FetchRespPartition{
+					{
 						ID:        0,
 						Err:       ErrUnknownTopicOrPartition,
 						TipOffset: -1,
 						Messages:  []*Message{},
 					},
-					FetchRespPartition{
+					{
 						ID:        1,
 						Err:       ErrUnknownTopicOrPartition,
 						TipOffset: -1,
 						Messages:  []*Message{},
 					},
-					FetchRespPartition{
+					{
 						ID:        8,
 						Err:       ErrUnknownTopicOrPartition,
 						TipOffset: -1,
@@ -360,9 +360,9 @@ func TestSerializeEmptyMessageSet(t *testing.T) {
 func TestReadIncomleteMessage(t *testing.T) {
 	var buf bytes.Buffer
 	err := writeMessageSet(&buf, []*Message{
-		&Message{Value: []byte("111111111111111")},
-		&Message{Value: []byte("222222222222222")},
-		&Message{Value: []byte("333333333333333")},
+		{Value: []byte("111111111111111")},
+		{Value: []byte("222222222222222")},
+		{Value: []byte("333333333333333")},
 	})
 	if err != nil {
 		t.Fatalf("cannot serialize messages: %s", err)
@@ -400,10 +400,10 @@ func BenchmarkProduceRequestMarshal(b *testing.B) {
 		RequiredAcks:  RequiredAcksAll,
 		Timeout:       time.Second,
 		Topics: []ProduceReqTopic{
-			ProduceReqTopic{
+			{
 				Name: "foo",
 				Partitions: []ProduceReqPartition{
-					ProduceReqPartition{
+					{
 						ID:       0,
 						Messages: messages,
 					},
@@ -424,10 +424,10 @@ func BenchmarkProduceResponseUnmarshal(b *testing.B) {
 	resp := &ProduceResp{
 		CorrelationID: 241,
 		Topics: []ProduceRespTopic{
-			ProduceRespTopic{
+			{
 				Name: "foo",
 				Partitions: []ProduceRespPartition{
-					ProduceRespPartition{
+					{
 						ID:     0,
 						Err:    error(nil),
 						Offset: 1,
@@ -456,11 +456,11 @@ func BenchmarkFetchRequestMarshal(b *testing.B) {
 		MaxWaitTime:   time.Second * 2,
 		MinBytes:      12454,
 		Topics: []FetchReqTopic{
-			FetchReqTopic{
+			{
 				Name: "foo",
 				Partitions: []FetchReqPartition{
-					FetchReqPartition{ID: 421, FetchOffset: 529, MaxBytes: 4921},
-					FetchReqPartition{ID: 0, FetchOffset: 11, MaxBytes: 92},
+					{ID: 421, FetchOffset: 529, MaxBytes: 4921},
+					{ID: 0, FetchOffset: 11, MaxBytes: 92},
 				},
 			},
 		},
@@ -487,15 +487,15 @@ func BenchmarkFetchResponseUnmarshal(b *testing.B) {
 	resp := &FetchResp{
 		CorrelationID: 241,
 		Topics: []FetchRespTopic{
-			FetchRespTopic{
+			{
 				Name: "foo",
 				Partitions: []FetchRespPartition{
-					FetchRespPartition{
+					{
 						ID:        0,
 						TipOffset: 444,
 						Messages:  messages,
 					},
-					FetchRespPartition{
+					{
 						ID:        123,
 						Err:       ErrBrokerNotAvailable,
 						TipOffset: -1,

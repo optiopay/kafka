@@ -34,8 +34,8 @@ func TestMultiplexerConsume(t *testing.T) {
 	fetchers := []Consumer{
 		&fetcher{
 			messages: []*proto.Message{
-				&proto.Message{Value: []byte("first")},
-				&proto.Message{Value: []byte("second")},
+				{Value: []byte("first")},
+				{Value: []byte("second")},
 			},
 			errors: []error{
 				errors.New("e first"),
@@ -45,8 +45,8 @@ func TestMultiplexerConsume(t *testing.T) {
 		},
 		&fetcher{
 			messages: []*proto.Message{
-				&proto.Message{Value: []byte("1")},
-				&proto.Message{Value: []byte("2")},
+				{Value: []byte("1")},
+				{Value: []byte("2")},
 			},
 			errors: []error{
 				errors.New("e 1"),
@@ -137,7 +137,7 @@ func TestClosingMultiplexerWithBlockingWorkers(t *testing.T) {
 func TestErrNoDataCloseMultiplexer(t *testing.T) {
 	fetchers := []Consumer{
 		&fetcher{errors: []error{ErrNoData}},
-		&fetcher{errors: []error{ErrNoData}, messages: []*proto.Message{&proto.Message{}}},
+		&fetcher{errors: []error{ErrNoData}, messages: []*proto.Message{{}}},
 		&fetcher{errors: []error{ErrNoData}},
 	}
 	mx := Merge(fetchers...)

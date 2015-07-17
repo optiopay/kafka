@@ -168,7 +168,7 @@ func readMessageSet(r io.Reader) ([]*Message, error) {
 			return nil, err
 		}
 
-		// read message to buffer to compute it's content crc
+		// read message to buffer to compute its content crc
 		msgbuf := make([]byte, size)
 		if _, err := io.ReadFull(rd, msgbuf); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {

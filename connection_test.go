@@ -108,17 +108,17 @@ func TestConnectionMetadata(t *testing.T) {
 	resp1 := &proto.MetadataResp{
 		CorrelationID: 1,
 		Brokers: []proto.MetadataRespBroker{
-			proto.MetadataRespBroker{
+			{
 				NodeID: 666,
 				Host:   "example.com",
 				Port:   999,
 			},
 		},
 		Topics: []proto.MetadataRespTopic{
-			proto.MetadataRespTopic{
+			{
 				Name: "foo",
 				Partitions: []proto.MetadataRespPartition{
-					proto.MetadataRespPartition{
+					{
 						ID:       7,
 						Leader:   7,
 						Replicas: []int32{7},
@@ -158,10 +158,10 @@ func TestConnectionProduce(t *testing.T) {
 	resp1 := &proto.ProduceResp{
 		CorrelationID: 1,
 		Topics: []proto.ProduceRespTopic{
-			proto.ProduceRespTopic{
+			{
 				Name: "first",
 				Partitions: []proto.ProduceRespPartition{
-					proto.ProduceRespPartition{
+					{
 						ID:     0,
 						Err:    nil,
 						Offset: 4,
@@ -173,10 +173,10 @@ func TestConnectionProduce(t *testing.T) {
 	resp2 := &proto.ProduceResp{
 		CorrelationID: 2,
 		Topics: []proto.ProduceRespTopic{
-			proto.ProduceRespTopic{
+			{
 				Name: "first",
 				Partitions: []proto.ProduceRespPartition{
-					proto.ProduceRespPartition{
+					{
 						ID:     0,
 						Err:    proto.ErrLeaderNotAvailable,
 						Offset: -1,
@@ -209,14 +209,14 @@ func TestConnectionProduce(t *testing.T) {
 		RequiredAcks:  proto.RequiredAcksAll,
 		Timeout:       time.Second,
 		Topics: []proto.ProduceReqTopic{
-			proto.ProduceReqTopic{
+			{
 				Name: "first",
 				Partitions: []proto.ProduceReqPartition{
-					proto.ProduceReqPartition{
+					{
 						ID: 0,
 						Messages: []*proto.Message{
-							&proto.Message{Key: []byte("key 1"), Value: []byte("value 1")},
-							&proto.Message{Key: []byte("key 2"), Value: []byte("value 2")},
+							{Key: []byte("key 1"), Value: []byte("value 1")},
+							{Key: []byte("key 2"), Value: []byte("value 2")},
 						},
 					},
 				},
@@ -235,13 +235,13 @@ func TestConnectionProduce(t *testing.T) {
 		RequiredAcks:  proto.RequiredAcksAll,
 		Timeout:       time.Second,
 		Topics: []proto.ProduceReqTopic{
-			proto.ProduceReqTopic{
+			{
 				Name: "first",
 				Partitions: []proto.ProduceReqPartition{
-					proto.ProduceReqPartition{
+					{
 						ID: 0,
 						Messages: []*proto.Message{
-							&proto.Message{Key: []byte("key"), Value: []byte("value")},
+							{Key: []byte("key"), Value: []byte("value")},
 						},
 					},
 				},
@@ -265,8 +265,8 @@ func TestConnectionProduce(t *testing.T) {
 
 func TestConnectionFetch(t *testing.T) {
 	messages := []*proto.Message{
-		&proto.Message{Offset: 4, Key: []byte("f"), Value: []byte("first")},
-		&proto.Message{Offset: 5, Key: []byte("s"), Value: []byte("second message")},
+		{Offset: 4, Key: []byte("f"), Value: []byte("first")},
+		{Offset: 5, Key: []byte("s"), Value: []byte("second message")},
 	}
 	for _, m := range messages {
 		m.Crc = proto.ComputeCrc(m)
@@ -275,10 +275,10 @@ func TestConnectionFetch(t *testing.T) {
 	resp1 := &proto.FetchResp{
 		CorrelationID: 1,
 		Topics: []proto.FetchRespTopic{
-			proto.FetchRespTopic{
+			{
 				Name: "foo",
 				Partitions: []proto.FetchRespPartition{
-					proto.FetchRespPartition{
+					{
 						ID:        1,
 						Err:       nil,
 						TipOffset: 20,
@@ -286,10 +286,10 @@ func TestConnectionFetch(t *testing.T) {
 					},
 				},
 			},
-			proto.FetchRespTopic{
+			{
 				Name: "bar",
 				Partitions: []proto.FetchRespPartition{
-					proto.FetchRespPartition{
+					{
 						ID:        6,
 						Err:       proto.ErrUnknownTopicOrPartition,
 						TipOffset: -1,
@@ -329,10 +329,10 @@ func TestConnectionOffset(t *testing.T) {
 	resp1 := &proto.OffsetResp{
 		CorrelationID: 1,
 		Topics: []proto.OffsetRespTopic{
-			proto.OffsetRespTopic{
+			{
 				Name: "test",
 				Partitions: []proto.OffsetRespPartition{
-					proto.OffsetRespPartition{
+					{
 						ID:      0,
 						Offsets: []int64{92, 0},
 					},
@@ -351,10 +351,10 @@ func TestConnectionOffset(t *testing.T) {
 	resp, err := conn.Offset(&proto.OffsetReq{
 		ClientID: "tester",
 		Topics: []proto.OffsetReqTopic{
-			proto.OffsetReqTopic{
+			{
 				Name: "test",
 				Partitions: []proto.OffsetReqPartition{
-					proto.OffsetReqPartition{
+					{
 						ID:         0,
 						TimeMs:     -2,
 						MaxOffsets: 2,
@@ -385,14 +385,14 @@ func TestConnectionProduceNoAck(t *testing.T) {
 		RequiredAcks: proto.RequiredAcksNone,
 		Timeout:      time.Second,
 		Topics: []proto.ProduceReqTopic{
-			proto.ProduceReqTopic{
+			{
 				Name: "first",
 				Partitions: []proto.ProduceReqPartition{
-					proto.ProduceReqPartition{
+					{
 						ID: 0,
 						Messages: []*proto.Message{
-							&proto.Message{Key: []byte("key 1"), Value: []byte("value 1")},
-							&proto.Message{Key: []byte("key 2"), Value: []byte("value 2")},
+							{Key: []byte("key 1"), Value: []byte("value 1")},
+							{Key: []byte("key 2"), Value: []byte("value 2")},
 						},
 					},
 				},
@@ -431,13 +431,13 @@ func TestClosedConnectionWriter(t *testing.T) {
 		RequiredAcks: proto.RequiredAcksAll,
 		Timeout:      100,
 		Topics: []proto.ProduceReqTopic{
-			proto.ProduceReqTopic{
+			{
 				Name: "test-topic",
 				Partitions: []proto.ProduceReqPartition{
-					proto.ProduceReqPartition{
+					{
 						ID: 0,
 						Messages: []*proto.Message{
-							&proto.Message{Value: longBytes},
+							{Value: longBytes},
 						},
 					},
 				},
@@ -476,10 +476,10 @@ func TestClosedConnectionReader(t *testing.T) {
 		MaxWaitTime: 100,
 		MinBytes:    0,
 		Topics: []proto.FetchReqTopic{
-			proto.FetchReqTopic{
+			{
 				Name: "my-topic",
 				Partitions: []proto.FetchReqPartition{
-					proto.FetchReqPartition{
+					{
 						ID:          0,
 						FetchOffset: 1,
 						MaxBytes:    100000,
@@ -523,10 +523,10 @@ func TestConnectionReaderAfterEOF(t *testing.T) {
 		MaxWaitTime: 100,
 		MinBytes:    0,
 		Topics: []proto.FetchReqTopic{
-			proto.FetchReqTopic{
+			{
 				Name: "my-topic",
 				Partitions: []proto.FetchReqPartition{
-					proto.FetchReqPartition{
+					{
 						ID:          0,
 						FetchOffset: 1,
 						MaxBytes:    100000,

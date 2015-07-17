@@ -35,19 +35,19 @@ func TestRoundRobinProducer(t *testing.T) {
 	p := NewRoundRobinProducer(rec, 3)
 
 	data := [][][]byte{
-		[][]byte{
+		{
 			[]byte("a 1"),
 			[]byte("a 2"),
 		},
-		[][]byte{
+		{
 			[]byte("b 1"),
 		},
-		[][]byte{
+		{
 			[]byte("c 1"),
 			[]byte("c 2"),
 			[]byte("c 3"),
 		},
-		[][]byte{
+		{
 			[]byte("d 1"),
 		},
 	}

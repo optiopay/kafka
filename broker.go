@@ -35,11 +35,11 @@ var (
 
 // Client is the interface implemented by Broker.
 type Client interface {
-	Producer(ProducerConf) Producer
-	Consumer(ConsumerConf) (Consumer, error)
-	OffsetCoordinator(OffsetCoordinatorConf) (OffsetCoordinator, error)
-	OffsetEarliest(string, int32) (int64, error)
-	OffsetLatest(string, int32) (int64, error)
+	Producer(conf ProducerConf) Producer
+	Consumer(conf ConsumerConf) (Consumer, error)
+	OffsetCoordinator(conf OffsetCoordinatorConf) (OffsetCoordinator, error)
+	OffsetEarliest(topic string, partition int32) (offset int64, err error)
+	OffsetLatest(topic string, partition int32) (offset int64, err error)
 	Close()
 }
 
@@ -53,11 +53,11 @@ type Consumer interface {
 
 // Producer is the interface that wraps the Produce method.
 //
-// Produce writes the messages to the given topic and partition, returning the
-// post-commit offset and any error encountered.  The offset of each message is
-// also updated accordingly.
+// Produce writes the messages to the given topic and partition.
+// It returns the offset of the first message and any error encountered.
+// The offset of each message is also updated accordingly.
 type Producer interface {
-	Produce(string, int32, ...*proto.Message) (int64, error)
+	Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error)
 }
 
 // OffsetCoordinator is the interface which wraps the Commit and Offset methods.
@@ -394,7 +394,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			b.mu.Lock()
 		}
 
-		// first try all aready existing connections
+		// first try all already existing connections
 		for _, conn := range b.conns {
 			resp, err := conn.ConsumerMetadata(&proto.ConsumerMetadataReq{
 				ClientID:      b.conf.ClientID,
@@ -525,10 +525,10 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 		ClientID:  b.conf.ClientID,
 		ReplicaID: -1, // any client
 		Topics: []proto.OffsetReqTopic{
-			proto.OffsetReqTopic{
+			{
 				Name: topic,
 				Partitions: []proto.OffsetReqPartition{
-					proto.OffsetReqPartition{
+					{
 						ID:         partition,
 						TimeMs:     timems,
 						MaxOffsets: 2,
@@ -567,7 +567,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 				continue
 			}
 			found = true
-			// happends when there are no messages
+			// happens when there are no messages
 			if len(part.Offsets) == 0 {
 				offset = 0
 			} else {
@@ -702,10 +702,10 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 		RequiredAcks: p.conf.RequiredAcks,
 		Timeout:      p.conf.RequestTimeout,
 		Topics: []proto.ProduceReqTopic{
-			proto.ProduceReqTopic{
+			{
 				Name: topic,
 				Partitions: []proto.ProduceReqPartition{
-					proto.ProduceReqPartition{
+					{
 						ID:       partition,
 						Messages: messages,
 					},
@@ -720,7 +720,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 			// Connection is broken, so should be closed, but the error is
 			// still valid and should be returned so that retry mechanism have
 			// chance to react.
-			p.conf.Logger.Debug("connection died while sendnig message",
+			p.conf.Logger.Debug("connection died while sending message",
 				"topic", topic,
 				"partition", partition,
 				"err", err)
@@ -950,10 +950,10 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 		MaxWaitTime: c.conf.RequestTimeout,
 		MinBytes:    c.conf.MinFetchSize,
 		Topics: []proto.FetchReqTopic{
-			proto.FetchReqTopic{
+			{
 				Name: c.conf.Topic,
 				Partitions: []proto.FetchReqPartition{
-					proto.FetchReqPartition{
+					{
 						ID:          c.conf.Partition,
 						FetchOffset: c.offset,
 						MaxBytes:    c.conf.MaxFetchSize,
@@ -1129,10 +1129,10 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 			ClientID:      c.broker.conf.ClientID,
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetCommitReqTopic{
-				proto.OffsetCommitReqTopic{
+				{
 					Name: topic,
 					Partitions: []proto.OffsetCommitReqPartition{
-						proto.OffsetCommitReqPartition{ID: partition, Offset: offset, TimeStamp: time.Now(), Metadata: metadata},
+						{ID: partition, Offset: offset, TimeStamp: time.Now(), Metadata: metadata},
 					},
 				},
 			},
@@ -1204,7 +1204,7 @@ func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64,
 		resp, err := c.conn.OffsetFetch(&proto.OffsetFetchReq{
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetFetchReqTopic{
-				proto.OffsetFetchReqTopic{
+				{
 					Name:       topic,
 					Partitions: []int32{partition},
 				},
