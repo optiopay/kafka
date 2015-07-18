@@ -774,8 +774,8 @@ type ConsumerConf struct {
 	// Partition ID that should be consumed.
 	Partition int32
 
-	// RequestTimeout controlls fetch request timeout.This operation is
-	// blocking the whole connection, so it should always be set to small
+	// RequestTimeout controls fetch request timeout. This operation is
+	// blocking the whole connection, so it should always be set to a small
 	// value. By default it's set to 50ms.
 	// To control fetch function timeout use RetryLimit and RetryWait.
 	RequestTimeout time.Duration
