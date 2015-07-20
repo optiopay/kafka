@@ -206,6 +206,7 @@ func TestConnectionProduce(t *testing.T) {
 	resp, err := conn.Produce(&proto.ProduceReq{
 		CorrelationID: 1,
 		ClientID:      "tester",
+		Compression:   proto.CompressionNone,
 		RequiredAcks:  proto.RequiredAcksAll,
 		Timeout:       time.Second,
 		Topics: []proto.ProduceReqTopic{
@@ -232,6 +233,7 @@ func TestConnectionProduce(t *testing.T) {
 	resp, err = conn.Produce(&proto.ProduceReq{
 		CorrelationID: 2,
 		ClientID:      "tester",
+		Compression:   proto.CompressionNone,
 		RequiredAcks:  proto.RequiredAcksAll,
 		Timeout:       time.Second,
 		Topics: []proto.ProduceReqTopic{
@@ -266,10 +268,11 @@ func TestConnectionProduce(t *testing.T) {
 func TestConnectionFetch(t *testing.T) {
 	messages := []*proto.Message{
 		{Offset: 4, Key: []byte("f"), Value: []byte("first")},
-		{Offset: 5, Key: []byte("s"), Value: []byte("second message")},
+		{Offset: 5, Key: []byte("s"), Value: []byte("second")},
+		{Offset: 6, Key: []byte("t"), Value: []byte("third")},
 	}
 	for _, m := range messages {
-		m.Crc = proto.ComputeCrc(m)
+		m.Crc = proto.ComputeCrc(m, proto.CompressionNone)
 	}
 
 	resp1 := &proto.FetchResp{
@@ -308,7 +311,27 @@ func TestConnectionFetch(t *testing.T) {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
 	resp, err := conn.Fetch(&proto.FetchReq{
-		ClientID: "tester",
+		CorrelationID: 1,
+		ClientID:      "tester",
+		Topics: []proto.FetchReqTopic{
+			{
+				Name: "foo",
+				Partitions: []proto.FetchReqPartition{
+					{
+						ID:          1,
+						FetchOffset: 5,
+					},
+				},
+			},
+			{
+				Name: "bar",
+				Partitions: []proto.FetchReqPartition{
+					{
+						ID: 6,
+					},
+				},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("could not fetch response: %s", err)
@@ -319,6 +342,8 @@ func TestConnectionFetch(t *testing.T) {
 		m.Topic = "foo"
 		m.Partition = 1
 	}
+	// offset 5 was requested; first message should be trimmed
+	resp1.Topics[0].Partitions[0].Messages = messages[1:]
 
 	if !reflect.DeepEqual(resp, resp1) {
 		t.Fatalf("expected different response %#v", resp)
@@ -382,6 +407,7 @@ func TestConnectionProduceNoAck(t *testing.T) {
 	}
 	resp, err := conn.Produce(&proto.ProduceReq{
 		ClientID:     "tester",
+		Compression:  proto.CompressionNone,
 		RequiredAcks: proto.RequiredAcksNone,
 		Timeout:      time.Second,
 		Topics: []proto.ProduceReqTopic{
@@ -428,6 +454,7 @@ func TestClosedConnectionWriter(t *testing.T) {
 	longBytes := []byte(strings.Repeat("xxxxxxxxxxxxxxxxxxxxxx", 1000))
 	req := proto.ProduceReq{
 		ClientID:     "test-client",
+		Compression:  proto.CompressionNone,
 		RequiredAcks: proto.RequiredAcksAll,
 		Timeout:      100,
 		Topics: []proto.ProduceReqTopic{

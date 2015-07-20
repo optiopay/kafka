@@ -36,7 +36,6 @@ func (d *decoder) DecodeInt8() int8 {
 		d.err = ErrNotEnoughData
 		return 0
 	}
-	// XXX is this correct?
 	return int8(b[0])
 }
 
@@ -186,7 +185,7 @@ func (e *encoder) Encode(value interface{}) {
 	}
 	switch val := value.(type) {
 	case int8:
-		_, e.err = e.w.Write([]byte{byte(val)}) // XXX is this correct?
+		_, e.err = e.w.Write([]byte{byte(val)})
 	case int16, int32, int64, uint16, uint32, uint64:
 		e.err = binary.Write(e.w, binary.BigEndian, val)
 	case string:
