@@ -1,0 +1,15 @@
+zookeeper:
+  image: wurstmeister/zookeeper
+  ports:
+    - "2181"
+kafka:
+  build: .
+  ports:
+    - "9092"
+  links:
+    - zookeeper:zk
+  environment:
+    KAFKA_CREATE_TOPICS: "Topic1:1:1,Topic2:1:2,Topic3:1:2,Topic4:1:2"
+    KAFKA_ADVERTISED_HOST_NAME: 172.17.42.1
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
