@@ -348,6 +348,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 		}
 
 		nodeID, ok := b.metadata.endpoints[tp]
+
 		if !ok {
 			err = b.refreshMetadata()
 			if err != nil {
@@ -665,41 +666,19 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 //
 // Upon a successful call, the message's Offset field is updated.
 func (p *producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
-
-retryLoop:
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(p.conf.RetryWait)
 		}
-
 		offset, err = p.produce(topic, partition, messages...)
-		switch err {
-		case nil:
-			break retryLoop
-		case io.EOF, syscall.EPIPE:
-			// p.produce call is closing connection when this error shows up,
-			// but it's also returning it so that retry loop can count this
-			// case
-			// we cannot handle this error here, because there is no direct
-			// access to connection
-		default:
-			if err := p.broker.muRefreshMetadata(); err != nil {
-				p.conf.Logger.Debug("cannot refresh metadata",
-					"err", err)
+		if err == nil {
+			// offset is the offset value of first published messages
+			for i, msg := range messages {
+				msg.Offset = int64(i) + offset
 			}
-		}
-		p.conf.Logger.Debug("cannot produce messages",
-			"retry", retry,
-			"err", err)
-	}
-
-	if err == nil {
-		// offset is the offset value of first published messages
-		for i, msg := range messages {
-			msg.Offset = int64(i) + offset
+			return offset, err
 		}
 	}
-
 	return offset, err
 }
 
@@ -707,6 +686,10 @@ retryLoop:
 func (p *producer) produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 	conn, err := p.broker.muLeaderConnection(topic, partition)
 	if err != nil {
+		p.conf.Logger.Debug("cannot get leader connection",
+			"topic", topic,
+			"partition", partition,
+			"err", err)
 		return 0, err
 	}
 
@@ -731,15 +714,12 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 	resp, err := conn.Produce(&req)
 	if err != nil {
 		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
-			// Connection is broken, so should be closed, but the error is
-			// still valid and should be returned so that retry mechanism have
-			// chance to react.
-			p.conf.Logger.Debug("connection died while sending message",
-				"topic", topic,
-				"partition", partition,
-				"err", err)
 			p.broker.muCloseDeadConnection(conn)
 		}
+		p.conf.Logger.Debug("cannot produce",
+			"topic", topic,
+			"partition", partition,
+			"err", err)
 		return 0, err
 	}
 
