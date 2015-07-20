@@ -23,7 +23,7 @@ func TestProducerBrokenConnection(t *testing.T) {
 	}()
 
 	bconf := kafka.NewBrokerConf("producer-broken-connection")
-	bconf.Log = &testLogger{t}
+	bconf.Logger = &testLogger{t}
 	addrs, err := cluster.KafkaAddrs()
 	if err != nil {
 		t.Fatalf("cannot get kafka address: %s", err)
@@ -111,10 +111,22 @@ type testLogger struct {
 	*testing.T
 }
 
-func (tlog *testLogger) Print(args ...interface{}) {
+func (tlog *testLogger) Debug(msg string, keyvals ...interface{}) {
+	args := append([]interface{}{msg}, keyvals...)
 	tlog.Log(args...)
 }
 
-func (tlog *testLogger) Printf(format string, args ...interface{}) {
-	tlog.Logf(format, args...)
+func (tlog *testLogger) Info(msg string, keyvals ...interface{}) {
+	args := append([]interface{}{msg}, keyvals...)
+	tlog.Log(args...)
+}
+
+func (tlog *testLogger) Warn(msg string, keyvals ...interface{}) {
+	args := append([]interface{}{msg}, keyvals...)
+	tlog.Log(args...)
+}
+
+func (tlog *testLogger) Error(msg string, keyvals ...interface{}) {
+	args := append([]interface{}{msg}, keyvals...)
+	tlog.Log(args...)
 }
