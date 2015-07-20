@@ -1007,43 +1007,44 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 				"err", err)
 			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
-		} else {
-			switch err {
-			case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
-				c.conf.Logger.Debug("cannot fetch messages",
-					"retry", retry,
+			continue
+		}
+
+		switch err {
+		case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
+			c.conf.Logger.Debug("cannot fetch messages",
+				"retry", retry,
+				"err", err)
+			if err := c.broker.muRefreshMetadata(); err != nil {
+				c.conf.Logger.Debug("cannot refresh metadata",
 					"err", err)
-				if err := c.broker.muRefreshMetadata(); err != nil {
-					c.conf.Logger.Debug("cannot refresh metadata",
-						"err", err)
+			}
+		case nil:
+			for _, topic := range resp.Topics {
+				if topic.Name != c.conf.Topic {
+					c.conf.Logger.Warn("unexpected topic information received",
+						"got", topic.Name,
+						"expected", c.conf.Topic)
+					continue
 				}
-			case nil:
-				for _, topic := range resp.Topics {
-					if topic.Name != c.conf.Topic {
-						c.conf.Logger.Warn("unexpected topic information received",
-							"got", topic.Name,
-							"expected", c.conf.Topic)
+				for _, part := range topic.Partitions {
+					if part.ID != c.conf.Partition {
+						c.conf.Logger.Warn("unexpected partition information received",
+							"topic", topic.Name,
+							"expected", c.conf.Partition,
+							"got", part.ID)
 						continue
 					}
-					for _, part := range topic.Partitions {
-						if part.ID != c.conf.Partition {
-							c.conf.Logger.Warn("unexpected partition information received",
-								"topic", topic.Name,
-								"expected", c.conf.Partition,
-								"got", part.ID)
-							continue
-						}
-						return part.Messages, part.Err
-					}
+					return part.Messages, part.Err
 				}
-				return nil, errors.New("incomplete fetch response")
-			default:
-				c.conf.Logger.Debug("cannot fetch messages: unknown error",
-					"retry", retry,
-					"err", err)
-				c.broker.muCloseDeadConnection(c.conn)
-				c.conn = nil
 			}
+			return nil, errors.New("incomplete fetch response")
+		default:
+			c.conf.Logger.Debug("cannot fetch messages: unknown error",
+				"retry", retry,
+				"err", err)
+			c.broker.muCloseDeadConnection(c.conn)
+			c.conn = nil
 		}
 	}
 
