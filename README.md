@@ -1,6 +1,8 @@
 [![Build Status](https://travis-ci.org/optiopay/kafka.svg?branch=master)](https://travis-ci.org/optiopay/kafka)
 [![GoDoc](https://godoc.org/github.com/optiopay/kafka?status.png)](https://godoc.org/github.com/optiopay/kafka)
 
+# Kafka
+
 Kafka is Go client library for [Apache Kafka](https://kafka.apache.org/)
 server, released under [MIT license](LICENSE]).
 
@@ -10,11 +12,8 @@ failover and easy to use blocking API.
 
 * [godoc](https://godoc.org/github.com/optiopay/kafka) generated documentation,
 * [code examples](https://godoc.org/github.com/optiopay/kafka#pkg-examples)
-* [consumer and producer](https://github.com/husio/kafka-libs-test) speed
-  comparison with [sarama](https://github.com/Shopify/sarama) library.
 
-Example
--------
+## Example
 
 Write all messages from stdin to kafka and print all messages from kafka topic
 to stdout.
