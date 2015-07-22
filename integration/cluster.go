@@ -67,6 +67,10 @@ func (c *Container) Stop() error {
 	return c.cluster.ContainerStop(c.ID)
 }
 
+func (c *Container) Kill() error {
+	return c.cluster.ContainerKill(c.ID)
+}
+
 // Start start zookeeper and kafka nodes using docker-compose command. Upon
 // successful process spawn, cluster is scaled to required amount of nodes.
 func (cluster *KafkaCluster) Start() error {
@@ -177,6 +181,14 @@ func (cluster *KafkaCluster) ContainerStop(containerID string) error {
 	stopCmd := cluster.cmd("docker", "stop", containerID)
 	if err := stopCmd.Run(); err != nil {
 		return fmt.Errorf("cannot stop %q container: %s", containerID, err)
+	}
+	return nil
+}
+
+func (cluster *KafkaCluster) ContainerKill(containerID string) error {
+	killCmd := cluster.cmd("docker", "kill", containerID)
+	if err := killCmd.Run(); err != nil {
+		return fmt.Errorf("cannot kill %q container: %s", containerID, err)
 	}
 	return nil
 }
