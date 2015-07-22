@@ -60,8 +60,8 @@ func TestProducerBrokenConnection(t *testing.T) {
 	var stopped []*Container
 	for _, container := range containers {
 		if container.RunningKafka() {
-			if err := container.Stop(); err != nil {
-				t.Fatalf("cannot stop %q kafka container: %s", container.ID, err)
+			if err := container.Kill(); err != nil {
+				t.Fatalf("cannot kill %q kafka container: %s", container.ID, err)
 			}
 			stopped = append(stopped, container)
 		}
