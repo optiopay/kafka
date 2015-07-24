@@ -978,6 +978,7 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 	}
 
 	var resErr error
+consumeRetryLoop:
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
 		if retry != 0 {
 			// fetch call is protected by consumer lock - release it for the
@@ -991,6 +992,10 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 		if c.conn == nil {
 			conn, err := c.broker.muLeaderConnection(c.conf.Topic, c.conf.Partition)
 			if err != nil {
+				if err := c.broker.muRefreshMetadata(); err != nil {
+					c.conf.Logger.Debug("cannot refresh metadata",
+						"err", err)
+				}
 				resErr = err
 				continue
 			}
@@ -1007,44 +1012,53 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 				"err", err)
 			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
-		} else {
-			switch err {
-			case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
-				c.conf.Logger.Debug("cannot fetch messages",
-					"retry", retry,
-					"err", err)
-				if err := c.broker.muRefreshMetadata(); err != nil {
-					c.conf.Logger.Debug("cannot refresh metadata",
-						"err", err)
+			continue
+		}
+
+		if err != nil {
+			c.conf.Logger.Debug("cannot fetch messages: unknown error",
+				"retry", retry,
+				"err", err)
+			c.broker.muCloseDeadConnection(c.conn)
+			c.conn = nil
+			continue
+		}
+
+		for _, topic := range resp.Topics {
+			if topic.Name != c.conf.Topic {
+				c.conf.Logger.Warn("unexpected topic information received",
+					"got", topic.Name,
+					"expected", c.conf.Topic)
+				continue
+			}
+			for _, part := range topic.Partitions {
+				if part.ID != c.conf.Partition {
+					c.conf.Logger.Warn("unexpected partition information received",
+						"topic", topic.Name,
+						"expected", c.conf.Partition,
+						"got", part.ID)
+					continue
 				}
-			case nil:
-				for _, topic := range resp.Topics {
-					if topic.Name != c.conf.Topic {
-						c.conf.Logger.Warn("unexpected topic information received",
-							"got", topic.Name,
-							"expected", c.conf.Topic)
-						continue
+				switch part.Err {
+				case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
+					c.conf.Logger.Debug("cannot fetch messages",
+						"retry", retry,
+						"err", part.Err)
+					if err := c.broker.muRefreshMetadata(); err != nil {
+						c.conf.Logger.Debug("cannot refresh metadata",
+							"err", err)
 					}
-					for _, part := range topic.Partitions {
-						if part.ID != c.conf.Partition {
-							c.conf.Logger.Warn("unexpected partition information received",
-								"topic", topic.Name,
-								"expected", c.conf.Partition,
-								"got", part.ID)
-							continue
-						}
-						return part.Messages, part.Err
-					}
+					// The connection is fine, so don't close it,
+					// but we may very well need to talk to a different broker now.
+					// Set the conn to nil so that next time around the loop
+					// we'll check the metadata again to see who we're supposed to talk to.
+					c.conn = nil
+					continue consumeRetryLoop
 				}
-				return nil, errors.New("incomplete fetch response")
-			default:
-				c.conf.Logger.Debug("cannot fetch messages: unknown error",
-					"retry", retry,
-					"err", err)
-				c.broker.muCloseDeadConnection(c.conn)
-				c.conn = nil
+				return part.Messages, part.Err
 			}
 		}
+		return nil, errors.New("incomplete fetch response")
 	}
 
 	return nil, resErr
