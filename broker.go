@@ -913,31 +913,11 @@ func (c *consumer) Consume() (*proto.Message, error) {
 
 	var retry int
 	for len(c.msgbuf) == 0 {
-		messages, err := c.fetch()
+		var err error
+		c.msgbuf, err = c.fetch()
 		if err != nil {
 			return nil, err
 		}
-
-		// check first messages if any of them has index lower than requested,
-		// this can happen because of kafka optimizations
-		toSkip := 0
-		for toSkip < len(messages) {
-			if messages[toSkip].Offset >= c.offset {
-				break
-			}
-			toSkip++
-		}
-
-		// messages crc is checked by underlying connection so no need to check
-		// those again
-
-		if len(messages) == toSkip && toSkip != 0 {
-			c.conf.Logger.Debug("no valid message fetched",
-				"skipped", toSkip)
-		}
-		// ignore all messages that are of index lower than requested
-		c.msgbuf = messages[toSkip:]
-
 		if len(c.msgbuf) == 0 {
 			if c.conf.RetryWait > 0 {
 				time.Sleep(c.conf.RetryWait)
