@@ -974,10 +974,6 @@ consumeRetryLoop:
 		if c.conn == nil {
 			conn, err := c.broker.muLeaderConnection(c.conf.Topic, c.conf.Partition)
 			if err != nil {
-				if err := c.broker.muRefreshMetadata(); err != nil {
-					c.conf.Logger.Debug("cannot refresh metadata",
-						"err", err)
-				}
 				resErr = err
 				continue
 			}
