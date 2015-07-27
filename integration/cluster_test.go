@@ -55,7 +55,7 @@ func TestKafkaCluster(t *testing.T) {
 func TestContainerRestart(t *testing.T) {
 	IntegrationTest(t)
 
-	cluster := NewKafkaCluster("kafka-docker/", 2)
+	cluster := NewKafkaCluster("kafka-docker/", 3)
 	if err := cluster.Start(); err != nil {
 		t.Fatalf("cannot start kafka cluster: %s", err)
 	}

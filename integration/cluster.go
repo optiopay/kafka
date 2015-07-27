@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"testing"
 )
 
 type KafkaCluster struct {
@@ -46,9 +47,14 @@ type PortMapping struct {
 }
 
 func NewKafkaCluster(kafkaDockerDir string, size int) *KafkaCluster {
+	if size < 3 {
+		fmt.Fprintln(os.Stderr,
+			"WARNING: creating cluster smaller than 3 nodes is not sufficient for all topics")
+	}
 	return &KafkaCluster{
 		kafkaDockerDir: kafkaDockerDir,
 		size:           size,
+		verbose:        testing.Verbose(),
 	}
 }
 
