@@ -128,7 +128,9 @@ type BrokerConf struct {
 		Printf(string, ...interface{})
 	}
 
-	// TODO(husio) document
+	// Logger is general logging interface that can be provided by popular
+	// logging frameworks. Used to notify and as replacement for stdlib `log`
+	// package.
 	Logger Logger
 }
 
