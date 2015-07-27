@@ -32,7 +32,7 @@ func hasDocker() bool {
 func TestKafkaCluster(t *testing.T) {
 	IntegrationTest(t)
 
-	const clusterSize = 3
+	const clusterSize = 4
 
 	cluster := NewKafkaCluster("kafka-docker/", clusterSize)
 	if err := cluster.Start(); err != nil {
@@ -55,7 +55,7 @@ func TestKafkaCluster(t *testing.T) {
 func TestContainerRestart(t *testing.T) {
 	IntegrationTest(t)
 
-	cluster := NewKafkaCluster("kafka-docker/", 3)
+	cluster := NewKafkaCluster("kafka-docker/", 4)
 	if err := cluster.Start(); err != nil {
 		t.Fatalf("cannot start kafka cluster: %s", err)
 	}
@@ -64,8 +64,9 @@ func TestContainerRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot get containers info: %s", err)
 	}
-	if len(containers) != 3 {
-		t.Fatalf("expected 3 containers, got %d", len(containers))
+	// 4 kafka + zookeeper
+	if len(containers) != 5 {
+		t.Fatalf("expected 5 containers, got %d", len(containers))
 	}
 
 	// first stop all zookeeper containers

@@ -47,9 +47,9 @@ type PortMapping struct {
 }
 
 func NewKafkaCluster(kafkaDockerDir string, size int) *KafkaCluster {
-	if size < 3 {
+	if size < 4 {
 		fmt.Fprintln(os.Stderr,
-			"WARNING: creating cluster smaller than 3 nodes is not sufficient for all topics")
+			"WARNING: creating cluster smaller than 4 nodes is not sufficient for all topics")
 	}
 	return &KafkaCluster{
 		kafkaDockerDir: kafkaDockerDir,
