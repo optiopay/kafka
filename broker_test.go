@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1296,7 +1297,7 @@ func TestOffsetCoordinatorNoCoordinatorError(t *testing.T) {
 // this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
 func BenchmarkConsumer(b *testing.B) {
-	const messagesPerResp = 30
+	const messagesPerResp = 100
 
 	srv := NewServer()
 	srv.Start()
@@ -1354,6 +1355,83 @@ func BenchmarkConsumer(b *testing.B) {
 			b.Fatalf("cannot fetch message: %s", err)
 		}
 	}
+}
+
+// this is not the best benchmark, because Server implementation is
+// not made for performance, but it should be good enough to help tuning code.
+func BenchmarkConsumerConcurrent(b *testing.B) {
+	const (
+		concurrentConsumers = 4
+		messagesPerResp     = concurrentConsumers * 100
+	)
+
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+
+	var msgOffset int64
+	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+		req := request.(*proto.FetchReq)
+		messages := make([]*proto.Message, messagesPerResp)
+
+		for i := range messages {
+			msgOffset++
+			msg := &proto.Message{
+				Offset: msgOffset,
+				Value:  []byte(`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec a diam lectus. Sed sit amet ipsum mauris. Maecenas congue ligula ac quam viverra nec consectetur ante hendrerit. Donec et mollis dolor. Praesent et diam eget libero egestas mattis sit amet vitae augue. Nam tincidunt congue enim, ut porta lorem lacinia consectetur.`),
+			}
+			messages[i] = msg
+		}
+		return &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						{
+							ID:        0,
+							TipOffset: msgOffset - int64(len(messages)),
+							Messages:  messages,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("test"))
+	if err != nil {
+		b.Fatalf("cannot create broker: %s", err)
+	}
+
+	conf := NewConsumerConf("test", 0)
+	conf.StartOffset = 0
+
+	consumer, err := broker.Consumer(conf)
+	if err != nil {
+		b.Fatalf("cannot create consumer: %s", err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(concurrentConsumers)
+	for i := 0; i < concurrentConsumers; i++ {
+		go func(c Consumer) {
+			defer wg.Done()
+			for i := 0; i < b.N/concurrentConsumers; i++ {
+				_, err := c.Consume()
+				if err != nil {
+					b.Fatalf("cannot fetch message: %s", err)
+				}
+			}
+		}(consumer)
+	}
+
+	b.ResetTimer()
+	close(start)
+	wg.Wait()
 }
 
 func BenchmarkProducer(b *testing.B) {
