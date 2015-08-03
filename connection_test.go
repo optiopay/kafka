@@ -267,9 +267,9 @@ func TestConnectionProduce(t *testing.T) {
 
 func TestConnectionFetch(t *testing.T) {
 	messages := []*proto.Message{
-		{Offset: 4, Key: []byte("f"), Value: []byte("first")},
-		{Offset: 5, Key: []byte("s"), Value: []byte("second")},
-		{Offset: 6, Key: []byte("t"), Value: []byte("third")},
+		{Offset: 4, Key: []byte("f"), Value: []byte("first"), TipOffset: 20},
+		{Offset: 5, Key: []byte("s"), Value: []byte("second"), TipOffset: 20},
+		{Offset: 6, Key: []byte("t"), Value: []byte("third"), TipOffset: 20},
 	}
 	for _, m := range messages {
 		m.Crc = proto.ComputeCrc(m, proto.CompressionNone)

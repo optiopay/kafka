@@ -289,8 +289,8 @@ func TestFetchResponse(t *testing.T) {
 						Err:       error(nil),
 						TipOffset: 4,
 						Messages: []*Message{
-							{Offset: 2, Crc: 0xb8ba5f57, Key: []byte("foo"), Value: []byte("bar"), Topic: "foo", Partition: 0},
-							{Offset: 3, Crc: 0xb8ba5f57, Key: []byte("foo"), Value: []byte("bar"), Topic: "foo", Partition: 0},
+							{Offset: 2, Crc: 0xb8ba5f57, Key: []byte("foo"), Value: []byte("bar"), Topic: "foo", Partition: 0, TipOffset: 4},
+							{Offset: 3, Crc: 0xb8ba5f57, Key: []byte("foo"), Value: []byte("bar"), Topic: "foo", Partition: 0, TipOffset: 4},
 						},
 					},
 					{

@@ -104,6 +104,7 @@ type Message struct {
 	Crc       uint32 // set when fetching, ignored when producing
 	Topic     string // set when fetching, ignored when producing
 	Partition int32  // set when fetching, ignored when producing
+	TipOffset int64  // set when fetching, ignored when processing
 }
 
 // ComputeCrc returns crc32 hash for given message content.
@@ -623,6 +624,7 @@ func ReadFetchResp(r io.Reader) (*FetchResp, error) {
 			for _, msg := range part.Messages {
 				msg.Topic = topic.Name
 				msg.Partition = part.ID
+				msg.TipOffset = part.TipOffset
 			}
 		}
 	}
