@@ -343,8 +343,10 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 		if retry != 0 {
 			b.mu.Unlock()
 			b.conf.Logger.Debug("cannot get leader connection",
+				"topic", topic,
+				"partition", partition,
 				"retry", retry,
-				"sleep", b.conf.LeaderRetryWait)
+				"sleep", b.conf.LeaderRetryWait.String())
 			time.Sleep(b.conf.LeaderRetryWait)
 			b.mu.Lock()
 		}
