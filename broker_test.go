@@ -435,6 +435,35 @@ func TestPartitionOffset(t *testing.T) {
 	}
 }
 
+func TestPartitionCount(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+
+	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	count, err := broker.PartitionCount("test")
+	if err != nil {
+		t.Fatalf("expected no error, got %s", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 partitions, got %d", count)
+	}
+
+	count, err = broker.PartitionCount("test2")
+	if err == nil {
+		t.Fatalf("expected an error, got none!")
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 partitions, got %d", count)
+	}
+}
+
 func TestPartitionOffsetClosedConnection(t *testing.T) {
 	srv1 := NewServer()
 	srv1.Start()
