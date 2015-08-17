@@ -76,9 +76,10 @@ func (tp topicPartition) String() string {
 }
 
 type clusterMetadata struct {
-	created   time.Time
-	nodes     map[int32]string         // node ID to address
-	endpoints map[topicPartition]int32 // partition to leader node ID
+	created    time.Time
+	nodes      map[int32]string         // node ID to address
+	endpoints  map[topicPartition]int32 // partition to leader node ID
+	partitions map[string]int32         // topic to number of partitions
 }
 
 type BrokerConf struct {
@@ -309,9 +310,10 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 			"age", time.Now().Sub(b.metadata.created))
 	}
 	b.metadata = clusterMetadata{
-		created:   time.Now(),
-		nodes:     make(map[int32]string),
-		endpoints: make(map[topicPartition]int32),
+		created:    time.Now(),
+		nodes:      make(map[int32]string),
+		endpoints:  make(map[topicPartition]int32),
+		partitions: make(map[string]int32),
 	}
 	debugmsg := make([]interface{}, 0)
 	for _, node := range resp.Brokers {
@@ -325,8 +327,23 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 			b.metadata.endpoints[dest] = part.Leader
 			debugmsg = append(debugmsg, dest, part.Leader)
 		}
+		b.metadata.partitions[topic.Name] = int32(len(topic.Partitions))
 	}
 	b.conf.Logger.Debug("new metadata cached", debugmsg...)
+}
+
+// PartitionCount returns how many partitions a given topic has. If a topic
+// is not known, 0 and an error are returned.
+func (b *Broker) PartitionCount(topic string) (int32, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	count, ok := b.metadata.partitions[topic]
+	if ok {
+		return count, nil
+	}
+
+	return 0, fmt.Errorf("topic %s not found in metadata", topic)
 }
 
 // muLeaderConnection returns connection to leader for given partition. If
