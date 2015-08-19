@@ -1323,11 +1323,15 @@ func TestOffsetCoordinatorNoCoordinatorError(t *testing.T) {
 	}
 }
 
+func BenchmarkConsumer_10Msgs(b *testing.B)    { benchmarkConsumer(b, 10) }
+func BenchmarkConsumer_100Msgs(b *testing.B)   { benchmarkConsumer(b, 100) }
+func BenchmarkConsumer_500Msgs(b *testing.B)   { benchmarkConsumer(b, 500) }
+func BenchmarkConsumer_2000Msgs(b *testing.B)  { benchmarkConsumer(b, 2000) }
+func BenchmarkConsumer_10000Msgs(b *testing.B) { benchmarkConsumer(b, 10000) }
+
 // this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
-func BenchmarkConsumer(b *testing.B) {
-	const messagesPerResp = 100
-
+func benchmarkConsumer(b *testing.B, messagesPerResp int) {
 	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
@@ -1386,14 +1390,13 @@ func BenchmarkConsumer(b *testing.B) {
 	}
 }
 
+func BenchmarkConsumerConcurrent_8Consumers(b *testing.B)  { benchmarkConsumerConcurrent(b, 8) }
+func BenchmarkConsumerConcurrent_32Consumers(b *testing.B) { benchmarkConsumerConcurrent(b, 32) }
+func BenchmarkConsumerConcurrent_64Consumers(b *testing.B) { benchmarkConsumerConcurrent(b, 64) }
+
 // this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
-func BenchmarkConsumerConcurrent(b *testing.B) {
-	const (
-		concurrentConsumers = 4
-		messagesPerResp     = concurrentConsumers * 100
-	)
-
+func benchmarkConsumerConcurrent(b *testing.B, concurrentConsumers int) {
 	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
@@ -1403,7 +1406,7 @@ func BenchmarkConsumerConcurrent(b *testing.B) {
 	var msgOffset int64
 	srv.Handle(FetchRequest, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
-		messages := make([]*proto.Message, messagesPerResp)
+		messages := make([]*proto.Message, concurrentConsumers*2000)
 
 		for i := range messages {
 			msgOffset++
@@ -1463,9 +1466,14 @@ func BenchmarkConsumerConcurrent(b *testing.B) {
 	wg.Wait()
 }
 
-func BenchmarkProducer(b *testing.B) {
-	const messagesPerReq = 30
+func BenchmarkProducer_1Msgs(b *testing.B)    { benchmarkProducer(b, 1) }
+func BenchmarkProducer_2Msgs(b *testing.B)    { benchmarkProducer(b, 2) }
+func BenchmarkProducer_10Msgs(b *testing.B)   { benchmarkProducer(b, 10) }
+func BenchmarkProducer_50Msgs(b *testing.B)   { benchmarkProducer(b, 50) }
+func BenchmarkProducer_200Msgs(b *testing.B)  { benchmarkProducer(b, 200) }
+func BenchmarkProducer_1000Msgs(b *testing.B) { benchmarkProducer(b, 1000) }
 
+func benchmarkProducer(b *testing.B, messagesPerReq int64) {
 	srv := NewServer()
 	srv.Start()
 	defer srv.Close()
