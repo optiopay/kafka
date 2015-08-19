@@ -5,12 +5,12 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"io/ioutil"
 	"time"
 
 	"github.com/golang/snappy"
+	"github.com/optiopay/kafka/crc32"
 )
 
 /*
