@@ -982,12 +982,7 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 consumeRetryLoop:
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
 		if retry != 0 {
-			// fetch call is protected by consumer lock - release it for the
-			// time of sleep so that other threads can continue using
-			// connection
-			c.mu.Unlock()
 			time.Sleep(c.conf.RetryErrWait)
-			c.mu.Lock()
 		}
 
 		if c.conn == nil {
