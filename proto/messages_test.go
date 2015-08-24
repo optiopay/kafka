@@ -420,7 +420,7 @@ func TestReadIncompleteMessage(t *testing.T) {
 }
 
 func BenchmarkProduceRequestMarshal(b *testing.B) {
-	messages := make([]*Message, 1000)
+	messages := make([]*Message, 100)
 	for i := range messages {
 		messages[i] = &Message{
 			Offset: int64(i),

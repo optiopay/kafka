@@ -173,6 +173,7 @@ func (d *decoder) Err() error {
 type encoder struct {
 	w   io.Writer
 	err error
+	buf [8]byte
 }
 
 func NewEncoder(w io.Writer) *encoder {
@@ -183,25 +184,50 @@ func (e *encoder) Encode(value interface{}) {
 	if e.err != nil {
 		return
 	}
+	var b []byte
+
 	switch val := value.(type) {
 	case int8:
 		_, e.err = e.w.Write([]byte{byte(val)})
-	case int16, int32, int64, uint16, uint32, uint64:
-		e.err = binary.Write(e.w, binary.BigEndian, val)
+	case int16:
+		b = e.buf[:2]
+		binary.BigEndian.PutUint16(b, uint16(val))
+	case int32:
+		b = e.buf[:4]
+		binary.BigEndian.PutUint32(b, uint32(val))
+	case int64:
+		b = e.buf[:8]
+		binary.BigEndian.PutUint64(b, uint64(val))
+	case uint16:
+		b = e.buf[:2]
+		binary.BigEndian.PutUint16(b, val)
+	case uint32:
+		b = e.buf[:4]
+		binary.BigEndian.PutUint32(b, val)
+	case uint64:
+		b = e.buf[:8]
+		binary.BigEndian.PutUint64(b, val)
 	case string:
-		b := []byte(val)
-		e.err = binary.Write(e.w, binary.BigEndian, int16(len(b)))
+		buf := e.buf[:2]
+		binary.BigEndian.PutUint16(buf, uint16(len(val)))
+		e.err = writeAll(e.w, buf)
 		if e.err == nil {
-			e.err = binary.Write(e.w, binary.BigEndian, b)
+			e.err = writeAll(e.w, []byte(val))
 		}
 	case []byte:
+		buf := e.buf[:4]
+
 		if val == nil {
-			e.err = binary.Write(e.w, binary.BigEndian, int32(-1))
+			no := int32(-1)
+			binary.BigEndian.PutUint32(buf, uint32(no))
+			e.err = writeAll(e.w, buf)
 			return
 		}
-		e.err = binary.Write(e.w, binary.BigEndian, int32(len(val)))
+
+		binary.BigEndian.PutUint32(buf, uint32(len(val)))
+		e.err = writeAll(e.w, buf)
 		if e.err == nil {
-			e.err = binary.Write(e.w, binary.BigEndian, val)
+			e.err = writeAll(e.w, val)
 		}
 	case []int32:
 		e.EncodeArrayLen(len(val))
@@ -211,11 +237,102 @@ func (e *encoder) Encode(value interface{}) {
 	default:
 		e.err = fmt.Errorf("cannot encode type %T", value)
 	}
+
+	if b != nil {
+		e.err = writeAll(e.w, b)
+		return
+	}
+}
+
+func (e *encoder) EncodeInt8(val int8) {
+	if e.err != nil {
+		return
+	}
+
+	_, e.err = e.w.Write([]byte{byte(val)})
+}
+
+func (e *encoder) EncodeInt16(val int16) {
+	if e.err != nil {
+		return
+	}
+
+	b := e.buf[:2]
+	binary.BigEndian.PutUint16(b, uint16(val))
+	e.err = writeAll(e.w, b)
+}
+
+func (e *encoder) EncodeInt32(val int32) {
+	if e.err != nil {
+		return
+	}
+
+	b := e.buf[:4]
+	binary.BigEndian.PutUint32(b, uint32(val))
+	e.err = writeAll(e.w, b)
+}
+
+func (e *encoder) EncodeInt64(val int64) {
+	if e.err != nil {
+		return
+	}
+
+	b := e.buf[:8]
+	binary.BigEndian.PutUint64(b, uint64(val))
+	e.err = writeAll(e.w, b)
+}
+
+func (e *encoder) EncodeUint32(val uint32) {
+	if e.err != nil {
+		return
+	}
+
+	b := e.buf[:4]
+	binary.BigEndian.PutUint32(b, val)
+	e.err = writeAll(e.w, b)
+}
+
+func (e *encoder) EncodeBytes(val []byte) {
+	if e.err != nil {
+		return
+	}
+
+	buf := e.buf[:4]
+
+	if val == nil {
+		no := int32(-1)
+		binary.BigEndian.PutUint32(buf, uint32(no))
+		e.err = writeAll(e.w, buf)
+		return
+	}
+
+	binary.BigEndian.PutUint32(buf, uint32(len(val)))
+	e.err = writeAll(e.w, buf)
+	if e.err == nil {
+		e.err = writeAll(e.w, val)
+	}
+}
+
+func (e *encoder) EncodeString(val string) {
+	if e.err != nil {
+		return
+	}
+
+	buf := e.buf[:2]
+
+	binary.BigEndian.PutUint16(buf, uint16(len(val)))
+	e.err = writeAll(e.w, buf)
+	if e.err == nil {
+		e.err = writeAll(e.w, []byte(val))
+	}
 }
 
 func (e *encoder) EncodeError(err error) {
+	b := e.buf[:2]
+
 	if err == nil {
-		e.err = binary.Write(e.w, binary.BigEndian, int16(0))
+		binary.BigEndian.PutUint16(b, uint16(0))
+		e.err = writeAll(e.w, b)
 		return
 	}
 	kerr, ok := err.(*KafkaError)
@@ -223,13 +340,25 @@ func (e *encoder) EncodeError(err error) {
 		e.err = fmt.Errorf("cannot encode error of type %T", err)
 	}
 
-	e.err = binary.Write(e.w, binary.BigEndian, int16(kerr.errno))
+	binary.BigEndian.PutUint16(b, uint16(kerr.errno))
+	e.err = writeAll(e.w, b)
 }
 
 func (e *encoder) EncodeArrayLen(length int) {
-	e.Encode(int32(length))
+	e.EncodeInt32(int32(length))
 }
 
 func (e *encoder) Err() error {
 	return e.err
+}
+
+func writeAll(w io.Writer, b []byte) error {
+	n, err := w.Write(b)
+	if err != nil {
+		return err
+	}
+	if n != len(b) {
+		return fmt.Errorf("cannot write %d: %d written", len(b), n)
+	}
+	return nil
 }

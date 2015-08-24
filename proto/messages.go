@@ -161,14 +161,14 @@ func writeMessageSet(w io.Writer, messages []*Message, compression Compression) 
 	totalSize := 0
 	for _, message := range messages {
 		totalSize += 26 + len(message.Key) + len(message.Value)
-		enc.Encode(int64(message.Offset))
-		messageSize := 14 + len(message.Key) + len(message.Value)
-		enc.Encode(int32(messageSize))
-		enc.Encode(ComputeCrc(message, compression))
-		enc.Encode(int8(0)) // magic byte
-		enc.Encode(int8(compression))
-		enc.Encode(message.Key)
-		enc.Encode(message.Value)
+		enc.EncodeInt64(message.Offset)
+		messageSize := int32(14 + len(message.Key) + len(message.Value))
+		enc.EncodeInt32(messageSize)
+		enc.EncodeUint32(ComputeCrc(message, compression))
+		enc.EncodeInt8(0) // magic byte
+		enc.EncodeInt8(int8(compression))
+		enc.EncodeBytes(message.Key)
+		enc.EncodeBytes(message.Value)
 	}
 	return totalSize, enc.Err()
 }
@@ -182,7 +182,7 @@ func writeMessageSet(w io.Writer, messages []*Message, compression Compression) 
 func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 	rd := io.LimitReader(r, int64(size))
 	dec := NewDecoder(rd)
-	set := make([]*Message, 0, 32)
+	set := make([]*Message, 0, 64)
 	for {
 		offset := dec.DecodeInt64()
 		if err := dec.Err(); err != nil {
@@ -1123,22 +1123,22 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 	var buf buffer
 	enc := NewEncoder(&buf)
 
-	enc.Encode(int32(0)) // placeholder
-	enc.Encode(int16(ProduceReqKind))
-	enc.Encode(int16(0))
-	enc.Encode(r.CorrelationID)
-	enc.Encode(r.ClientID)
+	enc.EncodeInt32(0) // placeholder
+	enc.EncodeInt16(ProduceReqKind)
+	enc.EncodeInt16(0)
+	enc.EncodeInt32(r.CorrelationID)
+	enc.EncodeString(r.ClientID)
 
-	enc.Encode(r.RequiredAcks)
-	enc.Encode(int32(r.Timeout / time.Millisecond))
+	enc.EncodeInt16(r.RequiredAcks)
+	enc.EncodeInt32(int32(r.Timeout / time.Millisecond))
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, t := range r.Topics {
-		enc.Encode(t.Name)
+		enc.EncodeString(t.Name)
 		enc.EncodeArrayLen(len(t.Partitions))
 		for _, p := range t.Partitions {
-			enc.Encode(p.ID)
+			enc.EncodeInt32(p.ID)
 			i := len(buf)
-			enc.Encode(int32(0)) // placeholder
+			enc.EncodeInt32(0) // placeholder
 			n, err := writeMessageSet(&buf, p.Messages, r.Compression)
 			if err != nil {
 				return nil, err
