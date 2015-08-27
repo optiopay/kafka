@@ -3,6 +3,8 @@ package kafka
 import (
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -1332,43 +1334,58 @@ func BenchmarkConsumer_10000Msgs(b *testing.B) { benchmarkConsumer(b, 10000) }
 // this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
 func benchmarkConsumer(b *testing.B, messagesPerResp int) {
-	srv := NewServer()
-	srv.Start()
-	defer srv.Close()
+	if addr := os.Getenv("TEST_SERVER_ADDRESS"); addr != "" {
+		srv := NewServer()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+		srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
-	var msgOffset int64
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
-		req := request.(*proto.FetchReq)
-		messages := make([]*proto.Message, messagesPerResp)
+		var msgOffset int64
+		srv.Handle(FetchRequest, func(request Serializable) Serializable {
+			req := request.(*proto.FetchReq)
+			messages := make([]*proto.Message, messagesPerResp)
 
-		for i := range messages {
-			msgOffset++
-			msg := &proto.Message{
-				Offset: msgOffset,
-				Value:  []byte(`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec a diam lectus. Sed sit amet ipsum mauris. Maecenas congue ligula ac quam viverra nec consectetur ante hendrerit. Donec et mollis dolor. Praesent et diam eget libero egestas mattis sit amet vitae augue. Nam tincidunt congue enim, ut porta lorem lacinia consectetur.`),
+			for i := range messages {
+				msgOffset++
+				msg := &proto.Message{
+					Offset: msgOffset,
+					Value:  []byte(`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec a diam lectus. Sed sit amet ipsum mauris. Maecenas congue ligula ac quam viverra nec consectetur ante hendrerit. Donec et mollis dolor. Praesent et diam eget libero egestas mattis sit amet vitae augue. Nam tincidunt congue enim, ut porta lorem lacinia consectetur.`),
+				}
+				messages[i] = msg
 			}
-			messages[i] = msg
-		}
-		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
-			Topics: []proto.FetchRespTopic{
-				{
-					Name: "test",
-					Partitions: []proto.FetchRespPartition{
-						{
-							ID:        0,
-							TipOffset: msgOffset - int64(len(messages)),
-							Messages:  messages,
+			return &proto.FetchResp{
+				CorrelationID: req.CorrelationID,
+				Topics: []proto.FetchRespTopic{
+					{
+						Name: "test",
+						Partitions: []proto.FetchRespPartition{
+							{
+								ID:        0,
+								TipOffset: msgOffset - int64(len(messages)),
+								Messages:  messages,
+							},
 						},
 					},
 				},
-			},
-		}
-	})
+			}
+		})
 
-	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("test"))
+		defer srv.Close()
+		if err := srv.Run(addr); err != nil {
+			b.Fatalf("cannot start server: %s", err)
+		}
+		return
+	}
+
+	addr := randomAddr()
+	// run server in separate process
+	cmd := exec.Command(os.Args[0], "-test.bench=BenchmarkConsumer_10Msgs", "-test.run=none") // bench variant does not matter
+	cmd.Env = append(os.Environ(), fmt.Sprintf("TEST_SERVER_ADDRESS=%s", addr))
+	if err := cmd.Start(); err != nil {
+		b.Fatalf("cannot run test server: %s", err)
+	}
+	defer cmd.Process.Kill()
+
+	broker, err := Dial([]string{addr}, newTestBrokerConf("test"))
 	if err != nil {
 		b.Fatalf("cannot create broker: %s", err)
 	}
@@ -1397,43 +1414,57 @@ func BenchmarkConsumerConcurrent_64Consumers(b *testing.B) { benchmarkConsumerCo
 // this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
 func benchmarkConsumerConcurrent(b *testing.B, concurrentConsumers int) {
-	srv := NewServer()
-	srv.Start()
-	defer srv.Close()
+	if addr := os.Getenv("TEST_SERVER_ADDRESS"); addr != "" {
+		srv := NewServer()
+		srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+		var msgOffset int64
+		srv.Handle(FetchRequest, func(request Serializable) Serializable {
+			req := request.(*proto.FetchReq)
+			messages := make([]*proto.Message, concurrentConsumers*2000)
 
-	var msgOffset int64
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
-		req := request.(*proto.FetchReq)
-		messages := make([]*proto.Message, concurrentConsumers*2000)
-
-		for i := range messages {
-			msgOffset++
-			msg := &proto.Message{
-				Offset: msgOffset,
-				Value:  []byte(`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec a diam lectus. Sed sit amet ipsum mauris. Maecenas congue ligula ac quam viverra nec consectetur ante hendrerit. Donec et mollis dolor. Praesent et diam eget libero egestas mattis sit amet vitae augue. Nam tincidunt congue enim, ut porta lorem lacinia consectetur.`),
+			for i := range messages {
+				msgOffset++
+				msg := &proto.Message{
+					Offset: msgOffset,
+					Value:  []byte(`Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec a diam lectus. Sed sit amet ipsum mauris. Maecenas congue ligula ac quam viverra nec consectetur ante hendrerit. Donec et mollis dolor. Praesent et diam eget libero egestas mattis sit amet vitae augue. Nam tincidunt congue enim, ut porta lorem lacinia consectetur.`),
+				}
+				messages[i] = msg
 			}
-			messages[i] = msg
-		}
-		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
-			Topics: []proto.FetchRespTopic{
-				{
-					Name: "test",
-					Partitions: []proto.FetchRespPartition{
-						{
-							ID:        0,
-							TipOffset: msgOffset - int64(len(messages)),
-							Messages:  messages,
+			return &proto.FetchResp{
+				CorrelationID: req.CorrelationID,
+				Topics: []proto.FetchRespTopic{
+					{
+						Name: "test",
+						Partitions: []proto.FetchRespPartition{
+							{
+								ID:        0,
+								TipOffset: msgOffset - int64(len(messages)),
+								Messages:  messages,
+							},
 						},
 					},
 				},
-			},
-		}
-	})
+			}
+		})
 
-	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("test"))
+		defer srv.Close()
+		if err := srv.Run(addr); err != nil {
+			b.Fatalf("cannot start server: %s", err)
+		}
+		return
+	}
+
+	addr := randomAddr()
+	// run server in separate process
+	cmd := exec.Command(os.Args[0], "-test.bench=BenchmarkConsumerConcurrent_8Consumers", "-test.run=none") // bench variant does not matter
+	cmd.Env = append(os.Environ(), fmt.Sprintf("TEST_SERVER_ADDRESS=%s", addr))
+	if err := cmd.Start(); err != nil {
+		b.Fatalf("cannot run test server: %s", err)
+	}
+	defer cmd.Process.Kill()
+
+	broker, err := Dial([]string{addr}, newTestBrokerConf("test"))
 	if err != nil {
 		b.Fatalf("cannot create broker: %s", err)
 	}
@@ -1474,33 +1505,48 @@ func BenchmarkProducer_200Msgs(b *testing.B)  { benchmarkProducer(b, 200) }
 func BenchmarkProducer_1000Msgs(b *testing.B) { benchmarkProducer(b, 1000) }
 
 func benchmarkProducer(b *testing.B, messagesPerReq int64) {
-	srv := NewServer()
-	srv.Start()
-	defer srv.Close()
+	if addr := os.Getenv("TEST_SERVER_ADDRESS"); addr != "" {
+		srv := NewServer()
+		srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
-
-	var msgOffset int64
-	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
-		req := request.(*proto.ProduceReq)
-		msgOffset += messagesPerReq
-		return &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
-			Topics: []proto.ProduceRespTopic{
-				{
-					Name: "test",
-					Partitions: []proto.ProduceRespPartition{
-						{
-							ID:     0,
-							Offset: msgOffset,
+		var msgOffset int64
+		srv.Handle(ProduceRequest, func(request Serializable) Serializable {
+			req := request.(*proto.ProduceReq)
+			msgOffset += messagesPerReq
+			return &proto.ProduceResp{
+				CorrelationID: req.CorrelationID,
+				Topics: []proto.ProduceRespTopic{
+					{
+						Name: "test",
+						Partitions: []proto.ProduceRespPartition{
+							{
+								ID:     0,
+								Offset: msgOffset,
+							},
 						},
 					},
 				},
-			},
-		}
-	})
+			}
+		})
 
-	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
+		defer srv.Close()
+		if err := srv.Run(addr); err != nil {
+			b.Fatalf("cannot start server: %s", err)
+		}
+		return
+	}
+
+	addr := randomAddr()
+
+	// run server in separate process
+	cmd := exec.Command(os.Args[0], "-test.bench=BenchmarkProducer_1Msgs", "-test.run=none") // bench variant does not matter
+	cmd.Env = append(os.Environ(), fmt.Sprintf("TEST_SERVER_ADDRESS=%s", addr))
+	if err := cmd.Start(); err != nil {
+		b.Fatalf("cannot run test server: %s", err)
+	}
+	defer cmd.Process.Kill()
+
+	broker, err := Dial([]string{addr}, newTestBrokerConf("tester"))
 	if err != nil {
 		b.Fatalf("cannot create broker: %s", err)
 	}
@@ -1522,4 +1568,13 @@ func benchmarkProducer(b *testing.B, messagesPerReq int64) {
 		}
 
 	}
+}
+
+func randomAddr() string {
+	ln, err := net.Listen("tcp4", "")
+	if err != nil {
+		panic(fmt.Sprintf("cannot start server: %s", err))
+	}
+	defer ln.Close()
+	return ln.Addr().String()
 }

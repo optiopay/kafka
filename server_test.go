@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -96,6 +97,30 @@ func (srv *Server) Start() {
 			go srv.handleClient(client)
 		}
 	}()
+}
+
+func (srv *Server) Run(address string) error {
+	srv.mu.Lock()
+
+	if srv.ln != nil {
+		srv.mu.Unlock()
+		return errors.New("server already started")
+	}
+	ln, err := net.Listen("tcp4", address)
+	if err != nil {
+		srv.mu.Unlock()
+		return fmt.Errorf("cannot start server: %s", err)
+	}
+	srv.ln = ln
+	srv.mu.Unlock()
+
+	for {
+		client, err := ln.Accept()
+		if err != nil {
+			return nil
+		}
+		go srv.handleClient(client)
+	}
 }
 
 func (srv *Server) Close() {
