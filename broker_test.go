@@ -492,7 +492,7 @@ func TestPartitionCount(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
 	if err != nil {
