@@ -235,7 +235,9 @@ func (w *slicewriter) Slice() []byte {
 func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 	rd := io.LimitReader(r, int64(size))
 	dec := NewDecoder(rd)
-	set := make([]*Message, 0, 64)
+	set := make([]*Message, 0, 256)
+
+	var buf []byte
 	for {
 		offset := dec.DecodeInt64()
 		if err := dec.Err(); err != nil {
@@ -254,7 +256,12 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 		}
 
 		// read message to buffer to compute its content crc
-		msgbuf := make([]byte, size)
+		if int(size) > len(buf) {
+			// allocate a bit more than needed
+			buf = make([]byte, size+10240)
+		}
+		msgbuf := buf[:size]
+
 		if _, err := io.ReadFull(rd, msgbuf); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				return set, nil
@@ -263,8 +270,10 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 		}
 		msgdec := NewDecoder(bytes.NewBuffer(msgbuf))
 
-		msg := &Message{Offset: offset}
-		msg.Crc = msgdec.DecodeUint32()
+		msg := &Message{
+			Offset: offset,
+			Crc:    msgdec.DecodeUint32(),
+		}
 
 		if msg.Crc != crc32.ChecksumIEEE(msgbuf[4:]) {
 			// ignore this message and because we want to have constant
