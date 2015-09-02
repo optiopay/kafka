@@ -111,10 +111,10 @@ type Message struct {
 func ComputeCrc(m *Message, compression Compression) uint32 {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
-	enc.Encode(int8(0)) // magic byte is always 0
-	enc.Encode(int8(compression))
-	enc.Encode(m.Key)
-	enc.Encode(m.Value)
+	enc.EncodeInt8(0) // magic byte is always 0
+	enc.EncodeInt8(int8(compression))
+	enc.EncodeBytes(m.Key)
+	enc.EncodeBytes(m.Value)
 	return crc32.ChecksumIEEE(buf.Bytes())
 }
 
