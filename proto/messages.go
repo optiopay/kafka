@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -157,20 +158,72 @@ func writeMessageSet(w io.Writer, messages []*Message, compression Compression) 
 		}
 	}
 
-	enc := NewEncoder(w)
 	totalSize := 0
+	b := newSliceWriter(0)
 	for _, message := range messages {
-		totalSize += 26 + len(message.Key) + len(message.Value)
+		bsize := 26 + len(message.Key) + len(message.Value)
+		b.Reset(bsize)
+
+		enc := NewEncoder(b)
 		enc.EncodeInt64(message.Offset)
-		messageSize := int32(14 + len(message.Key) + len(message.Value))
-		enc.EncodeInt32(messageSize)
-		enc.EncodeUint32(ComputeCrc(message, compression))
-		enc.EncodeInt8(0) // magic byte
+		msize := int32(14 + len(message.Key) + len(message.Value))
+		enc.EncodeInt32(msize)
+		enc.EncodeUint32(0) // crc32 placeholder
+		enc.EncodeInt8(0)   // magic byte
 		enc.EncodeInt8(int8(compression))
 		enc.EncodeBytes(message.Key)
 		enc.EncodeBytes(message.Value)
+
+		if err := enc.Err(); err != nil {
+			return totalSize, err
+		}
+
+		const hsize = 8 + 4 + 4 // offset + message size + crc32
+		const crcoff = 8 + 4    // offset + message size
+		binary.BigEndian.PutUint32(b.buf[crcoff:crcoff+4], crc32.ChecksumIEEE(b.buf[hsize:bsize]))
+
+		if n, err := w.Write(b.Slice()); err != nil {
+			return totalSize, err
+		} else {
+			totalSize += n
+		}
+
 	}
-	return totalSize, enc.Err()
+	return totalSize, nil
+}
+
+type slicewriter struct {
+	buf  []byte
+	pos  int
+	size int
+}
+
+func newSliceWriter(bufsize int) *slicewriter {
+	return &slicewriter{
+		buf: make([]byte, bufsize),
+		pos: 0,
+	}
+}
+
+func (w *slicewriter) Write(p []byte) (int, error) {
+	if len(w.buf) < w.pos+len(p) {
+		return 0, errors.New("buffer too small")
+	}
+	copy(w.buf[w.pos:], p)
+	w.pos += len(p)
+	return len(p), nil
+}
+
+func (w *slicewriter) Reset(size int) {
+	if size > len(w.buf) {
+		w.buf = make([]byte, size+1000) // allocate a bit more than required
+	}
+	w.size = size
+	w.pos = 0
+}
+
+func (w *slicewriter) Slice() []byte {
+	return w.buf[:w.pos]
 }
 
 // readMessageSet reads and return messages from the stream.
