@@ -101,6 +101,13 @@ type BrokerConf struct {
 	// Timeout on a connection is controlled by the DialTimeout setting.
 	LeaderRetryWait time.Duration
 
+	// AllowTopicCreation enables a last-ditch "send produce request" which
+	// happens if we do not know about a topic. This enables topic creation
+	// if your Kafka cluster is configured to allow it.
+	//
+	// Defaults to False.
+	AllowTopicCreation bool
+
 	// Any new connection dial timeout.
 	//
 	// Default is 10 seconds.
@@ -137,13 +144,14 @@ type BrokerConf struct {
 
 func NewBrokerConf(clientID string) BrokerConf {
 	return BrokerConf{
-		ClientID:         clientID,
-		DialTimeout:      10 * time.Second,
-		DialRetryLimit:   10,
-		DialRetryWait:    500 * time.Millisecond,
-		LeaderRetryLimit: 10,
-		LeaderRetryWait:  500 * time.Millisecond,
-		Logger:           &nullLogger{},
+		ClientID:           clientID,
+		DialTimeout:        10 * time.Second,
+		DialRetryLimit:     10,
+		DialRetryWait:      500 * time.Millisecond,
+		AllowTopicCreation: false,
+		LeaderRetryLimit:   10,
+		LeaderRetryWait:    500 * time.Millisecond,
+		Logger:             &nullLogger{},
 	}
 }
 
@@ -249,9 +257,13 @@ func (b *Broker) muRefreshMetadata() error {
 
 // fetchMetadata is requesting metadata information from any node and return
 // protocol response if successful
+//
+// If "topics" are specified, only fetch metadata for those topics (can be
+// used to create a topic)
+//
 // Because it's using metadata information to find node connections it's not
 // thread safe and using it require locking.
-func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
+func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 	checkednodes := make(map[int32]bool)
 
 	// try all existing connections first
@@ -259,7 +271,7 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 		checkednodes[nodeID] = true
 		resp, err := conn.Metadata(&proto.MetadataReq{
 			ClientID: b.conf.ClientID,
-			Topics:   nil,
+			Topics:   topics,
 		})
 		if err != nil {
 			b.conf.Logger.Debug("cannot fetch metadata from node",
@@ -284,7 +296,7 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 		}
 		resp, err := conn.Metadata(&proto.MetadataReq{
 			ClientID: b.conf.ClientID,
-			Topics:   nil,
+			Topics:   topics,
 		})
 
 		// we had no active connection to this node, so most likely we don't need it
@@ -304,6 +316,9 @@ func (b *Broker) fetchMetadata() (*proto.MetadataResp, error) {
 
 // cacheMetadata creates new internal metadata representation using data from
 // given response. It's call has to be protected with lock.
+//
+// Do not call with partial metadata response, this assumes we have the full
+// set of metadata in the response
 func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 	if !b.metadata.created.IsZero() {
 		b.conf.Logger.Debug("rewriting old metadata",
@@ -349,7 +364,13 @@ func (b *Broker) PartitionCount(topic string) (int32, error) {
 // muLeaderConnection returns connection to leader for given partition. If
 // connection does not exist, broker will try to connect first and add store
 // connection for any further use.
+//
 // Failed connection retry is controlled by broker configuration.
+//
+// If broker is configured to allow topic creation, then if we don't find
+// the leader we will return a random broker. The broker will error if we end
+// up producing to it incorrectly (i.e., our metadata happened to be out of
+// date).
 func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connection, err error) {
 	tp := topicPartition{topic, partition}
 
@@ -378,11 +399,23 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 			}
 			nodeID, ok = b.metadata.endpoints[tp]
 			if !ok {
-				b.conf.Logger.Info("cannot get leader connection: unknown topic or partition",
-					"topic", topic,
-					"partition", partition,
-					"endpoint", tp)
 				err = proto.ErrUnknownTopicOrPartition
+				// If we allow topic creation, now is the point where it is likely that this
+				// is a brand new topic, so try to get metadata on it (which will trigger
+				// the creation process)
+				if b.conf.AllowTopicCreation {
+					_, err := b.fetchMetadata(topic)
+					if err != nil {
+						b.conf.Logger.Info("failed to fetch metadata for new topic",
+							"topic", topic,
+							"err", err)
+					}
+				} else {
+					b.conf.Logger.Info("cannot get leader connection: unknown topic or partition",
+						"topic", topic,
+						"partition", partition,
+						"endpoint", tp)
+				}
 				continue
 			}
 		}
@@ -694,6 +727,7 @@ retryLoop:
 		}
 
 		offset, err = p.produce(topic, partition, messages...)
+
 		switch err {
 		case nil:
 			break retryLoop

@@ -21,35 +21,87 @@ func newTestBrokerConf(clientID string) BrokerConf {
 	return conf
 }
 
-func TestingMetadataHandler(srv *Server) RequestHandler {
+type MetadataTester struct {
+	host               string
+	port               int
+	topics             map[string]bool
+	allowCreate        bool
+	numGeneralFetches  int
+	numSpecificFetches int
+}
+
+func NewMetadataHandler(srv *Server, allowCreate bool) *MetadataTester {
+	host, port := srv.HostPort()
+	tester := &MetadataTester{
+		host:        host,
+		port:        port,
+		allowCreate: allowCreate,
+		topics:      make(map[string]bool),
+	}
+	tester.topics["test"] = true
+	return tester
+}
+
+func (m *MetadataTester) NumGeneralFetches() int {
+	return m.numGeneralFetches
+}
+
+func (m *MetadataTester) NumSpecificFetches() int {
+	return m.numSpecificFetches
+}
+
+func (m *MetadataTester) Handler() RequestHandler {
 	return func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
-		host, port := srv.HostPort()
-		return &proto.MetadataResp{
+
+		if len(req.Topics) == 0 {
+			m.numGeneralFetches++
+		} else {
+			m.numSpecificFetches++
+		}
+
+		resp := &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
-				{NodeID: 1, Host: host, Port: int32(port)},
+				{NodeID: 1, Host: m.host, Port: int32(m.port)},
 			},
-			Topics: []proto.MetadataRespTopic{
-				{
-					Name: "test",
-					Partitions: []proto.MetadataRespPartition{
-						{
-							ID:       0,
-							Leader:   1,
-							Replicas: []int32{1},
-							Isrs:     []int32{1},
-						},
-						{
-							ID:       1,
-							Leader:   1,
-							Replicas: []int32{1},
-							Isrs:     []int32{1},
-						},
+			Topics: []proto.MetadataRespTopic{},
+		}
+
+		wantsTopic := make(map[string]bool)
+		for _, topic := range req.Topics {
+			if m.allowCreate {
+				m.topics[topic] = true
+			}
+			wantsTopic[topic] = true
+		}
+
+		for topic, _ := range m.topics {
+			// Return either all topics or only topics that they explicitly requested
+			_, explicitTopic := wantsTopic[topic]
+			if len(req.Topics) > 0 && !explicitTopic {
+				continue
+			}
+
+			resp.Topics = append(resp.Topics, proto.MetadataRespTopic{
+				Name: topic,
+				Partitions: []proto.MetadataRespPartition{
+					{
+						ID:       0,
+						Leader:   1,
+						Replicas: []int32{1},
+						Isrs:     []int32{1},
+					},
+					{
+						ID:       1,
+						Leader:   1,
+						Replicas: []int32{1},
+						Isrs:     []int32{1},
 					},
 				},
-			},
+			})
 		}
+		return resp
 	}
 }
 
@@ -71,7 +123,7 @@ func TestProducer(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
 	if err != nil {
@@ -337,7 +389,7 @@ func TestConsumeInvalidOffset(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	srv.Handle(FetchRequest, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
@@ -391,7 +443,7 @@ func TestPartitionOffset(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	var handlerErr error
 	srv.Handle(OffsetRequest, func(request Serializable) Serializable {
@@ -626,7 +678,7 @@ func TestLeaderConnectionFailover(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	addresses := []string{srv.Address()}
 
@@ -688,7 +740,7 @@ func TestProducerFailoverRequestTimeout(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	requestsCount := 0
 	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
@@ -734,7 +786,7 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	requestsCount := 0
 	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
@@ -793,6 +845,126 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 	}
 }
 
+func TestProducerNoCreateTopic(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	md := NewMetadataHandler(srv, false)
+	srv.Handle(MetadataRequest, md.Handler())
+
+	produces := 0
+	srv.Handle(ProduceRequest,
+		func(request Serializable) Serializable {
+			produces++
+
+			// Must return something?
+			req := request.(*proto.ProduceReq)
+			return &proto.ProduceResp{
+				CorrelationID: req.CorrelationID,
+				Topics: []proto.ProduceRespTopic{
+					{
+						Name: "test2",
+						Partitions: []proto.ProduceRespPartition{
+							{
+								ID:     0,
+								Offset: 5,
+							},
+						},
+					},
+				},
+			}
+		},
+	)
+
+	// Broker DO NOT create topic
+	brokerConf := newTestBrokerConf("test")
+	brokerConf.AllowTopicCreation = false
+
+	broker, err := Dial([]string{srv.Address()}, brokerConf)
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	prodConf := NewProducerConf()
+	prodConf.RetryLimit = 5
+	prodConf.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConf)
+
+	_, err = producer.Produce("test2", 0, &proto.Message{Value: []byte("first")},
+		&proto.Message{Value: []byte("second")})
+	if err != proto.ErrUnknownTopicOrPartition {
+		t.Fatalf("expected ErrUnknownTopicOrPartition, got %s", err)
+	}
+	if md.NumSpecificFetches() != 0 {
+		t.Fatalf("expected 0 specific topic metadata requests, got %d",
+			md.NumSpecificFetches())
+	}
+	if produces != 0 {
+		t.Fatalf("expected 0 produce attempts, got %d", produces)
+	}
+}
+
+func TestProducerTryCreateTopic(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	md := NewMetadataHandler(srv, true)
+	srv.Handle(MetadataRequest, md.Handler())
+
+	produces := 0
+	srv.Handle(ProduceRequest,
+		func(request Serializable) Serializable {
+			produces++
+
+			// Must return something?
+			req := request.(*proto.ProduceReq)
+			return &proto.ProduceResp{
+				CorrelationID: req.CorrelationID,
+				Topics: []proto.ProduceRespTopic{
+					{
+						Name: "test2",
+						Partitions: []proto.ProduceRespPartition{
+							{
+								ID:     0,
+								Offset: 5,
+							},
+						},
+					},
+				},
+			}
+		},
+	)
+
+	// Broker DO create topic
+	brokerConf := newTestBrokerConf("test")
+	brokerConf.AllowTopicCreation = true
+
+	broker, err := Dial([]string{srv.Address()}, brokerConf)
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	prodConf := NewProducerConf()
+	prodConf.RetryLimit = 5
+	prodConf.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConf)
+
+	_, err = producer.Produce("test2", 0, &proto.Message{Value: []byte("first")},
+		&proto.Message{Value: []byte("second")})
+	if err != nil {
+		t.Fatalf("expected no error, got %s", err)
+	}
+	if md.NumSpecificFetches() != 1 {
+		t.Fatalf("expected 1 specific topic metadata requests, got %d",
+			md.NumSpecificFetches())
+	}
+	if produces != 1 {
+		t.Fatalf("expected 1 produce attempts, got %d", produces)
+	}
+}
+
 func TestConsumerFailover(t *testing.T) {
 	srv := NewServer()
 	srv.Start()
@@ -803,7 +975,7 @@ func TestConsumerFailover(t *testing.T) {
 		{Value: []byte("second")},
 	}
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	respCount := 0
 	srv.Handle(FetchRequest, func(request Serializable) Serializable {
@@ -1021,7 +1193,9 @@ func TestFetchOffset(t *testing.T) {
 	const offset = 94
 
 	srv := NewServer()
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Start()
+
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 	srv.Handle(FetchRequest, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		off := req.Topics[0].Partitions[0].FetchOffset
@@ -1045,7 +1219,6 @@ func TestFetchOffset(t *testing.T) {
 			},
 		}
 	})
-	srv.Start()
 
 	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("test-fetch-offset"))
 	if err != nil {
@@ -1209,7 +1382,7 @@ func TestOffsetCoordinator(t *testing.T) {
 
 	setOffset := int64(-1)
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 	srv.Handle(ConsumerMetadataRequest, func(request Serializable) Serializable {
 		req := request.(*proto.ConsumerMetadataReq)
 		host, port := srv.HostPort()
@@ -1299,7 +1472,7 @@ func TestOffsetCoordinatorNoCoordinatorError(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 	srv.Handle(ConsumerMetadataRequest, func(request Serializable) Serializable {
 		req := request.(*proto.ConsumerMetadataReq)
 		return &proto.ConsumerMetadataResp{
@@ -1336,7 +1509,7 @@ func benchmarkConsumer(b *testing.B, messagesPerResp int) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	var msgOffset int64
 	srv.Handle(FetchRequest, func(request Serializable) Serializable {
@@ -1401,7 +1574,7 @@ func benchmarkConsumerConcurrent(b *testing.B, concurrentConsumers int) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	var msgOffset int64
 	srv.Handle(FetchRequest, func(request Serializable) Serializable {
@@ -1478,7 +1651,7 @@ func benchmarkProducer(b *testing.B, messagesPerReq int64) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, TestingMetadataHandler(srv))
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
 
 	var msgOffset int64
 	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
