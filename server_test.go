@@ -176,6 +176,8 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 	srv.mu.RLock()
 	defer srv.mu.RUnlock()
 
+	srv.Processed++
+
 	switch req := request.(type) {
 	case *proto.FetchReq:
 		resp := &proto.FetchResp{

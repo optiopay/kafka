@@ -66,6 +66,51 @@ func TestDialWithInvalidAddress(t *testing.T) {
 	broker.Close()
 }
 
+func TestDialWithNoAddress(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	_, err := Dial(nil, newTestBrokerConf("tester"))
+	if err == nil {
+		t.Fatalf("expected error, but none received")
+	}
+}
+
+// Tests to ensure that our dial function is randomly selecting brokers from the
+// list of available brokers
+func TestDialRandomized(t *testing.T) {
+	srv1 := NewServer()
+	srv1.Start()
+	defer srv1.Close()
+
+	srv2 := NewServer()
+	srv2.Start()
+	defer srv2.Close()
+
+	srv3 := NewServer()
+	srv3.Start()
+	defer srv3.Close()
+
+	for i := 0; i < 30; i++ {
+		_, err := Dial([]string{srv1.Address(), srv2.Address(), srv3.Address()},
+			newTestBrokerConf("tester"))
+		if err != nil {
+			t.Fatalf("cannot create broker: %s", err)
+		}
+	}
+
+	if srv1.Processed == 30 {
+		t.Fatal("all traffic went to first broker")
+	}
+	if srv1.Processed+srv2.Processed+srv3.Processed != 30 {
+		t.Fatal("received unexpected number of requests")
+	}
+	if srv1.Processed == 0 || srv2.Processed == 0 || srv3.Processed == 0 {
+		t.Fatal("one broker received no traffic")
+	}
+}
+
 func TestProducer(t *testing.T) {
 	srv := NewServer()
 	srv.Start()
