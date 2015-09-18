@@ -188,7 +188,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 			if err != nil {
 				conf.Logger.Debug("cannot connect",
 					"address", addr,
-					"err", err)
+					"error", err)
 				continue
 			}
 			defer func(c *connection) {
@@ -201,7 +201,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 			if err != nil {
 				conf.Logger.Debug("cannot fetch metadata",
 					"address", addr,
-					"err", err)
+					"error", err)
 				continue
 			}
 			if len(resp.Brokers) == 0 {
@@ -224,7 +224,7 @@ func (b *Broker) Close() {
 		if err := conn.Close(); err != nil {
 			b.conf.Logger.Info("cannot close node connection",
 				"nodeID", nodeID,
-				"err", err)
+				"error", err)
 		}
 	}
 }
@@ -276,7 +276,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 		if err != nil {
 			b.conf.Logger.Debug("cannot fetch metadata from node",
 				"nodeID", nodeID,
-				"err", err)
+				"error", err)
 			continue
 		}
 		return resp, nil
@@ -291,7 +291,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect",
 				"address", addr,
-				"err", err)
+				"error", err)
 			continue
 		}
 		resp, err := conn.Metadata(&proto.MetadataReq{
@@ -305,7 +305,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 		if err != nil {
 			b.conf.Logger.Debug("cannot fetch metadata from node",
 				"nodeID", nodeID,
-				"err", err)
+				"error", err)
 			continue
 		}
 		return resp, nil
@@ -394,7 +394,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 			err = b.refreshMetadata()
 			if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot refresh metadata",
-					"err", err)
+					"error", err)
 				continue
 			}
 			nodeID, ok = b.metadata.endpoints[tp]
@@ -408,7 +408,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 					if err != nil {
 						b.conf.Logger.Info("failed to fetch metadata for new topic",
 							"topic", topic,
-							"err", err)
+							"error", err)
 					}
 				} else {
 					b.conf.Logger.Info("cannot get leader connection: unknown topic or partition",
@@ -433,7 +433,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 			if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot connect to node",
 					"address", addr,
-					"err", err)
+					"error", err)
 				continue
 			}
 			b.conns[nodeID] = conn
@@ -466,14 +466,14 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			if err != nil {
 				b.conf.Logger.Debug("cannot fetch coordinator metadata",
 					"consumGrp", consumerGroup,
-					"err", err)
+					"error", err)
 				resErr = err
 				continue
 			}
 			if resp.Err != nil {
 				b.conf.Logger.Debug("coordinator metadata response error",
 					"consumGrp", consumerGroup,
-					"err", resp.Err)
+					"error", resp.Err)
 				resErr = err
 				continue
 			}
@@ -484,7 +484,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
 					"address", addr,
-					"err", err)
+					"error", err)
 				resErr = err
 				continue
 			}
@@ -495,7 +495,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 		// if none of the connections worked out, try with fresh data
 		if err := b.refreshMetadata(); err != nil {
 			b.conf.Logger.Debug("cannot refresh metadata",
-				"err", err)
+				"error", err)
 			resErr = err
 			continue
 		}
@@ -510,7 +510,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 				b.conf.Logger.Debug("cannot connect to node",
 					"nodeID", nodeID,
 					"address", addr,
-					"err", err)
+					"error", err)
 				resErr = err
 				continue
 			}
@@ -523,14 +523,14 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			if err != nil {
 				b.conf.Logger.Debug("cannot fetch metadata",
 					"consumGrp", consumerGroup,
-					"err", err)
+					"error", err)
 				resErr = err
 				continue
 			}
 			if resp.Err != nil {
 				b.conf.Logger.Debug("metadata response error",
 					"consumGrp", consumerGroup,
-					"err", resp.Err)
+					"error", resp.Err)
 				resErr = err
 				continue
 			}
@@ -541,7 +541,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
 					"address", addr,
-					"err", err)
+					"error", err)
 				resErr = err
 				continue
 			}
@@ -570,7 +570,7 @@ func (b *Broker) muCloseDeadConnection(conn *connection) {
 			_ = c.Close()
 			if err := b.refreshMetadata(); err != nil {
 				b.conf.Logger.Debug("cannot refresh metadata",
-					"err", err)
+					"error", err)
 			}
 			return
 		}
@@ -608,7 +608,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 			b.conf.Logger.Debug("connection died while sending message",
 				"topic", topic,
 				"partition", partition,
-				"err", err)
+				"error", err)
 			b.muCloseDeadConnection(conn)
 		}
 		return 0, err
@@ -740,12 +740,12 @@ retryLoop:
 		default:
 			if err := p.broker.muRefreshMetadata(); err != nil {
 				p.conf.Logger.Debug("cannot refresh metadata",
-					"err", err)
+					"error", err)
 			}
 		}
 		p.conf.Logger.Debug("cannot produce messages",
 			"retry", retry,
-			"err", err)
+			"error", err)
 	}
 
 	if err == nil {
@@ -792,7 +792,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 			p.conf.Logger.Debug("connection died while sending message",
 				"topic", topic,
 				"partition", partition,
-				"err", err)
+				"error", err)
 			p.broker.muCloseDeadConnection(conn)
 		}
 		return 0, err
@@ -1035,7 +1035,7 @@ consumeRetryLoop:
 			c.conf.Logger.Debug("connection died while fetching message",
 				"topic", c.conf.Topic,
 				"partition", c.conf.Partition,
-				"err", err)
+				"error", err)
 			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
 			continue
@@ -1044,7 +1044,7 @@ consumeRetryLoop:
 		if err != nil {
 			c.conf.Logger.Debug("cannot fetch messages: unknown error",
 				"retry", retry,
-				"err", err)
+				"error", err)
 			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
 			continue
@@ -1069,10 +1069,10 @@ consumeRetryLoop:
 				case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
 					c.conf.Logger.Debug("cannot fetch messages",
 						"retry", retry,
-						"err", part.Err)
+						"error", part.Err)
 					if err := c.broker.muRefreshMetadata(); err != nil {
 						c.conf.Logger.Debug("cannot refresh metadata",
-							"err", err)
+							"error", err)
 					}
 					// The connection is fine, so don't close it,
 					// but we may very well need to talk to a different broker now.
@@ -1175,7 +1175,7 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 				resErr = err
 				c.conf.Logger.Debug("cannot connect to coordinator",
 					"consumGrp", c.conf.ConsumerGroup,
-					"err", err)
+					"error", err)
 				continue
 			}
 			c.conn = conn
@@ -1250,7 +1250,7 @@ func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64,
 			if err != nil {
 				c.conf.Logger.Debug("cannot connect to coordinator",
 					"consumGrp", c.conf.ConsumerGroup,
-					"err", err)
+					"error", err)
 				resErr = err
 				continue
 			}
