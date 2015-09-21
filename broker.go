@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"sync"
 	"syscall"
@@ -175,6 +176,11 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 		conns: make(map[int32]*connection),
 	}
 
+	if len(nodeAddresses) == 0 {
+		return nil, errors.New("no addresses provided")
+	}
+	numAddresses := len(nodeAddresses)
+
 	for i := 0; i < conf.DialRetryLimit; i++ {
 		if i > 0 {
 			conf.Logger.Debug("cannot fetch metadata from any connection",
@@ -183,7 +189,12 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 			time.Sleep(conf.DialRetryWait)
 		}
 
-		for _, addr := range nodeAddresses {
+		// This iterates starting at a random location in the slice, to prevent
+		// hitting the first server repeatedly
+		offset := rand.Intn(numAddresses)
+		for idx := 0; idx < numAddresses; idx++ {
+			addr := nodeAddresses[(idx+offset)%numAddresses]
+
 			conn, err := newTCPConnection(addr, conf.DialTimeout)
 			if err != nil {
 				conf.Logger.Debug("cannot connect",
