@@ -172,12 +172,12 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
-		c.logger.Error("msg", "failed waiting for response", "err", err)
+		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
 	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "err", err)
+		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -205,12 +205,12 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
-		c.logger.Error("msg", "failed waiting for response", "err", err)
+		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
 	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "err", err)
+		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -231,12 +231,12 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
-		c.logger.Error("msg", "failed waiting for response", "err", err)
+		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
 	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "err", err)
+		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -282,7 +282,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
-		c.logger.Error("msg", "failed waiting for response", "err", err)
+		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
@@ -290,7 +290,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	// -1 is for non node clients
 	req.ReplicaID = -1
 	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "err", err)
+		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -308,11 +308,11 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 	}
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
-		c.logger.Error("msg", "failed waiting for response", "err", err)
+		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "err", err)
+		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -330,11 +330,11 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 	}
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
-		c.logger.Error("msg", "failed waiting for response", "err", err)
+		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "err", err)
+		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -352,11 +352,11 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 	}
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
-		c.logger.Error("msg", "failed waiting for response", "err", err)
+		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "err", err)
+		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
