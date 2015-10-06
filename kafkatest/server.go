@@ -25,7 +25,7 @@ type Server struct {
 	mu          sync.RWMutex
 	brokers     []proto.MetadataRespBroker
 	topics      map[string]map[int32][]*proto.Message
-	offsets     map[string]map[int32]*topicOffset
+	offsets     map[string]map[int32]map[string]*topicOffset
 	ln          net.Listener
 	middlewares []Middleware
 }
@@ -50,7 +50,7 @@ func NewServer(middlewares ...Middleware) *Server {
 	s := &Server{
 		brokers:     make([]proto.MetadataRespBroker, 0),
 		topics:      make(map[string]map[int32][]*proto.Message),
-		offsets:     make(map[string]map[int32]*topicOffset),
+		offsets:     make(map[string]map[int32]map[string]*topicOffset),
 		middlewares: middlewares,
 	}
 	return s
@@ -450,6 +450,28 @@ func (s *Server) handleConsumerMetadataRequest(nodeID int32, conn net.Conn, req 
 	}
 }
 
+func (s *Server) getTopicOffset(group, topic string, partID int32) *topicOffset {
+	pmap, ok := s.offsets[topic]
+	if !ok {
+		pmap = make(map[int32]map[string]*topicOffset)
+		s.offsets[topic] = pmap
+	}
+
+	groups, ok := pmap[partID]
+	if !ok {
+		groups = make(map[string]*topicOffset)
+		pmap[partID] = groups
+	}
+
+	toffset, ok := groups[group]
+	if !ok {
+		toffset = &topicOffset{}
+		groups[group] = toffset
+	}
+
+	return toffset
+}
+
 func (s *Server) handleOffsetFetchRequest(nodeID int32, conn net.Conn, req *proto.OffsetFetchReq) response {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -459,22 +481,11 @@ func (s *Server) handleOffsetFetchRequest(nodeID int32, conn net.Conn, req *prot
 		Topics:        make([]proto.OffsetFetchRespTopic, len(req.Topics)),
 	}
 	for ti, topic := range req.Topics {
-		pmap, ok := s.offsets[topic.Name]
-		if !ok {
-			pmap = make(map[int32]*topicOffset)
-			s.offsets[topic.Name] = pmap
-		}
-
 		respPart := make([]proto.OffsetFetchRespPartition, len(topic.Partitions))
 		resp.Topics[ti].Name = topic.Name
 		resp.Topics[ti].Partitions = respPart
 		for pi, part := range topic.Partitions {
-			toffset, ok := pmap[part]
-			if !ok {
-				toffset = &topicOffset{}
-				pmap[part] = toffset
-			}
-
+			toffset := s.getTopicOffset(req.ConsumerGroup, topic.Name, part)
 			respPart[pi].ID = part
 			respPart[pi].Metadata = toffset.metadata
 			respPart[pi].Offset = toffset.offset
@@ -492,22 +503,11 @@ func (s *Server) handleOffsetCommitRequest(nodeID int32, conn net.Conn, req *pro
 		Topics:        make([]proto.OffsetCommitRespTopic, len(req.Topics)),
 	}
 	for ti, topic := range req.Topics {
-		pmap, ok := s.offsets[topic.Name]
-		if !ok {
-			pmap = make(map[int32]*topicOffset)
-			s.offsets[topic.Name] = pmap
-		}
-
 		respPart := make([]proto.OffsetCommitRespPartition, len(topic.Partitions))
 		resp.Topics[ti].Name = topic.Name
 		resp.Topics[ti].Partitions = respPart
 		for pi, part := range topic.Partitions {
-			toffset, ok := pmap[part.ID]
-			if !ok {
-				toffset = &topicOffset{}
-				pmap[part.ID] = toffset
-			}
-
+			toffset := s.getTopicOffset(req.ConsumerGroup, topic.Name, part.ID)
 			toffset.metadata = part.Metadata
 			toffset.offset = part.Offset
 
