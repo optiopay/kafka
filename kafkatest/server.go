@@ -495,8 +495,8 @@ func (s *Server) handleOffsetFetchRequest(nodeID int32, conn net.Conn, req *prot
 }
 
 func (s *Server) handleOffsetCommitRequest(nodeID int32, conn net.Conn, req *proto.OffsetCommitReq) response {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	resp := &proto.OffsetCommitResp{
 		CorrelationID: req.CorrelationID,
