@@ -9,15 +9,23 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/optiopay/kafka/proto"
 )
 
+type topicOffset struct {
+	offset   int64
+	metadata string
+}
+
+// Server is container for fake kafka server data.
 type Server struct {
 	mu          sync.RWMutex
 	brokers     []proto.MetadataRespBroker
 	topics      map[string]map[int32][]*proto.Message
+	offsets     map[string]map[int32]*topicOffset
 	ln          net.Listener
 	middlewares []Middleware
 }
@@ -42,6 +50,7 @@ func NewServer(middlewares ...Middleware) *Server {
 	s := &Server{
 		brokers:     make([]proto.MetadataRespBroker, 0),
 		topics:      make(map[string]map[int32][]*proto.Message),
+		offsets:     make(map[string]map[int32]*topicOffset),
 		middlewares: middlewares,
 	}
 	return s
@@ -275,14 +284,26 @@ func (s *Server) handleClient(nodeID int32, conn net.Conn) {
 				}
 				resp = s.handleMetadataRequest(nodeID, conn, req)
 			case proto.OffsetCommitReqKind:
-				log.Printf("not implemented: %d\n%s", kind, b)
-				return
+				req, err := proto.ReadOffsetCommitReq(bytes.NewBuffer(b))
+				if err != nil {
+					log.Printf("cannot parse offset commit request: %s\n%s", err, b)
+					return
+				}
+				resp = s.handleOffsetCommitRequest(nodeID, conn, req)
 			case proto.OffsetFetchReqKind:
-				log.Printf("not implemented: %d\n%s", kind, b)
-				return
+				req, err := proto.ReadOffsetFetchReq(bytes.NewBuffer(b))
+				if err != nil {
+					log.Printf("cannot parse offset fetch request: %s\n%s", err, b)
+					return
+				}
+				resp = s.handleOffsetFetchRequest(nodeID, conn, req)
 			case proto.ConsumerMetadataReqKind:
-				log.Printf("not implemented: %d\n%s", kind, b)
-				return
+				req, err := proto.ReadConsumerMetadataReq(bytes.NewBuffer(b))
+				if err != nil {
+					log.Printf("cannot parse consumer metadata request: %s\n%s", err, b)
+					return
+				}
+				resp = s.handleConsumerMetadataRequest(nodeID, conn, req)
 			default:
 				log.Printf("unknown request: %d\n%s", kind, b)
 				return
@@ -373,6 +394,10 @@ func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.Fetc
 				respParts[pi].Err = proto.ErrUnknownTopicOrPartition
 				continue
 			}
+			if part.FetchOffset > int64(len(messages)) {
+				respParts[pi].Err = proto.ErrOffsetOutOfRange
+				continue
+			}
 			respParts[pi].TipOffset = int64(len(messages))
 			respParts[pi].Messages = messages[part.FetchOffset:]
 		}
@@ -405,6 +430,88 @@ func (s *Server) handleOffsetRequest(nodeID int32, conn net.Conn, req *proto.Off
 				log.Printf("offset time for %s:%d not supported: %d", topic.Name, part.ID, part.TimeMs)
 				return nil
 			}
+		}
+	}
+	return resp
+}
+
+func (s *Server) handleConsumerMetadataRequest(nodeID int32, conn net.Conn, req *proto.ConsumerMetadataReq) response {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	addrps := strings.Split(s.Addr(), ":")
+	port, _ := strconv.Atoi(addrps[1])
+
+	return &proto.ConsumerMetadataResp{
+		CorrelationID:   req.CorrelationID,
+		CoordinatorID:   0,
+		CoordinatorHost: addrps[0],
+		CoordinatorPort: int32(port),
+	}
+}
+
+func (s *Server) handleOffsetFetchRequest(nodeID int32, conn net.Conn, req *proto.OffsetFetchReq) response {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	resp := &proto.OffsetFetchResp{
+		CorrelationID: req.CorrelationID,
+		Topics:        make([]proto.OffsetFetchRespTopic, len(req.Topics)),
+	}
+	for ti, topic := range req.Topics {
+		pmap, ok := s.offsets[topic.Name]
+		if !ok {
+			pmap = make(map[int32]*topicOffset)
+			s.offsets[topic.Name] = pmap
+		}
+
+		respPart := make([]proto.OffsetFetchRespPartition, len(topic.Partitions))
+		resp.Topics[ti].Name = topic.Name
+		resp.Topics[ti].Partitions = respPart
+		for pi, part := range topic.Partitions {
+			toffset, ok := pmap[part]
+			if !ok {
+				toffset = &topicOffset{}
+				pmap[part] = toffset
+			}
+
+			respPart[pi].ID = part
+			respPart[pi].Metadata = toffset.metadata
+			respPart[pi].Offset = toffset.offset
+		}
+	}
+	return resp
+}
+
+func (s *Server) handleOffsetCommitRequest(nodeID int32, conn net.Conn, req *proto.OffsetCommitReq) response {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	resp := &proto.OffsetCommitResp{
+		CorrelationID: req.CorrelationID,
+		Topics:        make([]proto.OffsetCommitRespTopic, len(req.Topics)),
+	}
+	for ti, topic := range req.Topics {
+		pmap, ok := s.offsets[topic.Name]
+		if !ok {
+			pmap = make(map[int32]*topicOffset)
+			s.offsets[topic.Name] = pmap
+		}
+
+		respPart := make([]proto.OffsetCommitRespPartition, len(topic.Partitions))
+		resp.Topics[ti].Name = topic.Name
+		resp.Topics[ti].Partitions = respPart
+		for pi, part := range topic.Partitions {
+			toffset, ok := pmap[part.ID]
+			if !ok {
+				toffset = &topicOffset{}
+				pmap[part.ID] = toffset
+			}
+
+			toffset.metadata = part.Metadata
+			toffset.offset = part.Offset
+
+			respPart[pi].ID = part.ID
 		}
 	}
 	return resp
