@@ -30,6 +30,23 @@ func (f *fetcher) Consume() (*proto.Message, error) {
 	panic("not implemented")
 }
 
+func (f *fetcher) ConsumeBatch() ([]*proto.Message, error) {
+	// sleep a bit to let the other's work
+	time.Sleep(time.Microsecond * 500)
+
+	if len(f.messages) > 0 {
+		msgs := f.messages
+		f.messages = nil
+		return msgs, nil
+	}
+	if len(f.errors) > 0 {
+		err := f.errors[0]
+		f.errors = f.errors[1:]
+		return nil, err
+	}
+	panic("not implemented")
+}
+
 func TestMultiplexerConsume(t *testing.T) {
 	fetchers := []Consumer{
 		&fetcher{
@@ -113,6 +130,11 @@ type blockingFetcher struct {
 func (f *blockingFetcher) Consume() (*proto.Message, error) {
 	<-f.stop
 	return nil, errors.New("blocking fetcher is done")
+}
+
+func (f *blockingFetcher) ConsumeBatch() ([]*proto.Message, error) {
+	<-f.stop
+	return nil, errors.New("blocking batch fetcher is done")
 }
 
 func (f *blockingFetcher) Close() {
