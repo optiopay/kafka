@@ -50,6 +50,7 @@ type Client interface {
 // encountered.
 type Consumer interface {
 	Consume() (*proto.Message, error)
+	ConsumeBatch() ([]*proto.Message, error)
 }
 
 // Producer is the interface that wraps the Produce method.
@@ -999,6 +1000,37 @@ func (c *consumer) Consume() (*proto.Message, error) {
 	c.msgbuf = c.msgbuf[1:]
 	c.offset = msg.Offset + 1
 	return msg, nil
+}
+
+// ConsumeBatch returns a single batch of messages from Kafka. Consumer can
+// retry fetching messages even if responses return no new data. Retry
+// behaviour can be configured through RetryLimit and RetryWait consumer
+// parameters.
+//
+// ConsumeBatch can retry sending request on common errors. This behaviour can be
+// configured with RetryErrLimit and RetryErrWait consumer configuration
+// attributes.
+func (c *consumer) ConsumeBatch() ([]*proto.Message, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var retry int
+	for {
+		msgbuf, err := c.fetch()
+		if err != nil {
+			return nil, err
+		} else if len(msgbuf) > 0 {
+			c.offset = msgbuf[len(msgbuf)-1].Offset + 1
+			return msgbuf, nil
+		}
+		if c.conf.RetryWait > 0 {
+			time.Sleep(c.conf.RetryWait)
+		}
+		retry += 1
+		if c.conf.RetryLimit != -1 && retry > c.conf.RetryLimit {
+			return nil, ErrNoData
+		}
+	}
 }
 
 // fetch and return next batch of messages. In case of certain set of errors,

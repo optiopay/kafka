@@ -155,6 +155,11 @@ func (c *Consumer) Consume() (*proto.Message, error) {
 	}
 }
 
+// ConsumeBatch not implemented.
+func (c *Consumer) ConsumeBatch() ([]*proto.Message, error) {
+	panic("not implemented")
+}
+
 // Producer mocks kafka's producer.
 type Producer struct {
 	Broker *Broker

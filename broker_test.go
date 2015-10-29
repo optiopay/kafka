@@ -299,6 +299,8 @@ func TestConsumer(t *testing.T) {
 			{Offset: 3, Key: []byte("1"), Value: []byte("first")},
 			{Offset: 4, Key: []byte("2"), Value: []byte("second")},
 			{Offset: 5, Key: []byte("3"), Value: []byte("three")},
+			{Offset: 6, Key: []byte("4"), Value: []byte("fourth")},
+			{Offset: 7, Key: []byte("5"), Value: []byte("fifth")},
 		}
 
 		return &proto.FetchResp{
@@ -354,6 +356,20 @@ func TestConsumer(t *testing.T) {
 	if string(msg2.Value) != "second" || string(msg2.Key) != "2" || msg2.Offset != 4 {
 		t.Fatalf("expected different message than %#v", msg2)
 	}
+
+	batch, err := consumer.ConsumeBatch()
+	if err != nil {
+		t.Fatalf("expected no errors, got %s", err)
+	}
+	if len(batch) != 3 {
+		t.Fatalf("expected 3 messages, got %#v", batch)
+	}
+	if string(batch[0].Value) != "three" || string(batch[1].Value) != "fourth" ||
+		string(batch[2].Value) != "fifth" || batch[0].Offset != 5 || batch[1].Offset != 6 ||
+		batch[2].Offset != 7 {
+		t.Fatalf("unexpected batch: %#v", batch)
+	}
+
 	broker.Close()
 }
 
