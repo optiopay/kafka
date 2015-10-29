@@ -5,7 +5,7 @@ import (
 )
 
 var (
-	ErrUnknown                                 = &KafkaError{-1, "unknown"}
+	ErrUnknown                                 = &KafkaError{-1, "unknown error"}
 	ErrOffsetOutOfRange                        = &KafkaError{1, "offset out of range"}
 	ErrInvalidMessage                          = &KafkaError{2, "invalid message"}
 	ErrUnknownTopicOrPartition                 = &KafkaError{3, "unknown topic or partition"}
@@ -21,12 +21,12 @@ var (
 	ErrOffsetLoadInProgress                    = &KafkaError{14, "offsets load in progress"}
 	ErrNoCoordinator                           = &KafkaError{15, "consumer coordinator not available"}
 	ErrNotCoordinator                          = &KafkaError{16, "not coordinator for consumer"}
-	ErrRecortListTooLarge                      = &KafkaError{17, "operation on an invalid topic"}
-	ErrListTooLarge                            = &KafkaError{18, "essage batch larger than the configured segment size"}
+	ErrInvalidTopic                            = &KafkaError{17, "operation on an invalid topic"}
+	ErrRecordListTooLarge                      = &KafkaError{18, "message batch larger than the configured segment size"}
 	ErrNotEnoughReplicas                       = &KafkaError{19, "not enough in-sync replicas"}
 	ErrNotEnoughReplicasAfterAppend            = &KafkaError{20, "messages are written to the log, but to fewer in-sync replicas than required"}
 	ErrInvalidRequiredAcks                     = &KafkaError{21, "invalid value for required acks"}
-	ErrIllegalGenerations                      = &KafkaError{22, "consumer generation id is not valid"}
+	ErrIllegalGeneration                       = &KafkaError{22, "consumer generation id is not valid"}
 	ErrInconsistentPartitionAssignmentStrategy = &KafkaError{23, "partition assignment strategy does not match that of the group"}
 	ErrUnknownParititonAssignmentStrategy      = &KafkaError{24, "partition assignment strategy is unknown to the broker"}
 	ErrUnknownConsumerID                       = &KafkaError{25, "coordinator is not aware of this consumer"}
@@ -53,12 +53,12 @@ var (
 		14: ErrOffsetLoadInProgress,
 		15: ErrNoCoordinator,
 		16: ErrNotCoordinator,
-		17: ErrRecortListTooLarge,
-		18: ErrListTooLarge,
+		17: ErrInvalidTopic,
+		18: ErrRecordListTooLarge,
 		19: ErrNotEnoughReplicas,
 		20: ErrNotEnoughReplicasAfterAppend,
 		21: ErrInvalidRequiredAcks,
-		22: ErrIllegalGenerations,
+		22: ErrIllegalGeneration,
 		23: ErrInconsistentPartitionAssignmentStrategy,
 		24: ErrUnknownParititonAssignmentStrategy,
 		25: ErrUnknownConsumerID,
