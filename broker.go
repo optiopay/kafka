@@ -438,6 +438,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 				b.conf.Logger.Info("cannot get leader connection: no information about node",
 					"nodeID", nodeID)
 				err = proto.ErrBrokerNotAvailable
+				delete(b.metadata.endpoints, tp)
 				continue
 			}
 			conn, err = newTCPConnection(addr, b.conf.DialTimeout)
@@ -445,6 +446,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 				b.conf.Logger.Info("cannot get leader connection: cannot connect to node",
 					"address", addr,
 					"error", err)
+				delete(b.metadata.endpoints, tp)
 				continue
 			}
 			b.conns[nodeID] = conn
