@@ -2,7 +2,6 @@ package kafka
 
 import (
 	"fmt"
-	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -719,13 +718,72 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 }
 
 func TestLeaderConnectionFailover(t *testing.T) {
-	srv := NewServer()
-	srv.Start()
-	defer srv.Close()
+	srv1 := NewServer()
+	srv1.Start()
+	defer srv1.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv2 := NewServer()
+	srv2.Start()
+	defer srv2.Close()
 
-	addresses := []string{srv.Address()}
+	addresses := []string{srv1.Address()}
+
+	host1, port1 := srv1.HostPort()
+	host2, port2 := srv2.HostPort()
+
+	srv1.Handle(MetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.MetadataReq)
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				{
+					NodeID: 1,
+					Host: host1,
+					Port: int32(port1),
+				},
+			},
+			Topics: []proto.MetadataRespTopic{
+				{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						{
+							ID:       0,
+							Leader:   1,
+							Replicas: []int32{1},
+							Isrs:     []int32{1},
+						},
+					},
+				},
+			},
+		}
+	})
+
+	srv2.Handle(MetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.MetadataReq)
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				{
+					NodeID: 2,
+					Host: host2,
+					Port: int32(port2),
+				},
+			},
+			Topics: []proto.MetadataRespTopic{
+				{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						{
+							ID:       0,
+							Leader:   2,
+							Replicas: []int32{2},
+							Isrs:     []int32{2},
+						},
+					},
+				},
+			},
+		}
+	})
 
 	conf := newTestBrokerConf("tester")
 	conf.DialTimeout = time.Millisecond * 20
@@ -741,43 +799,48 @@ func TestLeaderConnectionFailover(t *testing.T) {
 		t.Fatalf("%s expected, got %s", proto.ErrUnknownTopicOrPartition, err)
 	}
 
-	// fake initial metadata confuration
-	broker.metadata.nodes = map[int32]string{
-		1: "localhost:214412",
+	conn, err := broker.muLeaderConnection("test", 0)
+	if err != nil {
+		t.Fatalf("%s", err)
 	}
+
+	tp := topicPartition{"test", 0}
+
+	nodeID, ok := broker.metadata.endpoints[tp]
+
+	if !ok {
+		t.Fatal("endpoint not found")
+	}
+
+	if nodeID != 1 {
+		t.Fatalf("wrong nodeID = %d, expected 1", nodeID)
+	}
+
+	srv1.Close()
+	broker.muCloseDeadConnection(conn)
+
 	if _, err := broker.muLeaderConnection("test", 0); err == nil {
 		t.Fatal("expected network error")
 	}
 
 	// provide node address that will be available after short period
 	broker.metadata.nodes = map[int32]string{
-		1: "localhost:23456",
+		2: fmt.Sprintf("%s:%d", host2, port2),
 	}
-	conf.LeaderRetryWait = time.Millisecond
-	conf.LeaderRetryLimit = 1000
-	stop := make(chan struct{})
 
-	go func() {
-		for {
-			if _, err := broker.muLeaderConnection("test", 0); err == nil {
-				close(stop)
-				return
-			}
-		}
-	}()
-
-	// let the leader election loop spin for a bit
-	time.Sleep(time.Millisecond * 2)
-
-	c, err := net.Listen("tcp", "localhost:23456")
+	conn, err = broker.muLeaderConnection("test", 0)
 	if err != nil {
-		t.Fatalf("cannot start server: %s", err)
+		t.Fatalf("%s", err)
 	}
-	if _, err = c.Accept(); err != nil {
-		t.Fatalf("cannot accept connection: %s", err)
+
+	nodeID, ok = broker.metadata.endpoints[tp]
+	if !ok {
+		t.Fatal("endpoint not found")
 	}
-	<-stop
-	broker.Close()
+
+	if nodeID != 2 {
+		t.Fatalf("wrong nodeID = %d, expected 2", nodeID)
+	}
 }
 
 func TestProducerFailoverRequestTimeout(t *testing.T) {
