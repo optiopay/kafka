@@ -136,5 +136,5 @@ func (p *hashProducer) messagePartition(m *proto.Message) (int32, error) {
 	if sum < 0 {
 		sum = -sum
 	}
-	return sum / p.partitions, nil
+	return sum % p.partitions, nil
 }
