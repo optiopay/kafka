@@ -104,13 +104,13 @@ func (p *hashProducer) Distribute(topic string, messages ...*proto.Message) (off
 	if len(messages) == 0 {
 		return 0, errors.New("no messages")
 	}
-	part, err := p.messagePartition(messages[0])
+	part, err := messageHashPartition(messages[0].Key, p.partitions)
 	if err != nil {
 		return 0, fmt.Errorf("cannot hash message: %s", err)
 	}
 	// make sure that all messages within single call are to the same destination
 	for i := 2; i < len(messages); i++ {
-		mp, err := p.messagePartition(messages[i])
+		mp, err := messageHashPartition(messages[i].Key, p.partitions)
 		if err != nil {
 			return 0, fmt.Errorf("cannot hash message: %s", err)
 		}
@@ -122,19 +122,19 @@ func (p *hashProducer) Distribute(topic string, messages ...*proto.Message) (off
 	return p.producer.Produce(topic, part, messages...)
 }
 
-// messagePartition compute message's key hash and return corresponding
-// partition number.
-func (p *hashProducer) messagePartition(m *proto.Message) (int32, error) {
-	if m.Key == nil {
+// messageHashPartition compute destination partition number for given key
+// value and total number of partitions.
+func messageHashPartition(key []byte, partitions int32) (int32, error) {
+	if key == nil {
 		return 0, errors.New("no key")
 	}
 	hasher := fnv.New32a()
-	if _, err := hasher.Write(m.Key); err != nil {
+	if _, err := hasher.Write(key); err != nil {
 		return 0, fmt.Errorf("cannot hash key: %s", err)
 	}
 	sum := int32(hasher.Sum32())
 	if sum < 0 {
 		sum = -sum
 	}
-	return sum % p.partitions, nil
+	return sum % partitions, nil
 }

@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -52,12 +53,14 @@ func TestRoundRobinProducer(t *testing.T) {
 		},
 	}
 
-	for _, values := range data {
+	for i, values := range data {
 		msgs := make([]*proto.Message, 0)
 		for _, value := range values {
 			msgs = append(msgs, &proto.Message{Value: value})
 		}
-		_, _ = p.Distribute("test-topic", msgs...)
+		if _, err := p.Distribute("test-topic", msgs...); err != nil {
+			t.Errorf("cannot distribute %d message: %s", i, err)
+		}
 	}
 
 	// a, [0, 1]
@@ -78,5 +81,39 @@ func TestRoundRobinProducer(t *testing.T) {
 	// d, [6]
 	if rec.msgs[6].Partition != 0 {
 		t.Fatalf("expected partition 0, got %d", rec.msgs[6].Partition)
+	}
+}
+
+func TestHashProducer(t *testing.T) {
+	const parts = 3
+	rec := newRecordingProducer()
+	p := NewHashProducer(rec, parts)
+
+	var keys [][]byte
+	for i := 0; i < 30; i++ {
+		keys = append(keys, []byte(fmt.Sprintf("key-%d", i)))
+	}
+	for i, key := range keys {
+		msg := &proto.Message{Key: key}
+		if _, err := p.Distribute("test-topic", msg); err != nil {
+			t.Errorf("cannot distribute %d message: %s", i, err)
+		}
+	}
+
+	if len(rec.msgs) != len(keys) {
+		t.Fatalf("expected %d messages, got %d", len(keys), len(rec.msgs))
+	}
+
+	for i, key := range keys {
+		want, err := messageHashPartition(key, parts)
+		if err != nil {
+			t.Errorf("cannot compute hash: %s", err)
+			continue
+		}
+		if got := rec.msgs[i].Partition; want != got {
+			t.Errorf("expected partition %d, got %d", want, got)
+		} else if got > parts-1 {
+			t.Errorf("number of partitions is %d, but message written to %d", parts, got)
+		}
 	}
 }
