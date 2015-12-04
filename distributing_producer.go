@@ -42,7 +42,10 @@ func NewRandomProducer(p Producer, numPartitions int32) DistributingProducer {
 // partition. All messages written within single Produce call are atomically
 // written to the same destination.
 func (p *randomProducer) Distribute(topic string, messages ...*proto.Message) (offset int64, err error) {
-	part := p.rand.Intn(int(p.partitions))
+	part := 0
+	if p.partitions > 0 {
+		part = p.rand.Intn(int(p.partitions))
+	}
 	return p.producer.Produce(topic, int32(part), messages...)
 }
 
