@@ -244,6 +244,78 @@ func TestProducer(t *testing.T) {
 	broker.Close()
 }
 
+func TestProducerWithNoAck(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+
+	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	prodConf := NewProducerConf()
+	prodConf.RequiredAcks = proto.RequiredAcksNone
+	prodConf.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConf)
+	messages := []*proto.Message{
+		{Value: []byte("first")},
+		{Value: []byte("second")},
+	}
+	_, err = producer.Produce("does-not-exist", 42142, messages...)
+	if err != proto.ErrUnknownTopicOrPartition {
+		t.Fatalf("expected '%s', got %s", proto.ErrUnknownTopicOrPartition, err)
+	}
+
+	errc := make(chan error)
+	var createdMsgs int
+	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
+		defer close(errc)
+		req := request.(*proto.ProduceReq)
+		if req.RequiredAcks != proto.RequiredAcksNone {
+			errc <- fmt.Errorf("expected no ack request, got %v", req.RequiredAcks)
+			return nil
+		}
+		if req.Topics[0].Name != "test" {
+			errc <- fmt.Errorf("expected 'test' topic, got %s", req.Topics[0].Name)
+			return nil
+		}
+		if req.Topics[0].Partitions[0].ID != 0 {
+			errc <- fmt.Errorf("expected 0 partition, got %d", req.Topics[0].Partitions[0].ID)
+			return nil
+		}
+		messages := req.Topics[0].Partitions[0].Messages
+		for _, msg := range messages {
+			createdMsgs++
+			crc := proto.ComputeCrc(msg, proto.CompressionNone)
+			if msg.Crc != crc {
+				errc <- fmt.Errorf("expected '%d' crc, got %d", crc, msg.Crc)
+				return nil
+			}
+		}
+		return nil
+	})
+
+	offset, err := producer.Produce("test", 0, messages...)
+	if err := <-errc; err != nil {
+		t.Fatalf("handling error: %s", err)
+	}
+	if err != nil {
+		t.Fatalf("expected no error, got %s", err)
+	}
+	if offset != 0 {
+		t.Fatalf("expected offset different than %d", offset)
+	}
+
+	if createdMsgs != 2 {
+		t.Fatalf("expected 2 messages to be created, got %d", createdMsgs)
+	}
+
+	broker.Close()
+}
+
 func TestConsumer(t *testing.T) {
 	srv := NewServer()
 	srv.Start()
@@ -738,8 +810,8 @@ func TestLeaderConnectionFailover(t *testing.T) {
 			Brokers: []proto.MetadataRespBroker{
 				{
 					NodeID: 1,
-					Host: host1,
-					Port: int32(port1),
+					Host:   host1,
+					Port:   int32(port1),
 				},
 			},
 			Topics: []proto.MetadataRespTopic{
@@ -765,8 +837,8 @@ func TestLeaderConnectionFailover(t *testing.T) {
 			Brokers: []proto.MetadataRespBroker{
 				{
 					NodeID: 2,
-					Host: host2,
-					Port: int32(port2),
+					Host:   host2,
+					Port:   int32(port2),
 				},
 			},
 			Topics: []proto.MetadataRespTopic{
