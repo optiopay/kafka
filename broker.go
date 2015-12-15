@@ -811,6 +811,10 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 		return 0, err
 	}
 
+	if req.RequiredAcks == proto.RequiredAcksNone {
+		return 0, err
+	}
+
 	// we expect single partition response
 	found := false
 	for _, t := range resp.Topics {
