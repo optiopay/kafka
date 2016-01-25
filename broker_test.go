@@ -428,6 +428,124 @@ func TestConsumer(t *testing.T) {
 	broker.Close()
 }
 
+func TestBatchConsumer(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(MetadataRequest, func(request Serializable) Serializable {
+		req := request.(*proto.MetadataReq)
+		host, port := srv.HostPort()
+		return &proto.MetadataResp{
+			CorrelationID: req.CorrelationID,
+			Brokers: []proto.MetadataRespBroker{
+				{NodeID: 1, Host: host, Port: int32(port)},
+			},
+			Topics: []proto.MetadataRespTopic{
+				{
+					Name: "test",
+					Partitions: []proto.MetadataRespPartition{
+						{
+							ID:       413,
+							Leader:   1,
+							Replicas: []int32{1},
+							Isrs:     []int32{1},
+						},
+					},
+				},
+			},
+		}
+	})
+	fetchCallCount := 0
+	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+		req := request.(*proto.FetchReq)
+		fetchCallCount++
+		if fetchCallCount < 2 {
+			return &proto.FetchResp{
+				CorrelationID: req.CorrelationID,
+				Topics: []proto.FetchRespTopic{
+					{
+						Name: "test",
+						Partitions: []proto.FetchRespPartition{
+							{
+								ID:        413,
+								TipOffset: 0,
+								Messages:  []*proto.Message{},
+							},
+						},
+					},
+				},
+			}
+		}
+
+		messages := []*proto.Message{
+			{Offset: 3, Key: []byte("1"), Value: []byte("first")},
+			{Offset: 4, Key: []byte("2"), Value: []byte("second")},
+			{Offset: 5, Key: []byte("3"), Value: []byte("three")},
+		}
+
+		return &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						{
+							ID:        413,
+							TipOffset: 2,
+							Messages:  messages,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	if _, err := broker.BatchConsumer(NewConsumerConf("does-not-exists", 413)); err != proto.ErrUnknownTopicOrPartition {
+		t.Fatalf("expected %s error, got %s", proto.ErrUnknownTopicOrPartition, err)
+	}
+	if _, err := broker.BatchConsumer(NewConsumerConf("test", 1)); err != proto.ErrUnknownTopicOrPartition {
+		t.Fatalf("expected %s error, got %s", proto.ErrUnknownTopicOrPartition, err)
+	}
+
+	consConf := NewConsumerConf("test", 413)
+	consConf.RetryWait = time.Millisecond
+	consConf.StartOffset = 0
+	consConf.RetryLimit = 4
+	consumer, err := broker.BatchConsumer(consConf)
+	if err != nil {
+		t.Fatalf("cannot create consumer: %s", err)
+	}
+
+	batch, err := consumer.ConsumeBatch()
+	if err != nil {
+		t.Fatalf("expected no errors, got %s", err)
+	}
+
+	if len(batch) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(batch))
+	}
+
+	if string(batch[0].Value) != "first" || string(batch[0].Key) != "1" || batch[0].Offset != 3 {
+		t.Fatalf("expected different message than %#v", batch[0])
+	}
+
+	if string(batch[1].Value) != "second" || string(batch[1].Key) != "2" || batch[1].Offset != 4 {
+		t.Fatalf("expected different message than %#v", batch[1])
+	}
+
+	if string(batch[2].Value) != "three" || string(batch[2].Key) != "3" || batch[2].Offset != 5 {
+		t.Fatalf("expected different message than %#v", batch[2])
+	}
+
+	broker.Close()
+}
+
 func TestConsumerRetry(t *testing.T) {
 	srv := NewServer()
 	srv.Start()
