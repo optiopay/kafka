@@ -52,6 +52,14 @@ type Consumer interface {
 	Consume() (*proto.Message, error)
 }
 
+// BatchConsumer is the interface that wraps the ConsumeBatch method.
+//
+// ConsumeBatch reads a batch of messages from a consumer, returning an error
+// when encountered.
+type BatchConsumer interface {
+	ConsumeBatch() ([]*proto.Message, error)
+}
+
 // Producer is the interface that wraps the Produce method.
 //
 // Produce writes the messages to the given topic and partition.
@@ -935,6 +943,15 @@ type consumer struct {
 
 // Consumer creates a new consumer instance, bound to the broker.
 func (b *Broker) Consumer(conf ConsumerConf) (Consumer, error) {
+	return b.consumer(conf)
+}
+
+// BatchConsumer creates a new BatchConsumer instance, bound to the broker.
+func (b *Broker) BatchConsumer(conf ConsumerConf) (BatchConsumer, error) {
+	return b.consumer(conf)
+}
+
+func (b *Broker) consumer(conf ConsumerConf) (*consumer, error) {
 	conn, err := b.muLeaderConnection(conf.Topic, conf.Partition)
 	if err != nil {
 		return nil, err
@@ -971,26 +988,24 @@ func (b *Broker) Consumer(conf ConsumerConf) (Consumer, error) {
 	return c, nil
 }
 
-// Consume is returning single message from consumed partition. Consumer can
-// retry fetching messages even if responses return no new data. Retry
-// behaviour can be configured through RetryLimit and RetryWait consumer
-// parameters.
+// consume is returning a batch of messages from consumed partition.
+// Consumer can retry fetching messages even if responses return no new
+// data. Retry behaviour can be configured through RetryLimit and RetryWait
+// consumer parameters.
 //
-// Consume can retry sending request on common errors. This behaviour can be
-// configured with RetryErrLimit and RetryErrWait consumer configuration
+// consume can retry sending request on common errors. This behaviour can
+// be configured with RetryErrLimit and RetryErrWait consumer configuration
 // attributes.
-func (c *consumer) Consume() (*proto.Message, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
+func (c *consumer) consume() ([]*proto.Message, error) {
+	var msgbuf []*proto.Message
 	var retry int
-	for len(c.msgbuf) == 0 {
+	for len(msgbuf) == 0 {
 		var err error
-		c.msgbuf, err = c.fetch()
+		msgbuf, err = c.fetch()
 		if err != nil {
 			return nil, err
 		}
-		if len(c.msgbuf) == 0 {
+		if len(msgbuf) == 0 {
 			if c.conf.RetryWait > 0 {
 				time.Sleep(c.conf.RetryWait)
 			}
@@ -1001,10 +1016,38 @@ func (c *consumer) Consume() (*proto.Message, error) {
 		}
 	}
 
+	return msgbuf, nil
+}
+
+func (c *consumer) Consume() (*proto.Message, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(c.msgbuf) == 0 {
+		var err error
+		c.msgbuf, err = c.consume()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	msg := c.msgbuf[0]
 	c.msgbuf = c.msgbuf[1:]
 	c.offset = msg.Offset + 1
 	return msg, nil
+}
+
+func (c *consumer) ConsumeBatch() ([]*proto.Message, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	batch, err := c.consume()
+	if err != nil {
+		return nil, err
+	}
+	c.offset = batch[len(batch)-1].Offset + 1
+
+	return batch, nil
 }
 
 // fetch and return next batch of messages. In case of certain set of errors,
