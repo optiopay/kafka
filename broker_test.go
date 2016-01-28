@@ -1402,11 +1402,15 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 		return func(request Serializable) Serializable {
 			metaCalls++
 
-			var leader int32 = 1
+			var leader int32
 			// send invalid information to producer several times to make sure
 			// client is consuming wrong node and retrying several times before
 			// succeeding
-			if metaCalls > 4 {
+			if metaCalls < 3 {
+				leader = 1
+			} else if metaCalls < 6 {
+				leader = 0
+			} else {
 				leader = 2
 			}
 			req := request.(*proto.MetadataReq)
@@ -1444,6 +1448,26 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 	srv1.Handle(FetchRequest, func(request Serializable) Serializable {
 		fetch1Calls++
 		req := request.(*proto.FetchReq)
+
+		if fetch1Calls == 1 {
+			return &proto.FetchResp{
+				CorrelationID: req.CorrelationID,
+				Topics: []proto.FetchRespTopic{
+					{
+						Name: "test",
+						Partitions: []proto.FetchRespPartition{
+							{
+								ID:        1,
+								TipOffset: 4,
+								Messages: []*proto.Message{
+									{Offset: 1, Value: []byte("first")},
+								},
+							},
+						},
+					},
+				},
+			}
+		}
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.FetchRespTopic{
@@ -1472,9 +1496,9 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 					Partitions: []proto.FetchRespPartition{
 						{
 							ID:        1,
-							TipOffset: 2,
+							TipOffset: 8,
 							Messages: []*proto.Message{
-								{Offset: 1, Value: []byte("foo")},
+								{Offset: 2, Value: []byte("second")},
 							},
 						},
 					},
@@ -1495,12 +1519,26 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create consumer: %s", err)
 	}
-	if _, err := cons.Consume(); err != nil {
+	// consume twice - once from srv1 and once from srv2
+	if m, err := cons.Consume(); err != nil {
 		t.Errorf("cannot consume: %s", err)
+	} else if m.Offset != 1 {
+		t.Errorf("expected offset to be 1, got %+v", m)
+	}
+	if m, err := cons.Consume(); err != nil {
+		t.Errorf("cannot consume: %s", err)
+	} else if m.Offset != 2 {
+		t.Errorf("expected offset to be 2, got %+v", m)
 	}
 
-	if fetch1Calls != 4 {
-		t.Errorf("expected fetch1Calls to be 4, got %d", fetch1Calls)
+	// 1,2,3   -> srv1
+	// 4, 5    -> no leader
+	// 6, 7... -> srv2
+	if metaCalls != 6 {
+		t.Errorf("expected 6 meta calls, got %d", metaCalls)
+	}
+	if fetch1Calls != 3 {
+		t.Errorf("expected fetch1Calls to be 3, got %d", fetch1Calls)
 	}
 	if fetch2Calls != 1 {
 		t.Errorf("expected fetch2Calls to be 1, got %d", fetch2Calls)
