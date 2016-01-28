@@ -316,6 +316,125 @@ func TestProducerWithNoAck(t *testing.T) {
 	broker.Close()
 }
 
+func TestProduceWhileLeaderChange(t *testing.T) {
+	srv1 := NewServer()
+	srv1.Start()
+	defer srv1.Close()
+
+	srv2 := NewServer()
+	srv2.Start()
+	defer srv2.Close()
+
+	host1, port1 := srv1.HostPort()
+	host2, port2 := srv2.HostPort()
+	brokers := []proto.MetadataRespBroker{
+		{NodeID: 1, Host: host1, Port: int32(port1)},
+		{NodeID: 2, Host: host2, Port: int32(port2)},
+	}
+
+	var metaCalls int
+	metadataHandler := func(srvName string) func(Serializable) Serializable {
+		return func(request Serializable) Serializable {
+			metaCalls++
+
+			var leader int32 = 1
+			// send invalid information to producer several times to make sure
+			// it's producing to the wrong node and retrying several times
+			if metaCalls > 4 {
+				leader = 2
+			}
+			req := request.(*proto.MetadataReq)
+			resp := &proto.MetadataResp{
+				CorrelationID: req.CorrelationID,
+				Brokers:       brokers,
+				Topics: []proto.MetadataRespTopic{
+					{
+						Name: "test",
+						Partitions: []proto.MetadataRespPartition{
+							{
+								ID:       0,
+								Leader:   1,
+								Replicas: []int32{1, 2},
+								Isrs:     []int32{1, 2},
+							},
+							{
+								ID:       1,
+								Leader:   leader,
+								Replicas: []int32{1, 2},
+								Isrs:     []int32{1, 2},
+							},
+						},
+					},
+				},
+			}
+			return resp
+		}
+	}
+
+	srv1.Handle(MetadataRequest, metadataHandler("srv1"))
+	srv2.Handle(MetadataRequest, metadataHandler("srv2"))
+
+	var prod1Calls int
+	srv1.Handle(ProduceRequest, func(request Serializable) Serializable {
+		prod1Calls++
+		req := request.(*proto.ProduceReq)
+		return &proto.ProduceResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.ProduceRespTopic{
+				{
+					Name: "test",
+					Partitions: []proto.ProduceRespPartition{
+						{
+							ID:  1,
+							Err: proto.ErrNotLeaderForPartition,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	var prod2Calls int
+	srv2.Handle(ProduceRequest, func(request Serializable) Serializable {
+		prod2Calls++
+		req := request.(*proto.ProduceReq)
+		return &proto.ProduceResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.ProduceRespTopic{
+				{
+					Name: "test",
+					Partitions: []proto.ProduceRespPartition{
+						{
+							ID:     1,
+							Offset: 5,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv1.Address()}, newTestBrokerConf("tester"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+	defer broker.Close()
+
+	prod := broker.Producer(NewProducerConf())
+	if off, err := prod.Produce("test", 1, &proto.Message{Value: []byte("foo")}); err != nil {
+		t.Errorf("cannot produce message: %s", err)
+	} else if off != 5 {
+		t.Errorf("expected to get offset 5, got %d", off)
+	}
+
+	if prod1Calls != 4 {
+		t.Errorf("expected prod1Calls to be 4, got %d", prod1Calls)
+	}
+	if prod2Calls != 1 {
+		t.Errorf("expected prod2Calls to be 1, got %d", prod2Calls)
+	}
+}
+
 func TestConsumer(t *testing.T) {
 	srv := NewServer()
 	srv.Start()
@@ -1260,6 +1379,131 @@ func TestProducerTryCreateTopic(t *testing.T) {
 	}
 	if produces != 1 {
 		t.Fatalf("expected 1 produce attempts, got %d", produces)
+	}
+}
+func TestConsumeWhileLeaderChange(t *testing.T) {
+	srv1 := NewServer()
+	srv1.Start()
+	defer srv1.Close()
+
+	srv2 := NewServer()
+	srv2.Start()
+	defer srv2.Close()
+
+	host1, port1 := srv1.HostPort()
+	host2, port2 := srv2.HostPort()
+	brokers := []proto.MetadataRespBroker{
+		{NodeID: 1, Host: host1, Port: int32(port1)},
+		{NodeID: 2, Host: host2, Port: int32(port2)},
+	}
+
+	var metaCalls int
+	metadataHandler := func(srvName string) func(Serializable) Serializable {
+		return func(request Serializable) Serializable {
+			metaCalls++
+
+			var leader int32 = 1
+			// send invalid information to producer several times to make sure
+			// client is consuming wrong node and retrying several times before
+			// succeeding
+			if metaCalls > 4 {
+				leader = 2
+			}
+			req := request.(*proto.MetadataReq)
+			resp := &proto.MetadataResp{
+				CorrelationID: req.CorrelationID,
+				Brokers:       brokers,
+				Topics: []proto.MetadataRespTopic{
+					{
+						Name: "test",
+						Partitions: []proto.MetadataRespPartition{
+							{
+								ID:       0,
+								Leader:   1,
+								Replicas: []int32{1, 2},
+								Isrs:     []int32{1, 2},
+							},
+							{
+								ID:       1,
+								Leader:   leader,
+								Replicas: []int32{1, 2},
+								Isrs:     []int32{1, 2},
+							},
+						},
+					},
+				},
+			}
+			return resp
+		}
+	}
+
+	srv1.Handle(MetadataRequest, metadataHandler("srv1"))
+	srv2.Handle(MetadataRequest, metadataHandler("srv2"))
+
+	var fetch1Calls int
+	srv1.Handle(FetchRequest, func(request Serializable) Serializable {
+		fetch1Calls++
+		req := request.(*proto.FetchReq)
+		return &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						{
+							ID:  1,
+							Err: proto.ErrNotLeaderForPartition,
+						},
+					},
+				},
+			},
+		}
+	})
+
+	var fetch2Calls int
+	srv2.Handle(FetchRequest, func(request Serializable) Serializable {
+		fetch2Calls++
+		req := request.(*proto.FetchReq)
+		return &proto.FetchResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.FetchRespTopic{
+				{
+					Name: "test",
+					Partitions: []proto.FetchRespPartition{
+						{
+							ID:        1,
+							TipOffset: 2,
+							Messages: []*proto.Message{
+								{Offset: 1, Value: []byte("foo")},
+							},
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv1.Address()}, newTestBrokerConf("tester"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+	defer broker.Close()
+
+	conf := NewConsumerConf("test", 1)
+	conf.StartOffset = 0
+	cons, err := broker.Consumer(conf)
+	if err != nil {
+		t.Fatalf("cannot create consumer: %s", err)
+	}
+	if _, err := cons.Consume(); err != nil {
+		t.Errorf("cannot consume: %s", err)
+	}
+
+	if fetch1Calls != 4 {
+		t.Errorf("expected fetch1Calls to be 4, got %d", fetch1Calls)
+	}
+	if fetch2Calls != 1 {
+		t.Errorf("expected fetch2Calls to be 1, got %d", fetch2Calls)
 	}
 }
 
