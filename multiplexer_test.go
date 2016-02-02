@@ -2,11 +2,22 @@ package kafka
 
 import (
 	"errors"
-	"testing"
 	"time"
+
+	. "gopkg.in/check.v1"
 
 	"github.com/optiopay/kafka/proto"
 )
+
+var _ = Suite(&MultiplexerSuite{})
+
+type MultiplexerSuite struct {
+	l *testLogger
+}
+
+func (s *MultiplexerSuite) SetUpTest(c *C) {
+	s.l = &testLogger{c: c}
+}
 
 type fetcher struct {
 	messages []*proto.Message
@@ -30,7 +41,7 @@ func (f *fetcher) Consume() (*proto.Message, error) {
 	panic("not implemented")
 }
 
-func TestMultiplexerConsume(t *testing.T) {
+func (s *MultiplexerSuite) TestMultiplexerConsume(c *C) {
 	fetchers := []Consumer{
 		&fetcher{
 			messages: []*proto.Message{
@@ -77,16 +88,16 @@ func TestMultiplexerConsume(t *testing.T) {
 
 	// expected 4 messages and 2 errors
 	if len(results) != len(expected) {
-		t.Errorf("expected %d results, got %d", len(expected), len(results))
+		c.Errorf("expected %d results, got %d", len(expected), len(results))
 	}
 	for _, name := range expected {
 		if results[name] != true {
-			t.Errorf("%q not found: %#v", name, results)
+			c.Errorf("%q not found: %#v", name, results)
 		}
 	}
 }
 
-func TestClosingMultiplexer(t *testing.T) {
+func (s *MultiplexerSuite) TestClosingMultiplexer(c *C) {
 	fetchers := []Consumer{
 		&fetcher{errors: []error{errors.New("a1")}},
 		&fetcher{errors: []error{errors.New("b1")}},
@@ -102,7 +113,7 @@ func TestClosingMultiplexer(t *testing.T) {
 	mx.Close()
 
 	if _, err := mx.Consume(); err != ErrMxClosed {
-		t.Fatalf("expected %s, got %s", ErrMxClosed, err)
+		c.Fatalf("expected %s, got %s", ErrMxClosed, err)
 	}
 }
 
@@ -119,7 +130,7 @@ func (f *blockingFetcher) Close() {
 	close(f.stop)
 }
 
-func TestClosingMultiplexerWithBlockingWorkers(t *testing.T) {
+func (s *MultiplexerSuite) TestClosingMultiplexerWithBlockingWorkers(c *C) {
 	f1 := &blockingFetcher{make(chan struct{})}
 	defer f1.Close()
 	f2 := &blockingFetcher{make(chan struct{})}
@@ -130,11 +141,11 @@ func TestClosingMultiplexerWithBlockingWorkers(t *testing.T) {
 	mx.Close()
 
 	if _, err := mx.Consume(); err != ErrMxClosed {
-		t.Fatalf("expected %s, got %s", ErrMxClosed, err)
+		c.Fatalf("expected %s, got %s", ErrMxClosed, err)
 	}
 }
 
-func TestErrNoDataCloseMultiplexer(t *testing.T) {
+func (s *MultiplexerSuite) TestErrNoDataCloseMultiplexer(c *C) {
 	fetchers := []Consumer{
 		&fetcher{errors: []error{ErrNoData}},
 		&fetcher{errors: []error{ErrNoData}, messages: []*proto.Message{{}}},
@@ -143,9 +154,9 @@ func TestErrNoDataCloseMultiplexer(t *testing.T) {
 	mx := Merge(fetchers...)
 
 	if _, err := mx.Consume(); err != nil {
-		t.Fatalf("first consume should succeed, got %s", err)
+		c.Fatalf("first consume should succeed, got %s", err)
 	}
 	if _, err := mx.Consume(); err != ErrMxClosed {
-		t.Fatalf("expected %s, got %s", ErrMxClosed, err)
+		c.Fatalf("expected %s, got %s", ErrMxClosed, err)
 	}
 }
