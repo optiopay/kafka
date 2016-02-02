@@ -2,8 +2,13 @@ package proto
 
 import (
 	"bytes"
-	"testing"
+
+	. "gopkg.in/check.v1"
 )
+
+var _ = Suite(&SerializationSuite{})
+
+type SerializationSuite struct{}
 
 var (
 	keyint = 12
@@ -22,50 +27,50 @@ func getTestEncoder() *encoder {
 	return NewEncoder(b)
 }
 
-func TestEncoder(t *testing.T) {
+func (s *SerializationSuite) TestEncoder(c *C) {
 	e := getTestEncoder()
 	e.Encode(int8(keyint))
 	if !bytes.Equal(b.Bytes(), bint8) {
-		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bint8)
+		c.Fatalf("bytes are not the same % x != % x", b.Bytes(), bint8)
 	}
 
 	e = getTestEncoder()
 	e.Encode(int64(keyint))
 	if !bytes.Equal(b.Bytes(), bint64) {
-		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bint64)
+		c.Fatalf("bytes are not the same % x != % x", b.Bytes(), bint64)
 	}
 
 	e = getTestEncoder()
 	e.Encode(string(keystr))
 	if !bytes.Equal(b.Bytes(), bstr) {
-		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bstr)
+		c.Fatalf("bytes are not the same % x != % x", b.Bytes(), bstr)
 	}
 
 	e = getTestEncoder()
 	e.Encode([]byte(keystr))
 	if !bytes.Equal(b.Bytes(), bbyte) {
-		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bbyte)
+		c.Fatalf("bytes are not the same % x != % x", b.Bytes(), bbyte)
 	}
 }
 
-func TestDecoder(t *testing.T) {
+func (s *SerializationSuite) TestDecoder(c *C) {
 	d := NewDecoder(bytes.NewBuffer(bint8))
 	if d.DecodeInt8() != int8(keyint) {
-		t.Fatalf("int8 decoding failed")
+		c.Fatalf("int8 decoding failed")
 	}
 
 	d = NewDecoder(bytes.NewBuffer(bint64))
 	if d.DecodeInt64() != int64(keyint) {
-		t.Fatalf("int64 decoding failed")
+		c.Fatalf("int64 decoding failed")
 	}
 
 	d = NewDecoder(bytes.NewBuffer(bstr))
 	if d.DecodeString() != keystr {
-		t.Fatalf("string decoding failed")
+		c.Fatalf("string decoding failed")
 	}
 
 	d = NewDecoder(bytes.NewBuffer(bbyte))
 	if !bytes.Equal(d.DecodeBytes(), []byte(keystr)) {
-		t.Fatalf("bytes are not the same")
+		c.Fatalf("bytes are not the same")
 	}
 }
