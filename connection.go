@@ -14,8 +14,14 @@ import (
 	"github.com/optiopay/kafka/proto"
 )
 
-// ErrClosed is returned as result of any request made using closed connection.
-var ErrClosed = errors.New("closed")
+var (
+	// ErrClosed is returned as result of any request made using closed connection.
+	ErrClosed = errors.New("closed")
+
+	// ErrRespTimeout is returned as result of any request if no response was
+	// returned in time.
+	ErrRespTimeout = errors.New("response timeout")
+)
 
 // Low level abstraction over connection to Kafka.
 type connection struct {
@@ -132,7 +138,7 @@ func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err err
 		c.logger.Error("msg", "correlation conflict", "correlationID", correlationID)
 		return nil, fmt.Errorf("correlation conflict: %d", correlationID)
 	}
-	respc = make(chan []byte)
+	respc = make(chan []byte, 1)
 	c.respc[correlationID] = respc
 	return respc, nil
 }
@@ -181,11 +187,15 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadMetadataResp(bytes.NewReader(b))
+	case <-time.After(responseTimeout):
+		return nil, ErrRespTimeout
 	}
-	return proto.ReadMetadataResp(bytes.NewReader(b))
 }
 
 // Produce sends given produce request to kafka node and returns related
@@ -214,11 +224,15 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadProduceResp(bytes.NewReader(b))
+	case <-time.After(responseTimeout):
+		return nil, ErrRespTimeout
 	}
-	return proto.ReadProduceResp(bytes.NewReader(b))
 }
 
 // Fetch sends given fetch request to kafka node and returns related response.
@@ -240,10 +254,17 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+
+	var b []byte
+	select {
+	case b, ok = <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+	case <-time.After(req.MaxWaitTime + responseTimeout):
+		return nil, ErrRespTimeout
 	}
+
 	resp, err := proto.ReadFetchResp(bytes.NewReader(b))
 	if err != nil {
 		return nil, err
@@ -294,11 +315,15 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadOffsetResp(bytes.NewReader(b))
+	case <-time.After(responseTimeout):
+		return nil, ErrRespTimeout
 	}
-	return proto.ReadOffsetResp(bytes.NewReader(b))
 }
 
 func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
@@ -316,11 +341,16 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadConsumerMetadataResp(bytes.NewReader(b))
+	case <-time.After(responseTimeout):
+		return nil, ErrRespTimeout
 	}
-	return proto.ReadConsumerMetadataResp(bytes.NewReader(b))
 }
 
 func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetCommitResp, error) {
@@ -338,11 +368,16 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadOffsetCommitResp(bytes.NewReader(b))
+	case <-time.After(responseTimeout):
+		return nil, ErrRespTimeout
 	}
-	return proto.ReadOffsetCommitResp(bytes.NewReader(b))
 }
 
 func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchResp, error) {
@@ -360,9 +395,16 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadOffsetFetchResp(bytes.NewReader(b))
+	case <-time.After(responseTimeout):
+		return nil, ErrRespTimeout
 	}
-	return proto.ReadOffsetFetchResp(bytes.NewReader(b))
 }
+
+var responseTimeout = time.Minute
