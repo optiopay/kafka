@@ -1,11 +1,12 @@
 package kafka
 
 import (
+	"errors"
 	"fmt"
+	"github.com/optiopay/kafka/proto"
 	"sync"
 	"testing"
-
-	"github.com/optiopay/kafka/proto"
+	"time"
 )
 
 type recordingProducer struct {
@@ -115,5 +116,28 @@ func TestHashProducer(t *testing.T) {
 		} else if got > parts-1 {
 			t.Errorf("number of partitions is %d, but message written to %d", parts, got)
 		}
+	}
+}
+
+func TestBackoff(t *testing.T) {
+	err := errors.New("An error")
+	backoff := newBackOffType(10*time.Second, 1.5)
+	if out := backoff.WaitTime(nil); out != 0 {
+		t.Fatalf("Expected 0 wait time, got %v", out)
+	}
+	if out := backoff.WaitTime(err); out != 10*time.Second {
+		t.Fatalf("Expeccted %v, got %v", 10*time.Second, out)
+	}
+	if out := backoff.WaitTime(err); out != 15*time.Second {
+		t.Fatalf("Expeccted %v, got %v", 15*time.Second, out)
+	}
+	if out := backoff.WaitTime(err); out != 22*time.Second+500*time.Millisecond {
+		t.Fatalf("Expeccted %v, got %v", 22*time.Second+500*time.Millisecond, out)
+	}
+	if out := backoff.WaitTime(nil); out != 0 {
+		t.Fatalf("Expected 0 wait time, got %v", out)
+	}
+	if out := backoff.WaitTime(err); out != 10*time.Second {
+		t.Fatalf("Expeccted %v, got %v", 10*time.Second, out)
 	}
 }
