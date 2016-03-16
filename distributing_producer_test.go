@@ -117,3 +117,38 @@ func TestHashProducer(t *testing.T) {
 		}
 	}
 }
+
+func TestRandomProducerIsConcurrencySafe(t *testing.T) {
+	const workers = 100
+
+	p := NewRandomProducer(nullproducer{}, 4)
+	start := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+
+	// spawn worker, each starting to produce at the same time
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			msg := &proto.Message{Value: []byte("value")}
+
+			<-start
+
+			for n := 0; n < 1000; n++ {
+				if _, err := p.Distribute("x", msg); err != nil {
+					t.Errorf("cannot distribute: %s", err)
+				}
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+}
+
+type nullproducer struct{}
+
+func (nullproducer) Produce(topic string, part int32, msgs ...*proto.Message) (int64, error) {
+	return 0, nil
+}

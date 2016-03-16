@@ -22,9 +22,11 @@ type DistributingProducer interface {
 }
 
 type randomProducer struct {
-	rand       *rand.Rand
 	producer   Producer
 	partitions int32
+
+	mu   sync.Mutex
+	rand *rand.Rand
 }
 
 // NewRandomProducer wraps given producer and return DistributingProducer that
@@ -47,7 +49,9 @@ func (p *randomProducer) Distribute(topic string, messages ...*proto.Message) (o
 	// since rand.Intn panics with 0
 	part := 0
 	if p.partitions > 0 {
+		p.mu.Lock()
 		part = p.rand.Intn(int(p.partitions))
+		p.mu.Unlock()
 	}
 	return p.producer.Produce(topic, int32(part), messages...)
 }
