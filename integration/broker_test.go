@@ -203,6 +203,52 @@ func TestConsumerBrokenConnection(t *testing.T) {
 	}
 }
 
+func TestNewTopic(t *testing.T) {
+	IntegrationTest(t)
+	const msgPerTopic = 10
+
+	topic := "NewTopic"
+
+	cluster := NewKafkaCluster("kafka-docker/", 1)
+	if err := cluster.Start(); err != nil {
+		t.Fatalf("cannot start kafka cluster: %s", err)
+	}
+	defer func() {
+		_ = cluster.Stop()
+	}()
+
+	bconf := kafka.NewBrokerConf("producer-new-topic")
+	bconf.Logger = &testLogger{t}
+	bconf.AllowTopicCreation = true
+	addrs, err := cluster.KafkaAddrs()
+	if err != nil {
+		t.Fatalf("cannot get kafka address: %s", err)
+	}
+	broker, err := kafka.Dial(addrs, bconf)
+	if err != nil {
+		t.Fatalf("cannot connect to cluster (%q): %s", addrs, err)
+	}
+	defer broker.Close()
+
+	m := proto.Message{
+		Value: []byte("Test message"),
+	}
+	pconf := kafka.NewProducerConf()
+	producer := broker.Producer(pconf)
+
+	if _, err := producer.Produce(topic, 0, &m); err != nil {
+		t.Fatalf("cannot produce to %q: %s", topic, err)
+	}
+
+	consumer, err := broker.Consumer(kafka.NewConsumerConf(topic, 0))
+	if err != nil {
+		t.Fatalf("cannot create consumer for %q: %s", topic, err)
+	}
+	if _, err := consumer.Consume(); err != nil {
+		t.Errorf("cannot consume message from %q: %s", topic, err)
+	}
+}
+
 type testLogger struct {
 	*testing.T
 }
