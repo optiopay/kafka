@@ -54,9 +54,9 @@ func TestRoundRobinProducer(t *testing.T) {
 	}
 
 	for i, values := range data {
-		msgs := make([]*proto.Message, 0)
-		for _, value := range values {
-			msgs = append(msgs, &proto.Message{Value: value})
+		msgs := make([]*proto.Message, len(values))
+		for i, value := range values {
+			msgs[i] = &proto.Message{Value: value}
 		}
 		if _, err := p.Distribute("test-topic", msgs...); err != nil {
 			t.Errorf("cannot distribute %d message: %s", i, err)
