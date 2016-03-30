@@ -24,7 +24,8 @@ const (
 )
 
 var (
-	// Returned by consumers on Fetch when the retry limit is set and exceeded.
+	// ErrNoData is returned by consumers on Fetch when the retry limit is set
+	// and exceeded.
 	ErrNoData = errors.New("no data")
 
 	// Make sure interfaces are implemented
@@ -91,6 +92,7 @@ type clusterMetadata struct {
 	partitions map[string]int32         // topic to number of partitions
 }
 
+// BrokerConf represents the configuration of a broker.
 type BrokerConf struct {
 	// Kafka client ID.
 	ClientID string
@@ -151,6 +153,7 @@ type BrokerConf struct {
 	Logger Logger
 }
 
+// NewBrokerConf returns the default broker configuration.
 func NewBrokerConf(clientID string) BrokerConf {
 	return BrokerConf{
 		ClientID:           clientID,
@@ -248,6 +251,7 @@ func (b *Broker) Close() {
 	}
 }
 
+// Metadata requests metadata information from any node.
 func (b *Broker) Metadata() (*proto.MetadataResp, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -349,7 +353,7 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 		endpoints:  make(map[topicPartition]int32),
 		partitions: make(map[string]int32),
 	}
-	debugmsg := make([]interface{}, 0)
+	var debugmsg []interface{}
 	for _, node := range resp.Brokers {
 		addr := fmt.Sprintf("%s:%d", node.Host, node.Port)
 		b.metadata.nodes[node.NodeID] = addr
@@ -676,12 +680,10 @@ func (b *Broker) OffsetLatest(topic string, partition int32) (offset int64, err 
 	return b.offset(topic, partition, -1)
 }
 
+// ProducerConf represents the configuration of a producer.
 type ProducerConf struct {
 	// Compression method to use, defaulting to proto.CompressionNone.
 	Compression proto.Compression
-
-	// Timeout of single produce request. By default, 5 seconds.
-	RequestTimeout time.Duration
 
 	// Message ACK configuration. Use proto.RequiredAcksAll to require all
 	// servers to write, proto.RequiredAcksLocal to wait only for leader node
@@ -689,6 +691,9 @@ type ProducerConf struct {
 	// Setting this to any other, greater than zero value will make producer to
 	// wait for given number of servers to confirm write before returning.
 	RequiredAcks int16
+
+	// Timeout of single produce request. By default, 5 seconds.
+	RequestTimeout time.Duration
 
 	// RetryLimit specify how many times message producing should be retried in
 	// case of failure, before returning the error to the caller. By default
@@ -707,8 +712,8 @@ type ProducerConf struct {
 func NewProducerConf() ProducerConf {
 	return ProducerConf{
 		Compression:    proto.CompressionNone,
-		RequestTimeout: 5 * time.Second,
 		RequiredAcks:   proto.RequiredAcksAll,
+		RequestTimeout: 5 * time.Second,
 		RetryLimit:     10,
 		RetryWait:      200 * time.Millisecond,
 		Logger:         nil,
@@ -852,6 +857,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 	return offset, err
 }
 
+// ConsumerConf represents the configuration of a consumer.
 type ConsumerConf struct {
 	// Topic name that should be consumed
 	Topic string
@@ -1009,7 +1015,7 @@ func (c *consumer) consume() ([]*proto.Message, error) {
 			if c.conf.RetryWait > 0 {
 				time.Sleep(c.conf.RetryWait)
 			}
-			retry += 1
+			retry++
 			if c.conf.RetryLimit != -1 && retry > c.conf.RetryLimit {
 				return nil, ErrNoData
 			}
@@ -1150,6 +1156,7 @@ consumeRetryLoop:
 	return nil, resErr
 }
 
+// OffsetCoordinatorConf represents the configuration of an offset coordinator.
 type OffsetCoordinatorConf struct {
 	ConsumerGroup string
 

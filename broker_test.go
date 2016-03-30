@@ -75,7 +75,7 @@ func (m *MetadataTester) Handler() RequestHandler {
 			wantsTopic[topic] = true
 		}
 
-		for topic, _ := range m.topics {
+		for topic := range m.topics {
 			// Return either all topics or only topics that they explicitly requested
 			_, explicitTopic := wantsTopic[topic]
 			if len(req.Topics) > 0 && !explicitTopic {
@@ -1137,7 +1137,7 @@ func TestLeaderConnectionFailover(t *testing.T) {
 		2: fmt.Sprintf("%s:%d", host2, port2),
 	}
 
-	conn, err = broker.muLeaderConnection("test", 0)
+	_, err = broker.muLeaderConnection("test", 0)
 	if err != nil {
 		t.Fatalf("%s", err)
 	}

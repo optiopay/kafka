@@ -49,7 +49,7 @@ func Merge(consumers ...Consumer) *Mx {
 		go func(c Consumer) {
 			defer func() {
 				p.mu.Lock()
-				p.workers -= 1
+				p.workers--
 				if p.workers == 0 && !p.closed {
 					close(p.stop)
 					p.closed = true
