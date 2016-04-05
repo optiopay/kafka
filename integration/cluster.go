@@ -47,7 +47,7 @@ type PortMapping struct {
 }
 
 func NewKafkaCluster(kafkaDockerDir string, size int) *KafkaCluster {
-	if size < 4 {
+	if size != 1 && size < 4 {
 		fmt.Fprintln(os.Stderr,
 			"WARNING: creating cluster smaller than 4 nodes is not sufficient for all topics")
 	}
@@ -91,7 +91,11 @@ func (cluster *KafkaCluster) Start() error {
 		return fmt.Errorf("cannot cleanup dead containers: %s", err)
 	}
 
-	upCmd := cluster.cmd("docker-compose", "up", "-d")
+	args := []string{"up", "-d"}
+	if cluster.size == 1 {
+		args = append([]string{"-f", "docker-compose-single-broker.yml"}, args...)
+	}
+	upCmd := cluster.cmd("docker-compose", args...)
 	if err := upCmd.Run(); err != nil {
 		return fmt.Errorf("docker-compose error: %s", err)
 	}
