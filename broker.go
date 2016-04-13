@@ -1196,7 +1196,11 @@ consumeRetryLoop:
 					continue
 				}
 				switch part.Err {
-				case proto.ErrLeaderNotAvailable, proto.ErrNotLeaderForPartition, proto.ErrBrokerNotAvailable:
+				case proto.ErrLeaderNotAvailable,
+					proto.ErrNotLeaderForPartition,
+					proto.ErrBrokerNotAvailable,
+					proto.ErrUnknownTopicOrPartition:
+
 					c.conf.Logger.Debug("cannot fetch messages",
 						"retry", retry,
 						"error", part.Err)
