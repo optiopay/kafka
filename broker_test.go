@@ -1468,6 +1468,10 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 				},
 			}
 		}
+		respErr := proto.ErrNotLeaderForPartition
+		if fetch1Calls > 2 {
+			respErr = proto.ErrUnknownTopicOrPartition
+		}
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.FetchRespTopic{
@@ -1476,7 +1480,7 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 					Partitions: []proto.FetchRespPartition{
 						{
 							ID:  1,
-							Err: proto.ErrNotLeaderForPartition,
+							Err: respErr,
 						},
 					},
 				},
