@@ -18,6 +18,7 @@ var (
 	ErrMessageSizeTooLarge                     = &KafkaError{10, "message size too large"}
 	ErrScaleControllerEpoch                    = &KafkaError{11, "scale controller epoch"}
 	ErrOffsetMetadataTooLarge                  = &KafkaError{12, "offset metadata too large"}
+	ErrNetwork                                 = &KafkaError{13, "server disconnected before response was received"}
 	ErrOffsetLoadInProgress                    = &KafkaError{14, "offsets load in progress"}
 	ErrNoCoordinator                           = &KafkaError{15, "consumer coordinator not available"}
 	ErrNotCoordinator                          = &KafkaError{16, "not coordinator for consumer"}
@@ -31,10 +32,12 @@ var (
 	ErrUnknownParititonAssignmentStrategy      = &KafkaError{24, "partition assignment strategy is unknown to the broker"}
 	ErrUnknownConsumerID                       = &KafkaError{25, "coordinator is not aware of this consumer"}
 	ErrInvalidSessionTimeout                   = &KafkaError{26, "invalid session timeout"}
-	ErrCommitingParitionsNotAssigned           = &KafkaError{27, "committing partitions are not assigned the committer"}
+	ErrRebalanceInProgress                     = &KafkaError{27, "group is rebalancing, so a rejoin is needed"}
 	ErrInvalidCommitOffsetSize                 = &KafkaError{28, "offset data size is not valid"}
-	ErrAuthorizationFailed                     = &KafkaError{29, "not authorized"}
-	ErrRebalanceInProgress                     = &KafkaError{30, "group is rebalancing, rejoin is needed"}
+	ErrTopicAuthorizationFailed                = &KafkaError{29, "topic authorization failed"}
+	ErrGroupAuthorizationFailed                = &KafkaError{30, "group authorization failed"}
+	ErrClusterAuthorizationFailed              = &KafkaError{31, "cluster authorization failed"}
+	ErrInvalidTimeStamp                        = &KafkaError{32, "timestamp of the message is out of acceptable range"}
 
 	errnoToErr = map[int16]error{
 		-1: ErrUnknown,
@@ -50,6 +53,7 @@ var (
 		10: ErrMessageSizeTooLarge,
 		11: ErrScaleControllerEpoch,
 		12: ErrOffsetMetadataTooLarge,
+		13: ErrNetwork,
 		14: ErrOffsetLoadInProgress,
 		15: ErrNoCoordinator,
 		16: ErrNotCoordinator,
@@ -63,10 +67,12 @@ var (
 		24: ErrUnknownParititonAssignmentStrategy,
 		25: ErrUnknownConsumerID,
 		26: ErrInvalidSessionTimeout,
-		27: ErrCommitingParitionsNotAssigned,
+		27: ErrRebalanceInProgress,
 		28: ErrInvalidCommitOffsetSize,
-		29: ErrAuthorizationFailed,
-		30: ErrRebalanceInProgress,
+		29: ErrTopicAuthorizationFailed,
+		30: ErrGroupAuthorizationFailed,
+		31: ErrClusterAuthorizationFailed,
+		32: ErrInvalidCommitOffsetSize,
 	}
 )
 
