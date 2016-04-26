@@ -31,7 +31,11 @@ type connection struct {
 
 // newConnection returns new, initialized connection or error
 func newTCPConnection(address string, timeout time.Duration) (*connection, error) {
-	conn, err := net.DialTimeout("tcp", address, timeout)
+	dialer := net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 30 * time.Second,
+	}
+	conn, err := dialer.Dial("tcp", address)
 	if err != nil {
 		return nil, err
 	}
