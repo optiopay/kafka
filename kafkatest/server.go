@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/optiopay/kafka/proto"
 )
@@ -28,6 +29,7 @@ type Server struct {
 	offsets     map[string]map[int32]map[string]*topicOffset
 	ln          net.Listener
 	middlewares []Middleware
+	events      chan struct{}
 }
 
 // Middleware is function that is called for every incomming kafka message,
@@ -52,6 +54,7 @@ func NewServer(middlewares ...Middleware) *Server {
 		topics:      make(map[string]map[int32][]*proto.Message),
 		offsets:     make(map[string]map[int32]map[string]*topicOffset),
 		middlewares: middlewares,
+		events:      make(chan struct{}),
 	}
 	return s
 }
@@ -366,12 +369,14 @@ func (s *Server) handleProduceRequest(nodeID int32, conn net.Conn, req *proto.Pr
 			respParts[pi].Offset = int64(len(t[part.ID])) - 1
 		}
 	}
+	close(s.events)
+	s.events = make(chan struct{})
 	return resp
 }
-
-func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.FetchReq) response {
+func (s *Server) fetchRequest(req *proto.FetchReq) (response, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	var messagesNum int
 
 	resp := &proto.FetchResp{
 		CorrelationID: req.CorrelationID,
@@ -400,9 +405,23 @@ func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.Fetc
 			}
 			respParts[pi].TipOffset = int64(len(messages))
 			respParts[pi].Messages = messages[part.FetchOffset:]
+			messagesNum += len(messages[part.FetchOffset:])
 		}
 	}
 
+	return resp, messagesNum
+}
+
+func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.FetchReq) response {
+
+	resp, n := s.fetchRequest(req)
+	if n == 0 {
+		select {
+		case _ = <-s.events:
+		case _ = <-time.After(time.Second):
+			resp, _ = s.fetchRequest(req)
+		}
+	}
 	return resp
 }
 
