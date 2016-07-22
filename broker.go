@@ -137,6 +137,11 @@ type BrokerConf struct {
 	// Defaults to 500ms.
 	DialRetryWait time.Duration
 
+	// ReadTimeout is TCP read timeout
+	//
+	// Default is 30 seconds
+	ReadTimeout time.Duration
+
 	// DEPRECATED 2015-07-10 - use Logger instead
 	//
 	// TODO(husio) remove
@@ -163,6 +168,7 @@ func NewBrokerConf(clientID string) BrokerConf {
 		AllowTopicCreation: false,
 		LeaderRetryLimit:   10,
 		LeaderRetryWait:    500 * time.Millisecond,
+		ReadTimeout:        30 * time.Second,
 		Logger:             &nullLogger{},
 	}
 }
@@ -240,7 +246,7 @@ func (b *Broker) dialRun(f func(c *connection, addr string) bool) (ok bool) {
 	for idx := 0; idx < numAddresses; idx++ {
 		addr := b.nodeAddresses[(idx+offset)%numAddresses]
 
-		conn, err := newTCPConnection(addr, b.conf.DialTimeout)
+		conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect",
 				"address", addr,
@@ -328,7 +334,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 		if _, ok := checkednodes[nodeID]; ok {
 			continue
 		}
-		conn, err := newTCPConnection(addr, b.conf.DialTimeout)
+		conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect",
 				"address", addr,
@@ -517,7 +523,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 				delete(b.metadata.endpoints, tp)
 				continue
 			}
-			conn, err = newTCPConnection(addr, b.conf.DialTimeout)
+			conn, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 			if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot connect to node",
 					"address", addr,
@@ -568,7 +574,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			}
 
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
-			conn, err := newTCPConnection(addr, b.conf.DialTimeout)
+			conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
@@ -594,7 +600,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 				// connection to node is cached so it was already checked
 				continue
 			}
-			conn, err := newTCPConnection(addr, b.conf.DialTimeout)
+			conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"nodeID", nodeID,
@@ -625,7 +631,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			}
 
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
-			conn, err = newTCPConnection(addr, b.conf.DialTimeout)
+			conn, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
