@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +29,7 @@ type Server struct {
 	offsets     map[string]map[int32]map[string]*topicOffset
 	ln          net.Listener
 	middlewares []Middleware
+	events      map[string]map[int32]chan struct{}
 }
 
 // Middleware is function that is called for every incomming kafka message,
@@ -52,6 +54,7 @@ func NewServer(middlewares ...Middleware) *Server {
 		topics:      make(map[string]map[int32][]*proto.Message),
 		offsets:     make(map[string]map[int32]map[string]*topicOffset),
 		middlewares: middlewares,
+		events:      make(map[string]map[int32]chan struct{}),
 	}
 	return s
 }
@@ -360,6 +363,16 @@ func (s *Server) handleProduceRequest(nodeID int32, conn net.Conn, req *proto.Pr
 				msg.Offset = int64(len(t[part.ID]))
 				msg.Topic = topic.Name
 				t[part.ID] = append(t[part.ID], msg)
+
+				if _, ok := s.events[topic.Name][part.ID]; !ok {
+					s.events[topic.Name] = make(map[int32]chan struct{})
+				}
+				if _, ok := s.events[topic.Name][part.ID]; !ok {
+					s.events[topic.Name][part.ID] = make(chan struct{})
+				}
+
+				close(s.events[topic.Name][part.ID])
+				s.events[topic.Name][part.ID] = make(chan struct{})
 			}
 
 			respParts[pi].ID = part.ID
@@ -368,10 +381,11 @@ func (s *Server) handleProduceRequest(nodeID int32, conn net.Conn, req *proto.Pr
 	}
 	return resp
 }
-
-func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.FetchReq) response {
+func (s *Server) fetchRequest(req *proto.FetchReq) (response, int, []chan struct{}) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	var messagesNum int
+	var events []chan struct{}
 
 	resp := &proto.FetchResp{
 		CorrelationID: req.CorrelationID,
@@ -400,9 +414,29 @@ func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.Fetc
 			}
 			respParts[pi].TipOffset = int64(len(messages))
 			respParts[pi].Messages = messages[part.FetchOffset:]
+			messagesNum += len(messages[part.FetchOffset:])
+			events = append(events, s.events[topic.Name][part.ID])
 		}
 	}
 
+	return resp, messagesNum, events
+}
+
+func sel(chans []chan struct{}) {
+	cases := make([]reflect.SelectCase, len(chans))
+	for i, ch := range chans {
+		cases[i] = reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}
+	}
+	_, _, _ = reflect.Select(cases)
+}
+
+func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.FetchReq) response {
+
+	resp, n, events := s.fetchRequest(req)
+	if n == 0 {
+		sel(events)
+		resp, _, _ = s.fetchRequest(req)
+	}
 	return resp
 }
 
