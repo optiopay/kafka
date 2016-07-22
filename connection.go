@@ -86,7 +86,11 @@ func (c *connection) readRespLoop() {
 	rd := bufio.NewReader(c.rw)
 	for {
 		if c.readTimeout > 0 {
-			c.rw.SetReadDeadline(time.Now().Add(c.readTimeout))
+			err := c.rw.SetReadDeadline(time.Now().Add(c.readTimeout))
+			if err != nil {
+				c.logger.Error("msg", "SetReadDeadline failed",
+					"error", err)
+			}
 		}
 		correlationID, b, err := proto.ReadResp(rd)
 		if err != nil {
