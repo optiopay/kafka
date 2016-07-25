@@ -104,6 +104,27 @@ func testServer3() (net.Listener, error) {
 	return ln, nil
 }
 
+func testSilentServer() (net.Listener, error) {
+	ln, err := net.Listen("tcp", "")
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		for {
+			cli, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			go func(conn net.Conn) {
+				_, _ = cli.Read(make([]byte, 1024))
+			}(cli)
+		}
+	}()
+	return ln, nil
+}
+
 func TestConnectionMetadata(t *testing.T) {
 	resp1 := &proto.MetadataResp{
 		CorrelationID: 1,
@@ -132,7 +153,7 @@ func TestConnectionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -190,7 +211,7 @@ func TestConnectionProduce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -306,7 +327,7 @@ func TestConnectionFetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -369,7 +390,7 @@ func TestConnectionOffset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -401,7 +422,7 @@ func TestConnectionProduceNoAck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -446,7 +467,7 @@ func TestClosedConnectionWriter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -493,7 +514,7 @@ func TestClosedConnectionReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -540,7 +561,7 @@ func TestConnectionReaderAfterEOF(t *testing.T) {
 		_ = ln.Close()
 	}()
 
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second)
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -572,5 +593,30 @@ func TestConnectionReaderAfterEOF(t *testing.T) {
 
 	if _, err := conn.Fetch(req); err == nil {
 		t.Fatal("fetching from closed connection succeeded")
+	}
+}
+
+func TestNoServerResponse(t *testing.T) {
+	ln, err := testSilentServer()
+	if err != nil {
+		t.Fatalf("test server error: %s", err)
+	}
+	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
+	if err != nil {
+		t.Fatalf("could not conect to test server: %s", err)
+	}
+	_, err = conn.Metadata(&proto.MetadataReq{
+		ClientID: "tester",
+		Topics:   []string{"first", "second"},
+	})
+	if err == nil {
+		t.Fatalf("expected timeout error, did not happen")
+	}
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("could not close kafka connection: %s", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("could not close test server: %s", err)
 	}
 }
