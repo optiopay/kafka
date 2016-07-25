@@ -373,6 +373,7 @@ func (s *Server) handleProduceRequest(nodeID int32, conn net.Conn, req *proto.Pr
 	s.events = make(chan struct{})
 	return resp
 }
+
 func (s *Server) fetchRequest(req *proto.FetchReq) (response, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -413,7 +414,6 @@ func (s *Server) fetchRequest(req *proto.FetchReq) (response, int) {
 }
 
 func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.FetchReq) response {
-
 	resp, n := s.fetchRequest(req)
 	if n == 0 {
 		select {
