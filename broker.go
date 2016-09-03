@@ -358,6 +358,33 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 		return resp, nil
 	}
 
+	var resp *proto.MetadataResp
+
+	ok := b.dialRun(func(conn *connection, addr string) bool {
+		var err error
+		resp, err = conn.Metadata(&proto.MetadataReq{
+			ClientID: b.conf.ClientID,
+			Topics:   nil,
+		})
+		if err != nil {
+			b.conf.Logger.Debug("cannot fetch metadata",
+				"address", addr,
+				"error", err)
+			return false
+		}
+		if len(resp.Brokers) == 0 {
+			b.conf.Logger.Debug("response with no broker data",
+				"address", addr)
+		} else {
+			b.cacheMetadata(resp)
+		}
+		return true
+	})
+
+	if ok {
+		return resp, nil
+	}
+
 	return nil, errors.New("cannot fetch metadata. No topics created?")
 }
 

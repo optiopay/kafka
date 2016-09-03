@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"log"
 	"strings"
 	"testing"
 	"time"
@@ -39,7 +40,6 @@ func TestProducerBrokenConnection(t *testing.T) {
 	pconf := kafka.NewProducerConf()
 	producer := broker.Producer(pconf)
 
-	println("sending messages to brokers")
 	// send message to all topics to make sure it's working
 	for _, name := range topics {
 		if _, err := producer.Produce(name, 0, &m); err != nil {
@@ -53,10 +53,8 @@ func TestProducerBrokenConnection(t *testing.T) {
 	// request should not succeed until nodes are back - bring them back after
 	// small delay and make sure producing was successful
 	var stopped []*kafkaProcess
-	println("stopping container")
 	for _, k := range cluster.Kafkas {
 		if err := k.Stop(); err != nil {
-			println(err.Error())
 			t.Fatalf("cannot kill %q kafka container: %s", k.brokerID, err)
 		}
 		stopped = append(stopped, k)
@@ -65,7 +63,6 @@ func TestProducerBrokenConnection(t *testing.T) {
 		}
 	}
 
-	println("starting again")
 	// bring stopped containers back
 	errc := make(chan error)
 	go func() {
@@ -78,7 +75,6 @@ func TestProducerBrokenConnection(t *testing.T) {
 		close(errc)
 	}()
 
-	println("producing messages")
 	// send message to all topics to make sure it's working
 	for _, name := range topics {
 		if _, err := producer.Produce(name, 0, &m); err != nil {
@@ -86,15 +82,12 @@ func TestProducerBrokenConnection(t *testing.T) {
 		}
 	}
 
-	println("waiting for errors")
 	for err := range errc {
 		t.Errorf("cannot start container: %s", err)
 	}
 
-	println("waiting for consuming")
 	// make sure data was persisted
 	for _, name := range topics {
-		println("consuming", name)
 		consumer, err := broker.Consumer(kafka.NewConsumerConf(name, 0))
 		if err != nil {
 			t.Errorf("cannot create consumer for %q: %s", name, err)
@@ -104,10 +97,8 @@ func TestProducerBrokenConnection(t *testing.T) {
 			if _, err := consumer.Consume(); err != nil {
 				t.Errorf("cannot consume %d message from %q: %s", i, name, err)
 			}
-			println("consumend", name, i)
 		}
 	}
-	println("============== done ==========")
 }
 
 func TestConsumerBrokenConnection(t *testing.T) {
@@ -257,20 +248,20 @@ type testLogger struct {
 
 func (tlog *testLogger) Debug(msg string, keyvals ...interface{}) {
 	args := append([]interface{}{msg}, keyvals...)
-	tlog.Log(args...)
+	log.Println(args...)
 }
 
 func (tlog *testLogger) Info(msg string, keyvals ...interface{}) {
 	args := append([]interface{}{msg}, keyvals...)
-	tlog.Log(args...)
+	log.Println(args...)
 }
 
 func (tlog *testLogger) Warn(msg string, keyvals ...interface{}) {
 	args := append([]interface{}{msg}, keyvals...)
-	tlog.Log(args...)
+	log.Println(args...)
 }
 
 func (tlog *testLogger) Error(msg string, keyvals ...interface{}) {
 	args := append([]interface{}{msg}, keyvals...)
-	tlog.Log(args...)
+	log.Println(args...)
 }

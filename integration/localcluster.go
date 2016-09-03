@@ -109,7 +109,9 @@ func newZooKeeper(kafkaPath string) (*zooKeeper, error) {
 }
 
 func (z *zooKeeper) Stop() error {
+	z.Lock()
 	defer func() {
+		z.Unlock()
 		os.RemoveAll(filepath.Join(os.TempDir(), "zookeeper"))
 	}()
 	err := z.cmd.Process.Kill()
@@ -157,7 +159,9 @@ func (k *kafkaProcess) Start() error {
 }
 
 func (k *kafkaProcess) Stop() error {
+	k.Lock()
 	defer func() {
+		k.Unlock()
 		os.RemoveAll(k.logDir)
 	}()
 	err := k.cmd.Process.Kill()
