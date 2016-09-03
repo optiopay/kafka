@@ -70,7 +70,8 @@ func (c *Container) Start() error {
 
 // Stop stops current container
 func (c *Container) Stop() error {
-	return c.cluster.ContainerStop(c.ID)
+	//return c.cluster.ContainerStop(c.ID)
+	return nil
 }
 
 func (c *Container) Kill() error {
