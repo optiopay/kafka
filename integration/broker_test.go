@@ -114,7 +114,7 @@ func TestConsumerBrokenConnection(t *testing.T) {
 
 	topics := []string{"Topic3", "Topic4"}
 
-	cluster := NewKafkaCluster("kafka-docker/", 4)
+	cluster := NewKafkaCluster("kafka-docker/", 5)
 	if err := cluster.Start(); err != nil {
 		t.Fatalf("cannot start kafka cluster: %s", err)
 	}
@@ -183,6 +183,8 @@ func TestConsumerBrokenConnection(t *testing.T) {
 		}
 		close(errc)
 	}()
+
+	time.Sleep(5 * time.Second)
 
 	// make sure data was persisted
 	for _, name := range topics {

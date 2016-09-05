@@ -142,6 +142,18 @@ type BrokerConf struct {
 	// Default is 30 seconds
 	ReadTimeout time.Duration
 
+	// RetryErrLimit limits the number of retry attempts when an error is
+	// encountered.
+	//
+	// Default is 10.
+	RetryErrLimit int
+
+	// RetryErrWait controls the wait duration between retries after failed
+	// fetch request.
+	//
+	// Default is 500ms.
+	RetryErrWait time.Duration
+
 	// DEPRECATED 2015-07-10 - use Logger instead
 	//
 	// TODO(husio) remove
@@ -168,6 +180,8 @@ func NewBrokerConf(clientID string) BrokerConf {
 		AllowTopicCreation: false,
 		LeaderRetryLimit:   10,
 		LeaderRetryWait:    500 * time.Millisecond,
+		RetryErrLimit:      10,
+		RetryErrWait:       time.Millisecond * 500,
 		ReadTimeout:        30 * time.Second,
 		Logger:             &nullLogger{},
 	}
@@ -702,69 +716,86 @@ func (b *Broker) muCloseDeadConnection(conn *connection) {
 // offset will return offset value for given partition. Use timems to specify
 // which offset value should be returned.
 func (b *Broker) offset(topic string, partition int32, timems int64) (offset int64, err error) {
-	conn, err := b.muLeaderConnection(topic, partition)
-	if err != nil {
-		return 0, err
-	}
-	resp, err := conn.Offset(&proto.OffsetReq{
-		ClientID:  b.conf.ClientID,
-		ReplicaID: -1, // any client
-		Topics: []proto.OffsetReqTopic{
-			{
-				Name: topic,
-				Partitions: []proto.OffsetReqPartition{
-					{
-						ID:         partition,
-						TimeMs:     timems,
-						MaxOffsets: 2,
+	var resErr error
+	for retry := 0; retry < b.conf.RetryErrLimit; retry++ {
+		if retry != 0 {
+			time.Sleep(b.conf.RetryErrWait)
+			resErr = b.refreshMetadata()
+			if resErr != nil {
+				continue
+			}
+		}
+		conn, err := b.muLeaderConnection(topic, partition)
+		if err != nil {
+			return 0, err
+		}
+		resp, err := conn.Offset(&proto.OffsetReq{
+			ClientID:  b.conf.ClientID,
+			ReplicaID: -1, // any client
+			Topics: []proto.OffsetReqTopic{
+				{
+					Name: topic,
+					Partitions: []proto.OffsetReqPartition{
+						{
+							ID:         partition,
+							TimeMs:     timems,
+							MaxOffsets: 2,
+						},
 					},
 				},
 			},
-		},
-	})
-	if err != nil {
-		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
-			// Connection is broken, so should be closed, but the error is
-			// still valid and should be returned so that retry mechanism have
-			// chance to react.
-			b.conf.Logger.Debug("connection died while sending message",
-				"topic", topic,
-				"partition", partition,
-				"error", err)
-			b.muCloseDeadConnection(conn)
-		}
-		return 0, err
-	}
-	found := false
-	for _, t := range resp.Topics {
-		if t.Name != topic {
-			b.conf.Logger.Debug("unexpected topic information",
-				"expected", topic,
-				"got", t.Name)
+		})
+		if err != nil {
+			if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
+				// Connection is broken, so should be closed, but the error is
+				// still valid and should be returned so that retry mechanism have
+				// chance to react.
+				b.conf.Logger.Debug("connection died while sending message",
+					"topic", topic,
+					"partition", partition,
+					"error", err)
+				b.muCloseDeadConnection(conn)
+			}
+			resErr = err
 			continue
 		}
-		for _, part := range t.Partitions {
-			if part.ID != partition {
-				b.conf.Logger.Debug("unexpected partition information",
-					"topic", t.Name,
-					"expected", partition,
-					"got", part.ID)
+		found := false
+		for _, t := range resp.Topics {
+			if t.Name != topic {
+				b.conf.Logger.Debug("unexpected topic information",
+					"expected", topic,
+					"got", t.Name)
 				continue
 			}
-			found = true
-			// happens when there are no messages
-			if len(part.Offsets) == 0 {
-				offset = 0
-			} else {
-				offset = part.Offsets[0]
+			for _, part := range t.Partitions {
+				if part.ID != partition {
+					b.conf.Logger.Debug("unexpected partition information",
+						"topic", t.Name,
+						"expected", partition,
+						"got", part.ID)
+					continue
+				}
+				found = true
+				// happens when there are no messages
+				if len(part.Offsets) == 0 {
+					offset = 0
+				} else {
+					offset = part.Offsets[0]
+				}
+				err = part.Err
 			}
-			err = part.Err
 		}
+		if err != nil {
+			resErr = err
+			continue
+		}
+		if !found {
+			resErr = errors.New("incomplete fetch response")
+			continue
+		}
+		return offset, nil
 	}
-	if !found {
-		return 0, errors.New("incomplete fetch response")
-	}
-	return offset, err
+	return 0, resErr
 }
 
 // OffsetEarliest returns the oldest offset available on the given partition.
