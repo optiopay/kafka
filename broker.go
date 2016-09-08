@@ -203,14 +203,14 @@ type Broker struct {
 //
 // The returned broker is not initially connected to any kafka node.
 func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
+	if len(nodeAddresses) == 0 {
+		return nil, errors.New("no addresses provided")
+	}
+
 	broker := &Broker{
 		conf:          conf,
 		conns:         make(map[int32]*connection),
 		nodeAddresses: nodeAddresses,
-	}
-
-	if len(nodeAddresses) == 0 {
-		return nil, errors.New("no addresses provided")
 	}
 
 	for i := 0; i < conf.DialRetryLimit; i++ {
@@ -221,59 +221,22 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 			time.Sleep(conf.DialRetryWait)
 		}
 
-		ok := broker.dialRun(func(conn *connection, addr string) bool {
-			resp, err := conn.Metadata(&proto.MetadataReq{
-				ClientID: broker.conf.ClientID,
-				Topics:   nil,
-			})
-			if err != nil {
-				conf.Logger.Debug("cannot fetch metadata",
-					"address", addr,
-					"error", err)
-				return false
-			}
-			if len(resp.Brokers) == 0 {
-				conf.Logger.Debug("response with no broker data",
-					"address", addr)
-			} else {
-				broker.cacheMetadata(resp)
-			}
-			return true
-		})
-		if ok {
+		err := broker.refreshMetadata()
+
+		if err == nil {
 			return broker, nil
 		}
 	}
 	return nil, errors.New("cannot connect")
 }
 
-// dialRun creates a new connection and run f with that connection. If f returns
-// true, dialRun returns true. If f returns false, it is run again with a
-// connection to another node. dialRun returns false when all nodes have been
-// unsuccessfully tried.
-func (b *Broker) dialRun(f func(c *connection, addr string) bool) (ok bool) {
-	numAddresses := len(b.nodeAddresses)
-
-	// This iterates starting at a random location in the slice, to prevent
-	// hitting the first server repeatedly.
-	offset := rand.Intn(numAddresses)
-	for idx := 0; idx < numAddresses; idx++ {
-		addr := b.nodeAddresses[(idx+offset)%numAddresses]
-
-		conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
-		if err != nil {
-			b.conf.Logger.Debug("cannot connect",
-				"address", addr,
-				"error", err)
-			continue
-		}
-		ok := f(conn, addr)
-		_ = conn.Close()
-		if ok {
-			return true
-		}
+func (b *Broker) getInitialAddresses() []string {
+	dest := make([]string, len(b.nodeAddresses))
+	perm := rand.Perm(len(b.nodeAddresses))
+	for i, v := range perm {
+		dest[v] = b.nodeAddresses[i]
 	}
-	return false
+	return dest
 }
 
 // Close closes the broker and all active kafka nodes connections.
@@ -372,31 +335,25 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 		return resp, nil
 	}
 
-	var resp *proto.MetadataResp
-
-	ok := b.dialRun(func(conn *connection, addr string) bool {
-		var err error
-		resp, err = conn.Metadata(&proto.MetadataReq{
-			ClientID: b.conf.ClientID,
-			Topics:   nil,
-		})
+	for _, addr := range b.getInitialAddresses() {
+		conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 		if err != nil {
-			b.conf.Logger.Debug("cannot fetch metadata",
+			b.conf.Logger.Debug("cannot connect to seed node",
 				"address", addr,
 				"error", err)
-			return false
+			continue
 		}
-		if len(resp.Brokers) == 0 {
-			b.conf.Logger.Debug("response with no broker data",
-				"address", addr)
-		} else {
-			b.cacheMetadata(resp)
+		resp, err := conn.Metadata(&proto.MetadataReq{
+			ClientID: b.conf.ClientID,
+			Topics:   topics,
+		})
+		conn.Close()
+		if err == nil {
+			return resp, nil
 		}
-		return true
-	})
-
-	if ok {
-		return resp, nil
+		b.conf.Logger.Debug("cannot fetch metadata",
+			"address", addr,
+			"error", err)
 	}
 
 	return nil, errors.New("cannot fetch metadata. No topics created?")
@@ -475,52 +432,6 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 				"sleep", b.conf.LeaderRetryWait.String())
 			time.Sleep(b.conf.LeaderRetryWait)
 			b.mu.Lock()
-		}
-
-		// If there is no metadata it probably means no topic has been created
-		// yet. So create the topic if it is allowed.
-		if len(b.metadata.endpoints) == 0 && b.conf.AllowTopicCreation {
-			b.dialRun(func(conn *connection, addr string) bool {
-				// To create a topic we just need to request topic's metadata.
-				_, err = conn.Metadata(&proto.MetadataReq{
-					ClientID: b.conf.ClientID,
-					Topics:   []string{topic},
-				})
-				if err != nil {
-					b.conf.Logger.Info("failed to fetch metadata for new topic",
-						"addr", addr,
-						"topic", topic,
-						"error", err)
-					return false
-				}
-
-				// Once the topic has been created, Kafka needs some time to
-				// generate the correct metadata. So wait a little and retry a
-				// few times.
-				for i := 0; i < 5; i++ {
-					time.Sleep(50 * time.Millisecond)
-
-					resp, err := conn.Metadata(&proto.MetadataReq{
-						ClientID: b.conf.ClientID,
-					})
-					if err != nil {
-						b.conf.Logger.Info("failed to fetch metadata",
-							"addr", addr,
-							"error", err)
-						return false
-					}
-
-					// Check if the topic exists in the metadata. If it is ok,
-					// cache the metadata and exit the loop.
-					for _, t := range resp.Topics {
-						if t.Name == topic {
-							b.cacheMetadata(resp)
-							return true
-						}
-					}
-				}
-				return false
-			})
 		}
 
 		nodeID, ok := b.metadata.endpoints[tp]
