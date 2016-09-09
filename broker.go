@@ -347,7 +347,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
 		})
-		conn.Close()
+		_ = conn.Close()
 		if err == nil {
 			return resp, nil
 		}
