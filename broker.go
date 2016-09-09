@@ -627,20 +627,21 @@ func (b *Broker) muCloseDeadConnection(conn *connection) {
 // offset will return offset value for given partition. Use timems to specify
 // which offset value should be returned.
 func (b *Broker) offset(topic string, partition int32, timems int64) (offset int64, err error) {
-	var resErr error
 	for retry := 0; retry < b.conf.RetryErrLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(b.conf.RetryErrWait)
-			resErr = b.refreshMetadata()
-			if resErr != nil {
+			err = b.refreshMetadata()
+			if err != nil {
 				continue
 			}
 		}
-		conn, err := b.muLeaderConnection(topic, partition)
+		var conn *connection
+		conn, err = b.muLeaderConnection(topic, partition)
 		if err != nil {
 			return 0, err
 		}
-		resp, err := conn.Offset(&proto.OffsetReq{
+		var resp *proto.OffsetResp
+		resp, err = conn.Offset(&proto.OffsetReq{
 			ClientID:  b.conf.ClientID,
 			ReplicaID: -1, // any client
 			Topics: []proto.OffsetReqTopic{
@@ -667,10 +668,8 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 					"error", err)
 				b.muCloseDeadConnection(conn)
 			}
-			resErr = err
 			continue
 		}
-		found := false
 		for _, t := range resp.Topics {
 			if t.Name != topic {
 				b.conf.Logger.Debug("unexpected topic information",
@@ -686,27 +685,17 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 						"got", part.ID)
 					continue
 				}
-				found = true
-				// happens when there are no messages
-				if len(part.Offsets) == 0 {
-					offset = 0
-				} else {
-					offset = part.Offsets[0]
+				if err = part.Err; err == nil {
+					if len(part.Offsets) == 0 {
+						return 0, nil
+					} else {
+						return part.Offsets[0], nil
+					}
 				}
-				err = part.Err
 			}
 		}
-		if err != nil {
-			resErr = err
-			continue
-		}
-		if !found {
-			resErr = errors.New("incomplete fetch response")
-			continue
-		}
-		return offset, nil
 	}
-	return 0, resErr
+	return 0, errors.New("incomplete fetch response")
 }
 
 // OffsetEarliest returns the oldest offset available on the given partition.
@@ -785,7 +774,6 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 // Upon a successful call, the message's Offset field is updated.
 func (p *producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 
-retryLoop:
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(p.conf.RetryWait)
@@ -795,7 +783,10 @@ retryLoop:
 
 		switch err {
 		case nil:
-			break retryLoop
+			for i, msg := range messages {
+				msg.Offset = int64(i) + offset
+			}
+			return offset, err
 		case io.EOF, syscall.EPIPE:
 			// p.produce call is closing connection when this error shows up,
 			// but it's also returning it so that retry loop can count this
@@ -813,14 +804,8 @@ retryLoop:
 			"error", err)
 	}
 
-	if err == nil {
-		// offset is the offset value of first published messages
-		for i, msg := range messages {
-			msg.Offset = int64(i) + offset
-		}
-	}
+	return 0, err
 
-	return offset, err
 }
 
 // produce send produce request to leader for given destination.
