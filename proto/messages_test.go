@@ -122,6 +122,31 @@ func TestMetadataResponse(t *testing.T) {
 	}
 }
 
+func TestAPIVersionsResponse(t *testing.T) {
+	respOrig := &APIVersionsResp{
+		CorrelationID: 1,
+		APIVersions: []SupportedVersion{
+			SupportedVersion{
+				APIKey:     1,
+				MinVersion: 0,
+				MaxVersion: 2,
+			},
+		},
+	}
+	b, err := respOrig.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ReadAPIVersionsResp(bytes.NewBuffer(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(respOrig, resp) {
+		t.Errorf("Should be equal %+v %+v", respOrig, resp)
+	}
+
+}
+
 func TestProduceRequest(t *testing.T) {
 	req := &ProduceReq{
 		CorrelationID: 241,
