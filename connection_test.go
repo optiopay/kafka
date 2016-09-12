@@ -38,6 +38,7 @@ func testServer(messages ...serializableMessage) (net.Listener, error) {
 			}
 
 			go func(conn net.Conn) {
+
 				time.Sleep(time.Millisecond * 50)
 				for _, resp := range responses {
 					_, _ = cli.Write(resp)
@@ -126,8 +127,11 @@ func testSilentServer() (net.Listener, error) {
 }
 
 func TestConnectionMetadata(t *testing.T) {
-	resp1 := &proto.MetadataResp{
+	versionResp := &proto.APIVersionsResp{
 		CorrelationID: 1,
+	}
+	resp1 := &proto.MetadataResp{
+		CorrelationID: 2,
 		Brokers: []proto.MetadataRespBroker{
 			{
 				NodeID: 666,
@@ -149,14 +153,23 @@ func TestConnectionMetadata(t *testing.T) {
 			},
 		},
 	}
-	ln, err := testServer(resp1)
+	ln, ch, err := testServer2()
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		ch <- versionResp
+	}()
+
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		ch <- resp1
+	}()
 	resp, err := conn.Metadata(&proto.MetadataReq{
 		ClientID: "tester",
 		Topics:   []string{"first", "second"},
@@ -176,8 +189,11 @@ func TestConnectionMetadata(t *testing.T) {
 }
 
 func TestConnectionProduce(t *testing.T) {
-	resp1 := &proto.ProduceResp{
+	versionResp := &proto.APIVersionsResp{
 		CorrelationID: 1,
+	}
+	resp1 := &proto.ProduceResp{
+		CorrelationID: 2,
 		Topics: []proto.ProduceRespTopic{
 			{
 				Name: "first",
@@ -192,7 +208,7 @@ func TestConnectionProduce(t *testing.T) {
 		},
 	}
 	resp2 := &proto.ProduceResp{
-		CorrelationID: 2,
+		CorrelationID: 3,
 		Topics: []proto.ProduceRespTopic{
 			{
 				Name: "first",
@@ -211,6 +227,11 @@ func TestConnectionProduce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
+	go func() {
+		time.Sleep(time.Millisecond * 10)
+		msgs <- versionResp
+
+	}()
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
@@ -222,6 +243,7 @@ func TestConnectionProduce(t *testing.T) {
 
 		time.Sleep(time.Millisecond * 10)
 		msgs <- resp2
+
 	}()
 
 	resp, err := conn.Produce(&proto.ProduceReq{
@@ -287,6 +309,10 @@ func TestConnectionProduce(t *testing.T) {
 }
 
 func TestConnectionFetch(t *testing.T) {
+	versionResp := &proto.APIVersionsResp{
+		CorrelationID: 1,
+	}
+
 	messages := []*proto.Message{
 		{Offset: 4, Key: []byte("f"), Value: []byte("first"), TipOffset: 20},
 		{Offset: 5, Key: []byte("s"), Value: []byte("second"), TipOffset: 20},
@@ -297,7 +323,7 @@ func TestConnectionFetch(t *testing.T) {
 	}
 
 	resp1 := &proto.FetchResp{
-		CorrelationID: 1,
+		CorrelationID: 2,
 		Topics: []proto.FetchRespTopic{
 			{
 				Name: "foo",
@@ -323,16 +349,26 @@ func TestConnectionFetch(t *testing.T) {
 			},
 		},
 	}
-	ln, err := testServer(resp1)
+	ln, ch, err := testServer2()
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		ch <- versionResp
+	}()
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		ch <- resp1
+	}()
+
 	resp, err := conn.Fetch(&proto.FetchReq{
-		CorrelationID: 1,
+		CorrelationID: 2,
 		ClientID:      "tester",
 		Topics: []proto.FetchReqTopic{
 			{
@@ -372,8 +408,12 @@ func TestConnectionFetch(t *testing.T) {
 }
 
 func TestConnectionOffset(t *testing.T) {
-	resp1 := &proto.OffsetResp{
+	versionResp := &proto.APIVersionsResp{
 		CorrelationID: 1,
+	}
+
+	resp1 := &proto.OffsetResp{
+		CorrelationID: 2,
 		Topics: []proto.OffsetRespTopic{
 			{
 				Name: "test",
@@ -386,14 +426,27 @@ func TestConnectionOffset(t *testing.T) {
 			},
 		},
 	}
-	ln, err := testServer(resp1)
+
+	ln, ch, err := testServer2()
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		ch <- versionResp
+	}()
+
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		ch <- resp1
+	}()
+
 	resp, err := conn.Offset(&proto.OffsetReq{
 		ClientID: "tester",
 		Topics: []proto.OffsetReqTopic{
@@ -418,10 +471,17 @@ func TestConnectionOffset(t *testing.T) {
 }
 
 func TestConnectionProduceNoAck(t *testing.T) {
-	ln, err := testServer()
+	versionResp := &proto.APIVersionsResp{
+		CorrelationID: 1,
+	}
+	ln, ch, err := testServer2()
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		ch <- versionResp
+	}()
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)

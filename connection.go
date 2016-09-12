@@ -16,6 +16,12 @@ import (
 // ErrClosed is returned as result of any request made using closed connection.
 var ErrClosed = errors.New("closed")
 
+//pair of min and max versions supported by ApiKey
+type apiVersion struct {
+	MinVersion int16
+	MaxVersion int16
+}
+
 // Low level abstraction over connection to Kafka.
 type connection struct {
 	rw     net.Conn
@@ -27,6 +33,7 @@ type connection struct {
 	respc       map[int32]chan []byte
 	stopErr     error
 	readTimeout time.Duration
+	apiVersions map[int16]apiVersion
 }
 
 // newConnection returns new, initialized connection or error
@@ -46,10 +53,31 @@ func newTCPConnection(address string, timeout, readTimeout time.Duration) (*conn
 		respc:       make(map[int32]chan []byte),
 		logger:      &nullLogger{},
 		readTimeout: readTimeout,
+		apiVersions: make(map[int16]apiVersion),
 	}
 	go c.nextIDLoop()
 	go c.readRespLoop()
+	apiVersions, err := c.APIVersions(&proto.APIVersionsReq{})
+	if err != nil {
+		c.logger.Debug("cannot fetch apiversions",
+			"error", err)
+	} else {
+		for _, api := range apiVersions.APIVersions {
+			c.apiVersions[api.APIKey] = apiVersion{
+				MinVersion: api.MinVersion,
+				MaxVersion: api.MaxVersion,
+			}
+		}
+	}
 	return c, nil
+}
+
+//apiVersion returns pair of min and max supported version for apiKey
+func (c *connection) apiVersion(apiKey int16) apiVersion {
+	if v, ok := c.apiVersions[apiKey]; ok {
+		return v
+	}
+	return apiVersion{}
 }
 
 // nextIDLoop generates correlation IDs, making sure they are always in order
