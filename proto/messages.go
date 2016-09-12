@@ -1544,6 +1544,8 @@ func (a *APIVersionsResp) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(a.CorrelationID)
+	//error code
+	enc.Encode(int16(0))
 	enc.EncodeArrayLen(len(a.APIVersions))
 	for _, api := range a.APIVersions {
 		enc.Encode(api.APIKey)
