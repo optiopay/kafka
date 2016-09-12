@@ -139,20 +139,22 @@ func (srv *Server) handleClient(c net.Conn) {
 		var request Serializable
 
 		switch kind {
-		case FetchRequest:
+		case proto.FetchReqKind:
 			request, err = proto.ReadFetchReq(bytes.NewBuffer(b))
-		case ProduceRequest:
+		case proto.ProduceReqKind:
 			request, err = proto.ReadProduceReq(bytes.NewBuffer(b))
-		case OffsetRequest:
+		case proto.OffsetReqKind:
 			request, err = proto.ReadOffsetReq(bytes.NewBuffer(b))
-		case MetadataRequest:
+		case proto.MetadataReqKind:
 			request, err = proto.ReadMetadataReq(bytes.NewBuffer(b))
-		case ConsumerMetadataRequest:
+		case proto.ConsumerMetadataReqKind:
 			request, err = proto.ReadConsumerMetadataReq(bytes.NewBuffer(b))
-		case OffsetCommitRequest:
+		case proto.OffsetCommitReqKind:
 			request, err = proto.ReadOffsetCommitReq(bytes.NewBuffer(b))
-		case OffsetFetchRequest:
+		case proto.OffsetFetchReqKind:
 			request, err = proto.ReadOffsetFetchReq(bytes.NewBuffer(b))
+		case proto.APIVersionsReqKind:
+			request, err = proto.ReadAPIVersionsReq(bytes.NewBuffer(b))
 		}
 
 		if err != nil {
@@ -260,6 +262,19 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		panic("not implemented")
 	case *proto.OffsetFetchReq:
 		panic("not implemented")
+	case *proto.APIVersionsReq:
+		return &proto.APIVersionsResp{
+			CorrelationID: req.CorrelationID,
+			APIVersions: []proto.SupportedVersion{
+				proto.SupportedVersion{APIKey: ProduceRequest, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: FetchRequest, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: OffsetRequest, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: MetadataRequest, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: OffsetCommitRequest, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: OffsetFetchRequest, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: ConsumerMetadataRequest, MinVersion: 0, MaxVersion: 0},
+			},
+		}
 	default:
 		panic(fmt.Sprintf("unknown message type: %T", req))
 	}
