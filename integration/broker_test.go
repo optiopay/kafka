@@ -121,6 +121,7 @@ func TestConsumerBrokenConnection(t *testing.T) {
 	defer func() {
 		_ = cluster.Stop()
 	}()
+	//time.Sleep(5 * time.Second)
 
 	bconf := kafka.NewBrokerConf("producer-broken-connection")
 	bconf.Logger = &testLogger{t}
@@ -218,6 +219,14 @@ func TestNewTopic(t *testing.T) {
 	defer func() {
 		_ = cluster.Stop()
 	}()
+
+	//time.Sleep(5 * time.Second)
+	//	go func() {
+	//		logCmd := cluster.cmd("docker-compose", "logs")
+	//		if err := logCmd.Run(); err != nil {
+	//			panic(err)
+	//		}
+	//	}()
 
 	bconf := kafka.NewBrokerConf("producer-new-topic")
 	bconf.Logger = &testLogger{t}

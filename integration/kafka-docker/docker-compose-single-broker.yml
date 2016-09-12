@@ -8,7 +8,5 @@ kafka:
     - "9092:9092"
   links:
     - zookeeper:zk
-  environment:
-    KAFKA_ADVERTISED_HOST_NAME: localhost
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock

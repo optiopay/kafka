@@ -18,6 +18,10 @@ if [[ -n "$KAFKA_HEAP_OPTS" ]]; then
     unset KAFKA_HEAP_OPTS
 fi
 
+if [[ -z "$KAFKA_ADVERTISED_HOST_NAME" ]]; then
+    export KAFKA_ADVERTISED_HOST_NAME=$(docker inspect --format='{{ .NetworkSettings.Gateway}}' `hostname`)
+fi
+
 for VAR in `env`
 do
   if [[ $VAR =~ ^KAFKA_ && ! $VAR =~ ^KAFKA_HOME ]]; then
@@ -30,7 +34,6 @@ do
     fi
   fi
 done
-
 
 $KAFKA_HOME/bin/kafka-server-start.sh $KAFKA_HOME/config/server.properties &
 KAFKA_SERVER_PID=$!
