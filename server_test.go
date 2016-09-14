@@ -196,7 +196,9 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		return resp
 	case *proto.ProduceReq:
 		resp := &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID:  req.CorrelationID,
+			Version:        req.Version,
+			ThrottleTimeMs: 3,
 		}
 		resp.Topics = make([]proto.ProduceRespTopic, len(req.Topics))
 		for ti, topic := range req.Topics {
@@ -206,9 +208,10 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 			}
 			for pi, part := range topic.Partitions {
 				resp.Topics[ti].Partitions[pi] = proto.ProduceRespPartition{
-					ID:     part.ID,
-					Err:    proto.ErrUnknownTopicOrPartition,
-					Offset: -1,
+					ID:        part.ID,
+					Err:       proto.ErrUnknownTopicOrPartition,
+					Offset:    -1,
+					Timestamp: time.Now().UnixNano(),
 				}
 			}
 		}

@@ -316,6 +316,73 @@ func TestProducerWithNoAck(t *testing.T) {
 	broker.Close()
 }
 
+func TestProducerWithVersions(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	var apiVersionHandler RequestHandler
+
+	apiVersionHandler = func(request Serializable) Serializable {
+		req := request.(*proto.APIVersionsReq)
+		return &proto.APIVersionsResp{
+			CorrelationID: req.CorrelationID,
+			APIVersions: []proto.SupportedVersion{
+				proto.SupportedVersion{APIKey: proto.ProduceReqKind, MinVersion: 0, MaxVersion: 1},
+			},
+		}
+	}
+
+	srv.Handle(proto.APIVersionsReqKind, apiVersionHandler)
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
+
+	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	prodConf := NewProducerConf()
+	prodConf.RequiredAcks = proto.RequiredAcksNone
+	prodConf.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConf)
+	messages := []*proto.Message{
+		{Value: []byte("first")},
+		{Value: []byte("second")},
+	}
+
+	errc := make(chan error)
+	srv.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
+		defer close(errc)
+		req := request.(*proto.ProduceReq)
+		if req.Version != 1 {
+			errc <- fmt.Errorf("expected version == 1 got %v", req.Version)
+			return nil
+		}
+		messages := req.Topics[0].Partitions[0].Messages
+		for _, msg := range messages {
+			crc := proto.ComputeCrc(msg, proto.CompressionNone)
+			if msg.Crc != crc {
+				errc <- fmt.Errorf("expected '%d' crc, got %d", crc, msg.Crc)
+				return nil
+			}
+		}
+		return nil
+	})
+
+	offset, err := producer.Produce("test", 0, messages...)
+	if err := <-errc; err != nil {
+		t.Fatalf("handling error: %s", err)
+	}
+	if err != nil {
+		t.Fatalf("expected no error, got %s", err)
+	}
+	if offset != 0 {
+		t.Fatalf("expected offset different than %d", offset)
+	}
+
+	broker.Close()
+}
+
 func TestProduceWhileLeaderChange(t *testing.T) {
 	srv1 := NewServer()
 	srv1.Start()

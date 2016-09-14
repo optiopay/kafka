@@ -284,7 +284,7 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadProduceResp(bytes.NewReader(b))
+	return proto.ReadProduceResp(bytes.NewReader(b), req.Version)
 }
 
 // Fetch sends given fetch request to kafka node and returns related response.

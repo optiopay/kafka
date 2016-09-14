@@ -1123,6 +1123,7 @@ func (r *OffsetFetchResp) Bytes() ([]byte, error) {
 }
 
 type ProduceReq struct {
+	Version       int16
 	CorrelationID int32
 	ClientID      string
 	Compression   Compression // only used when sending ProduceReqs
@@ -1147,8 +1148,10 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 
 	// total message size
 	_ = dec.DecodeInt32()
-	// api key + api version
-	_ = dec.DecodeInt32()
+	// api key
+	_ = dec.DecodeInt16()
+	// version
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	req.RequiredAcks = dec.DecodeInt16()
@@ -1185,9 +1188,9 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 	var buf buffer
 	enc := NewEncoder(&buf)
 
-	enc.EncodeInt32(0) // placeholder
+	enc.EncodeInt32(0) // placeholder for size
 	enc.EncodeInt16(ProduceReqKind)
-	enc.EncodeInt16(0)
+	enc.EncodeInt16(r.Version)
 	enc.EncodeInt32(r.CorrelationID)
 	enc.EncodeString(r.ClientID)
 
@@ -1227,8 +1230,10 @@ func (r *ProduceReq) WriteTo(w io.Writer) (int64, error) {
 }
 
 type ProduceResp struct {
-	CorrelationID int32
-	Topics        []ProduceRespTopic
+	Version        int16
+	CorrelationID  int32
+	ThrottleTimeMs int32
+	Topics         []ProduceRespTopic
 }
 
 type ProduceRespTopic struct {
@@ -1237,9 +1242,10 @@ type ProduceRespTopic struct {
 }
 
 type ProduceRespPartition struct {
-	ID     int32
-	Err    error
-	Offset int64
+	ID        int32
+	Err       error
+	Offset    int64
+	Timestamp int64
 }
 
 func (r *ProduceResp) Bytes() ([]byte, error) {
@@ -1257,7 +1263,14 @@ func (r *ProduceResp) Bytes() ([]byte, error) {
 			enc.Encode(part.ID)
 			enc.EncodeError(part.Err)
 			enc.Encode(part.Offset)
+			if r.Version == 2 {
+				enc.EncodeInt64(part.Timestamp)
+			}
 		}
+	}
+
+	if r.Version == 1 || r.Version == 2 {
+		enc.EncodeInt32(r.ThrottleTimeMs)
 	}
 
 	if enc.Err() != nil {
@@ -1271,8 +1284,9 @@ func (r *ProduceResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
+func ReadProduceResp(r io.Reader, version int16) (*ProduceResp, error) {
 	var resp ProduceResp
+	resp.Version = version
 	dec := NewDecoder(r)
 
 	// total message size
@@ -1288,7 +1302,13 @@ func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
 			p.ID = dec.DecodeInt32()
 			p.Err = errFromNo(dec.DecodeInt16())
 			p.Offset = dec.DecodeInt64()
+			if resp.Version == 2 {
+				p.Timestamp = dec.DecodeInt64()
+			}
 		}
+	}
+	if resp.Version == 1 || resp.Version == 2 {
+		resp.ThrottleTimeMs = dec.DecodeInt32()
 	}
 
 	if err := dec.Err(); err != nil {
