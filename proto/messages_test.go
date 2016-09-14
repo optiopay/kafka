@@ -20,6 +20,7 @@ var _ Request = &ConsumerMetadataReq{}
 var _ Request = &OffsetReq{}
 var _ Request = &OffsetCommitReq{}
 var _ Request = &OffsetFetchReq{}
+var _ Request = &APIVersionsReq{}
 
 func testRequestSerialization(t *testing.T, r Request) {
 	var buf bytes.Buffer
