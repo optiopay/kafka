@@ -29,6 +29,7 @@ type connection struct {
 	respc       map[int32]chan []byte
 	stopErr     error
 	readTimeout time.Duration
+	apiVersions map[int16]proto.SupportedVersion
 }
 
 func newTLSConnection(address string, ca, cert, key []byte, timeout, readTimeout time.Duration) (*connection, error) {
@@ -63,6 +64,7 @@ func newTLSConnection(address string, ca, cert, key []byte, timeout, readTimeout
 		respc:       make(map[int32]chan []byte),
 		logger:      &nullLogger{},
 		readTimeout: readTimeout,
+		apiVersions: make(map[int16]proto.SupportedVersion),
 	}
 	go c.nextIDLoop()
 	go c.readRespLoop()
@@ -86,10 +88,39 @@ func newTCPConnection(address string, timeout, readTimeout time.Duration) (*conn
 		respc:       make(map[int32]chan []byte),
 		logger:      &nullLogger{},
 		readTimeout: readTimeout,
+		apiVersions: make(map[int16]proto.SupportedVersion),
 	}
 	go c.nextIDLoop()
 	go c.readRespLoop()
 	return c, nil
+}
+
+//getBestVersion returns version for passed apiKey which best fit server and client requirements
+func (c *connection) getBestVersion(apiKey int16) int16 {
+	if requested, ok := c.apiVersions[apiKey]; ok {
+		supported := proto.SupportedByDriver[apiKey]
+		if min(supported.MaxVersion, requested.MaxVersion) > max(supported.MaxVersion, requested.MaxVersion) {
+			return min(supported.MaxVersion, requested.MaxVersion)
+		}
+		return 0
+	}
+	return 0
+}
+
+func min(a int16, b int16) int16 {
+	if a < b {
+		return a
+	} else {
+		return b
+	}
+}
+
+func max(a int16, b int16) int16 {
+	if a > b {
+		return a
+	} else {
+		return b
+	}
 }
 
 // nextIDLoop generates correlation IDs, making sure they are always in order
@@ -211,6 +242,32 @@ func (c *connection) Close() error {
 	}
 	c.mu.Unlock()
 	return c.rw.Close()
+}
+
+// APIVersions sends a request to fetch the supported versions for each API.
+// Versioning is only supported in Kafka versions above 0.10.0.0
+func (c *connection) APIVersions(req *proto.APIVersionsReq) (*proto.APIVersionsResp, error) {
+	var ok bool
+	if req.CorrelationID, ok = <-c.nextID; !ok {
+		return nil, c.stopErr
+	}
+
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		c.logger.Error("msg", "failed waiting for response", "error", err)
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+
+	if _, err := req.WriteTo(c.rw); err != nil {
+		c.logger.Error("msg", "cannot write", "error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
+	b, ok := <-respc
+	if !ok {
+		return nil, c.stopErr
+	}
+	return proto.ReadAPIVersionsResp(bytes.NewReader(b))
 }
 
 // Metadata sends given metadata request to kafka node and returns related
