@@ -12,14 +12,7 @@ import (
 )
 
 const (
-	AnyRequest              = -1
-	ProduceRequest          = 0
-	FetchRequest            = 1
-	OffsetRequest           = 2
-	MetadataRequest         = 3
-	OffsetCommitRequest     = 8
-	OffsetFetchRequest      = 9
-	ConsumerMetadataRequest = 10
+	AnyRequest = -1
 )
 
 type Serializable interface {
@@ -266,13 +259,13 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		return &proto.APIVersionsResp{
 			CorrelationID: req.CorrelationID,
 			APIVersions: []proto.SupportedVersion{
-				proto.SupportedVersion{APIKey: ProduceRequest, MinVersion: 0, MaxVersion: 0},
-				proto.SupportedVersion{APIKey: FetchRequest, MinVersion: 0, MaxVersion: 0},
-				proto.SupportedVersion{APIKey: OffsetRequest, MinVersion: 0, MaxVersion: 0},
-				proto.SupportedVersion{APIKey: MetadataRequest, MinVersion: 0, MaxVersion: 0},
-				proto.SupportedVersion{APIKey: OffsetCommitRequest, MinVersion: 0, MaxVersion: 0},
-				proto.SupportedVersion{APIKey: OffsetFetchRequest, MinVersion: 0, MaxVersion: 0},
-				proto.SupportedVersion{APIKey: ConsumerMetadataRequest, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.ProduceReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.FetchReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.OffsetReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.MetadataReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.OffsetCommitReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.OffsetFetchReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.ConsumerMetadataReqKind, MinVersion: 0, MaxVersion: 0},
 			},
 		}
 	default:
