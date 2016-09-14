@@ -173,6 +173,32 @@ func (c *connection) Close() error {
 	return c.rw.Close()
 }
 
+// APIVersions sends a request to fetch the supported versions for each API.
+// Versioning is only supported in Kafka versions above 0.10.0.0
+func (c *connection) APIVersions(req *proto.APIVersionsReq) (*proto.APIVersionsResp, error) {
+	var ok bool
+	if req.CorrelationID, ok = <-c.nextID; !ok {
+		return nil, c.stopErr
+	}
+
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		c.logger.Error("msg", "failed waiting for response", "error", err)
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+
+	if _, err := req.WriteTo(c.rw); err != nil {
+		c.logger.Error("msg", "cannot write", "error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
+	b, ok := <-respc
+	if !ok {
+		return nil, c.stopErr
+	}
+	return proto.ReadAPIVersionsResp(bytes.NewReader(b))
+}
+
 // Metadata sends given metadata request to kafka node and returns related
 // metadata response.
 // Calling this method on closed connection will always return ErrClosed.
