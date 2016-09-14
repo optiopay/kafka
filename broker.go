@@ -815,11 +815,14 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 		return 0, err
 	}
 
+	ver := conn.apiVersion(proto.ProduceReqKind).MaxVersion
+
 	req := proto.ProduceReq{
 		ClientID:     p.broker.conf.ClientID,
 		Compression:  p.conf.Compression,
 		RequiredAcks: p.conf.RequiredAcks,
 		Timeout:      p.conf.RequestTimeout,
+		Version:      ver,
 		Topics: []proto.ProduceReqTopic{
 			{
 				Name: topic,

@@ -520,6 +520,126 @@ func TestConnectionProduceNoAck(t *testing.T) {
 	}
 }
 
+func TestConnectionProduceWithVersions(t *testing.T) {
+
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	var apiVersionHandler RequestHandler
+
+	apiVersionHandler = func(request Serializable) Serializable {
+		req := request.(*proto.APIVersionsReq)
+		return &proto.APIVersionsResp{
+			CorrelationID: req.CorrelationID,
+			APIVersions: []proto.SupportedVersion{
+				proto.SupportedVersion{APIKey: proto.ProduceReqKind, MinVersion: 0, MaxVersion: 1},
+			},
+		}
+	}
+
+	srv.Handle(proto.APIVersionsReqKind, apiVersionHandler)
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, true).Handler())
+
+	conn, err := newTCPConnection(srv.Address(), time.Second, time.Second)
+	if err != nil {
+		t.Fatalf("could not conect to test server: %s", err)
+	}
+
+	req := proto.ProduceReq{
+		ClientID:     "tester",
+		Compression:  proto.CompressionNone,
+		RequiredAcks: proto.RequiredAcksAll,
+		Timeout:      time.Second,
+		Topics: []proto.ProduceReqTopic{
+			{
+				Name: "first",
+				Partitions: []proto.ProduceReqPartition{
+					{
+						ID: 0,
+						Messages: []*proto.Message{
+							{Key: []byte("key 1"), Value: []byte("value 1")},
+							{Key: []byte("key 2"), Value: []byte("value 2")},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	//Version 0
+
+	resp, err := conn.Produce(&req)
+	if err != nil {
+		t.Fatalf("could not fetch response: %s", err)
+	}
+
+	if resp == nil {
+		t.Fatal("expected response, got nil")
+	}
+	if resp.Version != req.Version {
+		t.Fatalf("Version mismatch should be %s, got: %s", req.Version, resp.Version)
+	}
+
+	if resp.ThrottleTimeMs != 0 {
+		t.Fatalf("For version 0 ThrottleTimeMs should be 0, got: %s", resp.ThrottleTimeMs)
+	}
+	if resp.Topics[0].Partitions[0].Timestamp != 0 {
+		t.Fatalf("For version 0 Timestamp should be 0, got: %s", resp.Topics[0].Partitions[0].Timestamp)
+	}
+
+	// Version 1
+	req.Version = 1
+	resp, err = conn.Produce(&req)
+	if err != nil {
+		t.Fatalf("could not fetch response: %s", err)
+	}
+
+	if resp == nil {
+		t.Fatal("expected response, got nil")
+	}
+
+	if resp.Version != req.Version {
+		t.Fatalf("Version mismatch should be %s, got: %s", req.Version, resp.Version)
+	}
+
+	if resp.ThrottleTimeMs != 3 {
+		t.Fatalf("For version 1 ThrottleTimeMs should be 3, got: %s", resp.ThrottleTimeMs)
+	}
+
+	if resp.Topics[0].Partitions[0].Timestamp != 0 {
+		t.Fatalf("For version 1 Timestamp should be 0, got: %s", resp.Topics[0].Partitions[0].Timestamp)
+	}
+
+	// Version 2
+
+	req.Version = 2
+	resp, err = conn.Produce(&req)
+	if err != nil {
+		t.Fatalf("could not fetch response: %s", err)
+	}
+
+	if resp == nil {
+		t.Fatal("expected response, got nil")
+	}
+
+	if resp.Version != req.Version {
+		t.Fatalf("Version mismatch should be %s, got: %s", req.Version, resp.Version)
+	}
+
+	if resp.ThrottleTimeMs != 3 {
+		t.Fatalf("For version 2 ThrottleTimeMs should be 3, got: %s", resp.ThrottleTimeMs)
+	}
+
+	if resp.Topics[0].Partitions[0].Timestamp == 0 {
+		t.Fatal("For version 2 Timestamp should not be 0")
+	}
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("could not close kafka connection: %s", err)
+	}
+}
+
 func TestClosedConnectionWriter(t *testing.T) {
 	// create test server with no messages, so that any client connection will
 	// be immediately closed
