@@ -161,7 +161,7 @@ func (c *connection) readRespLoop() {
 // After pushing response message, channel is closed.
 //
 // Upon connection close, all unconsumed channels are closed.
-func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err error) {
+func (c *connection) respWaiter(correlationID int32) (func() ([]byte, bool), error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -172,9 +172,20 @@ func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err err
 		c.logger.Error("msg", "correlation conflict", "correlationID", correlationID)
 		return nil, fmt.Errorf("correlation conflict: %d", correlationID)
 	}
-	respc = make(chan []byte)
+	respc := make(chan []byte)
 	c.respc[correlationID] = respc
-	return respc, nil
+
+	return func() ([]byte, bool) {
+		select {
+		case v1, ok := <-respc:
+			return v1, ok
+		case _ = <-time.After(c.readTimeout):
+			c.mu.Lock()
+			c.stopErr = fmt.Errorf("Timeout for request with correlationID=%d", correlationID)
+			c.mu.Unlock()
+			return nil, false
+		}
+	}, nil
 }
 
 // releaseWaiter removes response channel from waiters pool and close it.
@@ -220,7 +231,7 @@ func (c *connection) APIVersions(req *proto.APIVersionsReq) (*proto.APIVersionsR
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -247,7 +258,7 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -280,7 +291,7 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -306,7 +317,7 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -360,7 +371,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -382,7 +393,7 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -404,7 +415,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -426,7 +437,7 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
