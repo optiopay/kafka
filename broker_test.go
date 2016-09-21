@@ -1004,14 +1004,6 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 
 	srv1.Close()
 
-	_, err = broker.offset("test", 1, -2)
-	if handlerErr != nil {
-		t.Fatalf("handler error: %s", handlerErr)
-	}
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-
 	offset, err = broker.offset("test", 1, -2)
 	if handlerErr != nil {
 		t.Fatalf("handler error: %s", handlerErr)

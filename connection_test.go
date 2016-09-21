@@ -15,7 +15,7 @@ type serializableMessage interface {
 }
 
 func testServer(messages ...serializableMessage) (net.Listener, error) {
-	ln, err := net.Listen("tcp", "")
+	ln, err := net.Listen("tcp4", "")
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func testServer(messages ...serializableMessage) (net.Listener, error) {
 }
 
 func testServer2() (net.Listener, chan serializableMessage, error) {
-	ln, err := net.Listen("tcp", "")
+	ln, err := net.Listen("tcp4", "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -83,7 +83,7 @@ func testServer2() (net.Listener, chan serializableMessage, error) {
 }
 
 func testServer3() (net.Listener, error) {
-	ln, err := net.Listen("tcp", "")
+	ln, err := net.Listen("tcp4", "")
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func testServer3() (net.Listener, error) {
 }
 
 func testSilentServer() (net.Listener, error) {
-	ln, err := net.Listen("tcp", "")
+	ln, err := net.Listen("tcp4", "")
 	if err != nil {
 		return nil, err
 	}

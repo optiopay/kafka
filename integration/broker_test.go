@@ -114,13 +114,14 @@ func TestConsumerBrokenConnection(t *testing.T) {
 
 	topics := []string{"Topic3", "Topic4"}
 
-	cluster := NewKafkaCluster("kafka-docker/", 4)
+	cluster := NewKafkaCluster("kafka-docker/", 5)
 	if err := cluster.Start(); err != nil {
 		t.Fatalf("cannot start kafka cluster: %s", err)
 	}
 	defer func() {
 		_ = cluster.Stop()
 	}()
+	//time.Sleep(5 * time.Second)
 
 	bconf := kafka.NewBrokerConf("producer-broken-connection")
 	bconf.Logger = &testLogger{t}
@@ -184,6 +185,8 @@ func TestConsumerBrokenConnection(t *testing.T) {
 		close(errc)
 	}()
 
+	time.Sleep(5 * time.Second)
+
 	// make sure data was persisted
 	for _, name := range topics {
 		consumer, err := broker.Consumer(kafka.NewConsumerConf(name, 0))
@@ -216,6 +219,14 @@ func TestNewTopic(t *testing.T) {
 	defer func() {
 		_ = cluster.Stop()
 	}()
+
+	//time.Sleep(5 * time.Second)
+	//	go func() {
+	//		logCmd := cluster.cmd("docker-compose", "logs")
+	//		if err := logCmd.Run(); err != nil {
+	//			panic(err)
+	//		}
+	//	}()
 
 	bconf := kafka.NewBrokerConf("producer-new-topic")
 	bconf.Logger = &testLogger{t}
