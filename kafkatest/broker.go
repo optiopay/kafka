@@ -100,7 +100,7 @@ func (b *Broker) Consumer(conf kafka.ConsumerConf) (kafka.Consumer, error) {
 func (b *Broker) Producer(kafka.ProducerConf) kafka.Producer {
 	return &Producer{
 		Broker:         b,
-		ResponseOffset: 1,
+		responseOffset: 1,
 	}
 }
 
@@ -161,7 +161,8 @@ type Producer struct {
 
 	// ResponseOffset is offset counter returned and incremented by every
 	// Produce method call. By default set to 1.
-	ResponseOffset int64
+	responseOffset int64
+	offsetMutex    sync.Mutex
 
 	// ResponseError if set, force Produce method call to instantly return
 	// error, without publishing messages. By default nil.
@@ -176,6 +177,15 @@ type ProducedMessages struct {
 	Messages  []*proto.Message
 }
 
+// ResponseOffset returns the offset counter. The counter is
+// incremented every time the Produce method is called. By default the
+// counter is set to 1.
+func (p *Producer) ResponseOffset() int64 {
+	p.offsetMutex.Lock()
+	defer p.offsetMutex.Unlock()
+	return p.responseOffset
+}
+
 // Produce is settings messages Crc and Offset attributes and pushing all
 // passed arguments to broker. Produce call is blocking until pushed message
 // will be read with broker's ReadProduces.
@@ -183,7 +193,10 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Mes
 	if p.ResponseError != nil {
 		return 0, p.ResponseError
 	}
-	off := p.ResponseOffset
+	p.offsetMutex.Lock()
+	defer p.offsetMutex.Unlock()
+
+	off := p.responseOffset
 
 	for i, msg := range messages {
 		msg.Offset = off + int64(i)
@@ -195,7 +208,7 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Mes
 		Partition: partition,
 		Messages:  messages,
 	}
-	p.ResponseOffset += int64(len(messages))
+	p.responseOffset = int64(len(messages))
 	return off, nil
 }
 
