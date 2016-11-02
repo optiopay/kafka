@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/optiopay/kafka"
@@ -163,6 +162,7 @@ type Producer struct {
 	// ResponseOffset is offset counter returned and incremented by every
 	// Produce method call. By default set to 1.
 	responseOffset int64
+	offsetMutex    sync.Mutex
 
 	// ResponseError if set, force Produce method call to instantly return
 	// error, without publishing messages. By default nil.
@@ -181,7 +181,9 @@ type ProducedMessages struct {
 // incremented every time the Produce method is called. By default the
 // counter is set to 1.
 func (p *Producer) ResponseOffset() int64 {
-	return atomic.LoadInt64(&p.responseOffset)
+	p.offsetMutex.Lock()
+	defer p.offsetMutex.Unlock()
+	return p.responseOffset
 }
 
 // Produce is settings messages Crc and Offset attributes and pushing all
@@ -191,8 +193,10 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Mes
 	if p.ResponseError != nil {
 		return 0, p.ResponseError
 	}
-	off := atomic.AddInt64(&p.responseOffset, int64(len(messages)))
-	off -= int64(len(messages))
+	p.offsetMutex.Lock()
+	defer p.offsetMutex.Unlock()
+
+	off := p.responseOffset
 
 	for i, msg := range messages {
 		msg.Offset = off + int64(i)
@@ -204,6 +208,7 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Mes
 		Partition: partition,
 		Messages:  messages,
 	}
+	p.responseOffset = int64(len(messages))
 	return off, nil
 }
 
