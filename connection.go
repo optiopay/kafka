@@ -16,6 +16,12 @@ import (
 // ErrClosed is returned as result of any request made using closed connection.
 var ErrClosed = errors.New("closed")
 
+//pair of min and max versions supported by ApiKey
+type apiVersion struct {
+	MinVersion int16
+	MaxVersion int16
+}
+
 // Low level abstraction over connection to Kafka.
 type connection struct {
 	rw     net.Conn
@@ -27,6 +33,7 @@ type connection struct {
 	respc       map[int32]chan []byte
 	stopErr     error
 	readTimeout time.Duration
+	apiVersions map[int16]apiVersion
 }
 
 // newConnection returns new, initialized connection or error
@@ -46,10 +53,31 @@ func newTCPConnection(address string, timeout, readTimeout time.Duration) (*conn
 		respc:       make(map[int32]chan []byte),
 		logger:      &nullLogger{},
 		readTimeout: readTimeout,
+		apiVersions: make(map[int16]apiVersion),
 	}
 	go c.nextIDLoop()
 	go c.readRespLoop()
+	apiVersions, err := c.APIVersions(&proto.APIVersionsReq{})
+	if err != nil {
+		c.logger.Debug("cannot fetch apiversions",
+			"error", err)
+	} else {
+		for _, api := range apiVersions.APIVersions {
+			c.apiVersions[api.APIKey] = apiVersion{
+				MinVersion: api.MinVersion,
+				MaxVersion: api.MaxVersion,
+			}
+		}
+	}
 	return c, nil
+}
+
+//apiVersion returns pair of min and max supported version for apiKey
+func (c *connection) apiVersion(apiKey int16) apiVersion {
+	if v, ok := c.apiVersions[apiKey]; ok {
+		return v
+	}
+	return apiVersion{}
 }
 
 // nextIDLoop generates correlation IDs, making sure they are always in order
@@ -133,7 +161,7 @@ func (c *connection) readRespLoop() {
 // After pushing response message, channel is closed.
 //
 // Upon connection close, all unconsumed channels are closed.
-func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err error) {
+func (c *connection) respWaiter(correlationID int32) (func() ([]byte, bool), error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -144,9 +172,20 @@ func (c *connection) respWaiter(correlationID int32) (respc chan []byte, err err
 		c.logger.Error("msg", "correlation conflict", "correlationID", correlationID)
 		return nil, fmt.Errorf("correlation conflict: %d", correlationID)
 	}
-	respc = make(chan []byte)
+	respc := make(chan []byte)
 	c.respc[correlationID] = respc
-	return respc, nil
+
+	return func() ([]byte, bool) {
+		select {
+		case v1, ok := <-respc:
+			return v1, ok
+		case _ = <-time.After(c.readTimeout):
+			c.mu.Lock()
+			c.stopErr = fmt.Errorf("Timeout for request with correlationID=%d", correlationID)
+			c.mu.Unlock()
+			return nil, false
+		}
+	}, nil
 }
 
 // releaseWaiter removes response channel from waiters pool and close it.
@@ -173,6 +212,32 @@ func (c *connection) Close() error {
 	return c.rw.Close()
 }
 
+// APIVersions sends a request to fetch the supported versions for each API.
+// Versioning is only supported in Kafka versions above 0.10.0.0
+func (c *connection) APIVersions(req *proto.APIVersionsReq) (*proto.APIVersionsResp, error) {
+	var ok bool
+	if req.CorrelationID, ok = <-c.nextID; !ok {
+		return nil, c.stopErr
+	}
+
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		c.logger.Error("msg", "failed waiting for response", "error", err)
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+
+	if _, err := req.WriteTo(c.rw); err != nil {
+		c.logger.Error("msg", "cannot write", "error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
+	b, ok := respc()
+	if !ok {
+		return nil, c.stopErr
+	}
+	return proto.ReadAPIVersionsResp(bytes.NewReader(b))
+}
+
 // Metadata sends given metadata request to kafka node and returns related
 // metadata response.
 // Calling this method on closed connection will always return ErrClosed.
@@ -193,7 +258,7 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -226,11 +291,11 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadProduceResp(bytes.NewReader(b))
+	return proto.ReadProduceResp(bytes.NewReader(b), req.Version)
 }
 
 // Fetch sends given fetch request to kafka node and returns related response.
@@ -252,7 +317,7 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -306,7 +371,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -328,7 +393,7 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -350,7 +415,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}
@@ -372,7 +437,7 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
+	b, ok := respc()
 	if !ok {
 		return nil, c.stopErr
 	}

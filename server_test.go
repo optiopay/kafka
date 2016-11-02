@@ -12,14 +12,7 @@ import (
 )
 
 const (
-	AnyRequest              = -1
-	ProduceRequest          = 0
-	FetchRequest            = 1
-	OffsetRequest           = 2
-	MetadataRequest         = 3
-	OffsetCommitRequest     = 8
-	OffsetFetchRequest      = 9
-	ConsumerMetadataRequest = 10
+	AnyRequest = -1
 )
 
 type Serializable interface {
@@ -139,20 +132,22 @@ func (srv *Server) handleClient(c net.Conn) {
 		var request Serializable
 
 		switch kind {
-		case FetchRequest:
+		case proto.FetchReqKind:
 			request, err = proto.ReadFetchReq(bytes.NewBuffer(b))
-		case ProduceRequest:
+		case proto.ProduceReqKind:
 			request, err = proto.ReadProduceReq(bytes.NewBuffer(b))
-		case OffsetRequest:
+		case proto.OffsetReqKind:
 			request, err = proto.ReadOffsetReq(bytes.NewBuffer(b))
-		case MetadataRequest:
+		case proto.MetadataReqKind:
 			request, err = proto.ReadMetadataReq(bytes.NewBuffer(b))
-		case ConsumerMetadataRequest:
+		case proto.ConsumerMetadataReqKind:
 			request, err = proto.ReadConsumerMetadataReq(bytes.NewBuffer(b))
-		case OffsetCommitRequest:
+		case proto.OffsetCommitReqKind:
 			request, err = proto.ReadOffsetCommitReq(bytes.NewBuffer(b))
-		case OffsetFetchRequest:
+		case proto.OffsetFetchReqKind:
 			request, err = proto.ReadOffsetFetchReq(bytes.NewBuffer(b))
+		case proto.APIVersionsReqKind:
+			request, err = proto.ReadAPIVersionsReq(bytes.NewBuffer(b))
 		}
 
 		if err != nil {
@@ -201,7 +196,9 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		return resp
 	case *proto.ProduceReq:
 		resp := &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID:  req.CorrelationID,
+			Version:        req.Version,
+			ThrottleTimeMs: 3,
 		}
 		resp.Topics = make([]proto.ProduceRespTopic, len(req.Topics))
 		for ti, topic := range req.Topics {
@@ -211,9 +208,10 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 			}
 			for pi, part := range topic.Partitions {
 				resp.Topics[ti].Partitions[pi] = proto.ProduceRespPartition{
-					ID:     part.ID,
-					Err:    proto.ErrUnknownTopicOrPartition,
-					Offset: -1,
+					ID:        part.ID,
+					Err:       proto.ErrUnknownTopicOrPartition,
+					Offset:    -1,
+					Timestamp: time.Now().UnixNano(),
 				}
 			}
 		}
@@ -260,6 +258,19 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		panic("not implemented")
 	case *proto.OffsetFetchReq:
 		panic("not implemented")
+	case *proto.APIVersionsReq:
+		return &proto.APIVersionsResp{
+			CorrelationID: req.CorrelationID,
+			APIVersions: []proto.SupportedVersion{
+				proto.SupportedVersion{APIKey: proto.ProduceReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.FetchReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.OffsetReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.MetadataReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.OffsetCommitReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.OffsetFetchReqKind, MinVersion: 0, MaxVersion: 0},
+				proto.SupportedVersion{APIKey: proto.ConsumerMetadataReqKind, MinVersion: 0, MaxVersion: 0},
+			},
+		}
 	default:
 		panic(fmt.Sprintf("unknown message type: %T", req))
 	}

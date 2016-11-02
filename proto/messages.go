@@ -16,8 +16,7 @@ import (
 
 /*
 
-Kafka wire protocol implemented as described in
-https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-Messagesets
+Kafka wire protocol implemented as described in http://kafka.apache.org/protocol.html
 
 */
 
@@ -29,6 +28,7 @@ const (
 	OffsetCommitReqKind     = 8
 	OffsetFetchReqKind      = 9
 	ConsumerMetadataReqKind = 10
+	APIVersionsReqKind      = 18
 
 	// receive the latest offset (i.e. the offset of the next coming message)
 	OffsetReqTimeLatest = -1
@@ -1123,6 +1123,7 @@ func (r *OffsetFetchResp) Bytes() ([]byte, error) {
 }
 
 type ProduceReq struct {
+	Version       int16
 	CorrelationID int32
 	ClientID      string
 	Compression   Compression // only used when sending ProduceReqs
@@ -1147,8 +1148,10 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 
 	// total message size
 	_ = dec.DecodeInt32()
-	// api key + api version
-	_ = dec.DecodeInt32()
+	// api key
+	_ = dec.DecodeInt16()
+	// version
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	req.RequiredAcks = dec.DecodeInt16()
@@ -1185,9 +1188,9 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 	var buf buffer
 	enc := NewEncoder(&buf)
 
-	enc.EncodeInt32(0) // placeholder
+	enc.EncodeInt32(0) // placeholder for size
 	enc.EncodeInt16(ProduceReqKind)
-	enc.EncodeInt16(0)
+	enc.EncodeInt16(r.Version)
 	enc.EncodeInt32(r.CorrelationID)
 	enc.EncodeString(r.ClientID)
 
@@ -1227,8 +1230,10 @@ func (r *ProduceReq) WriteTo(w io.Writer) (int64, error) {
 }
 
 type ProduceResp struct {
-	CorrelationID int32
-	Topics        []ProduceRespTopic
+	Version        int16
+	CorrelationID  int32
+	ThrottleTimeMs int32
+	Topics         []ProduceRespTopic
 }
 
 type ProduceRespTopic struct {
@@ -1237,9 +1242,10 @@ type ProduceRespTopic struct {
 }
 
 type ProduceRespPartition struct {
-	ID     int32
-	Err    error
-	Offset int64
+	ID        int32
+	Err       error
+	Offset    int64
+	Timestamp int64
 }
 
 func (r *ProduceResp) Bytes() ([]byte, error) {
@@ -1257,7 +1263,14 @@ func (r *ProduceResp) Bytes() ([]byte, error) {
 			enc.Encode(part.ID)
 			enc.EncodeError(part.Err)
 			enc.Encode(part.Offset)
+			if r.Version == 2 {
+				enc.EncodeInt64(part.Timestamp)
+			}
 		}
+	}
+
+	if r.Version == 1 || r.Version == 2 {
+		enc.EncodeInt32(r.ThrottleTimeMs)
 	}
 
 	if enc.Err() != nil {
@@ -1271,8 +1284,9 @@ func (r *ProduceResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
+func ReadProduceResp(r io.Reader, version int16) (*ProduceResp, error) {
 	var resp ProduceResp
+	resp.Version = version
 	dec := NewDecoder(r)
 
 	// total message size
@@ -1288,7 +1302,13 @@ func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
 			p.ID = dec.DecodeInt32()
 			p.Err = errFromNo(dec.DecodeInt16())
 			p.Offset = dec.DecodeInt64()
+			if resp.Version == 2 {
+				p.Timestamp = dec.DecodeInt64()
+			}
 		}
+	}
+	if resp.Version == 1 || resp.Version == 2 {
+		resp.ThrottleTimeMs = dec.DecodeInt32()
 	}
 
 	if err := dec.Err(); err != nil {
@@ -1470,4 +1490,121 @@ type buffer []byte
 func (b *buffer) Write(p []byte) (int, error) {
 	*b = append(*b, p...)
 	return len(p), nil
+}
+
+type APIVersionsReq struct {
+	CorrelationID int32
+	ClientID      string
+}
+
+func ReadAPIVersionsReq(r io.Reader) (*APIVersionsReq, error) {
+	var req APIVersionsReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
+func (r *APIVersionsReq) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(int16(APIVersionsReqKind))
+	// Currently only supports version 0
+	enc.Encode(int16(0))
+	enc.Encode(r.CorrelationID)
+	enc.Encode(r.ClientID)
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+func (r *APIVersionsReq) WriteTo(w io.Writer) (int64, error) {
+	b, err := r.Bytes()
+	if err != nil {
+		return 0, err
+	}
+	n, err := w.Write(b)
+	return int64(n), err
+}
+
+type APIVersionsResp struct {
+	CorrelationID int32
+	APIVersions   []SupportedVersion
+}
+
+type SupportedVersion struct {
+	APIKey     int16
+	MinVersion int16
+	MaxVersion int16
+}
+
+func (a *APIVersionsResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(a.CorrelationID)
+	//error code
+	enc.Encode(int16(0))
+	enc.EncodeArrayLen(len(a.APIVersions))
+	for _, api := range a.APIVersions {
+		enc.Encode(api.APIKey)
+		enc.Encode(api.MinVersion)
+		enc.Encode(api.MaxVersion)
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+func ReadAPIVersionsResp(r io.Reader) (*APIVersionsResp, error) {
+	var resp APIVersionsResp
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	resp.CorrelationID = dec.DecodeInt32()
+	errcode := dec.DecodeInt16()
+	if errcode != 0 {
+		//TODO fill app error
+		return nil, fmt.Errorf("versioning error: %d", errcode)
+	}
+	resp.APIVersions = make([]SupportedVersion, dec.DecodeArrayLen())
+	for i := range resp.APIVersions {
+		api := &resp.APIVersions[i]
+		api.APIKey = dec.DecodeInt16()
+		api.MinVersion = dec.DecodeInt16()
+		api.MaxVersion = dec.DecodeInt16()
+	}
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &resp, nil
 }

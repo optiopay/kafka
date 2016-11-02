@@ -20,6 +20,7 @@ var _ Request = &ConsumerMetadataReq{}
 var _ Request = &OffsetReq{}
 var _ Request = &OffsetCommitReq{}
 var _ Request = &OffsetFetchReq{}
+var _ Request = &APIVersionsReq{}
 
 func testRequestSerialization(t *testing.T, r Request) {
 	var buf bytes.Buffer
@@ -119,6 +120,31 @@ func TestMetadataResponse(t *testing.T) {
 			t.Fatalf("serialized representation different from expected: %#v", b)
 		}
 	}
+}
+
+func TestAPIVersionsResponse(t *testing.T) {
+	respOrig := &APIVersionsResp{
+		CorrelationID: 1,
+		APIVersions: []SupportedVersion{
+			SupportedVersion{
+				APIKey:     1,
+				MinVersion: 0,
+				MaxVersion: 2,
+			},
+		},
+	}
+	b, err := respOrig.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := ReadAPIVersionsResp(bytes.NewBuffer(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(respOrig, resp) {
+		t.Errorf("Should be equal %+v %+v", respOrig, resp)
+	}
+
 }
 
 func TestProduceRequest(t *testing.T) {

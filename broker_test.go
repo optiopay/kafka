@@ -151,10 +151,10 @@ func TestDialRandomized(t *testing.T) {
 		}
 	}
 
-	if srv1.Processed == 30 {
+	if srv1.Processed == 60 {
 		t.Fatal("all traffic went to first broker")
 	}
-	if srv1.Processed+srv2.Processed+srv3.Processed != 30 {
+	if srv1.Processed+srv2.Processed+srv3.Processed != 60 {
 		t.Fatal("received unexpected number of requests")
 	}
 	if srv1.Processed == 0 || srv2.Processed == 0 || srv3.Processed == 0 {
@@ -167,7 +167,7 @@ func TestProducer(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
 	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
 	if err != nil {
@@ -188,7 +188,7 @@ func TestProducer(t *testing.T) {
 
 	var handleErr error
 	var createdMsgs int
-	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		if req.Topics[0].Name != "test" {
 			handleErr = fmt.Errorf("expected 'test' topic, got %s", req.Topics[0].Name)
@@ -249,7 +249,7 @@ func TestProducerWithNoAck(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
 	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
 	if err != nil {
@@ -271,7 +271,7 @@ func TestProducerWithNoAck(t *testing.T) {
 
 	errc := make(chan error)
 	var createdMsgs int
-	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		defer close(errc)
 		req := request.(*proto.ProduceReq)
 		if req.RequiredAcks != proto.RequiredAcksNone {
@@ -311,6 +311,73 @@ func TestProducerWithNoAck(t *testing.T) {
 
 	if createdMsgs != 2 {
 		t.Fatalf("expected 2 messages to be created, got %d", createdMsgs)
+	}
+
+	broker.Close()
+}
+
+func TestProducerWithVersions(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	var apiVersionHandler RequestHandler
+
+	apiVersionHandler = func(request Serializable) Serializable {
+		req := request.(*proto.APIVersionsReq)
+		return &proto.APIVersionsResp{
+			CorrelationID: req.CorrelationID,
+			APIVersions: []proto.SupportedVersion{
+				proto.SupportedVersion{APIKey: proto.ProduceReqKind, MinVersion: 0, MaxVersion: 1},
+			},
+		}
+	}
+
+	srv.Handle(proto.APIVersionsReqKind, apiVersionHandler)
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
+
+	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	prodConf := NewProducerConf()
+	prodConf.RequiredAcks = proto.RequiredAcksNone
+	prodConf.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConf)
+	messages := []*proto.Message{
+		{Value: []byte("first")},
+		{Value: []byte("second")},
+	}
+
+	errc := make(chan error)
+	srv.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
+		defer close(errc)
+		req := request.(*proto.ProduceReq)
+		if req.Version != 1 {
+			errc <- fmt.Errorf("expected version == 1 got %v", req.Version)
+			return nil
+		}
+		messages := req.Topics[0].Partitions[0].Messages
+		for _, msg := range messages {
+			crc := proto.ComputeCrc(msg, proto.CompressionNone)
+			if msg.Crc != crc {
+				errc <- fmt.Errorf("expected '%d' crc, got %d", crc, msg.Crc)
+				return nil
+			}
+		}
+		return nil
+	})
+
+	offset, err := producer.Produce("test", 0, messages...)
+	if err := <-errc; err != nil {
+		t.Fatalf("handling error: %s", err)
+	}
+	if err != nil {
+		t.Fatalf("expected no error, got %s", err)
+	}
+	if offset != 0 {
+		t.Fatalf("expected offset different than %d", offset)
 	}
 
 	broker.Close()
@@ -371,11 +438,11 @@ func TestProduceWhileLeaderChange(t *testing.T) {
 		}
 	}
 
-	srv1.Handle(MetadataRequest, metadataHandler("srv1"))
-	srv2.Handle(MetadataRequest, metadataHandler("srv2"))
+	srv1.Handle(proto.MetadataReqKind, metadataHandler("srv1"))
+	srv2.Handle(proto.MetadataReqKind, metadataHandler("srv2"))
 
 	var prod1Calls int
-	srv1.Handle(ProduceRequest, func(request Serializable) Serializable {
+	srv1.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		prod1Calls++
 		req := request.(*proto.ProduceReq)
 		return &proto.ProduceResp{
@@ -395,7 +462,7 @@ func TestProduceWhileLeaderChange(t *testing.T) {
 	})
 
 	var prod2Calls int
-	srv2.Handle(ProduceRequest, func(request Serializable) Serializable {
+	srv2.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		prod2Calls++
 		req := request.(*proto.ProduceReq)
 		return &proto.ProduceResp{
@@ -440,7 +507,7 @@ func TestConsumer(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		host, port := srv.HostPort()
 		return &proto.MetadataResp{
@@ -464,7 +531,7 @@ func TestConsumer(t *testing.T) {
 		}
 	})
 	fetchCallCount := 0
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		fetchCallCount++
 		if fetchCallCount < 2 {
@@ -552,7 +619,7 @@ func TestBatchConsumer(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		host, port := srv.HostPort()
 		return &proto.MetadataResp{
@@ -576,7 +643,7 @@ func TestBatchConsumer(t *testing.T) {
 		}
 	})
 	fetchCallCount := 0
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		fetchCallCount++
 		if fetchCallCount < 2 {
@@ -670,7 +737,7 @@ func TestConsumerRetry(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		host, port := srv.HostPort()
 		return &proto.MetadataResp{
@@ -694,7 +761,7 @@ func TestConsumerRetry(t *testing.T) {
 		}
 	})
 	fetchCallCount := 0
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		fetchCallCount++
 		return &proto.FetchResp{
@@ -742,9 +809,9 @@ func TestConsumeInvalidOffset(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		messages := []*proto.Message{
 			// return message with offset lower than requested
@@ -796,10 +863,10 @@ func TestPartitionOffset(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
 	var handlerErr error
-	srv.Handle(OffsetRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.OffsetReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.OffsetReq)
 		if req.ReplicaID != -1 {
 			handlerErr = fmt.Errorf("expected -1 replica id, got %d", req.ReplicaID)
@@ -845,7 +912,7 @@ func TestPartitionCount(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
 	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("tester"))
 	if err != nil {
@@ -879,7 +946,7 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 	host2, port2 := srv2.HostPort()
 
 	var handlerErr error
-	srv1.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv1.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
@@ -908,7 +975,7 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 			},
 		}
 	})
-	srv1.Handle(OffsetRequest, func(request Serializable) Serializable {
+	srv1.Handle(proto.OffsetReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.OffsetReq)
 		if req.ReplicaID != -1 {
 			handlerErr = fmt.Errorf("expected -1 replica id, got %d", req.ReplicaID)
@@ -933,7 +1000,7 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 	})
 	// after closing first server, which started as leader, broker should ask
 	// other nodes about the leader and refresh connections
-	srv2.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv2.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
@@ -962,7 +1029,7 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 			},
 		}
 	})
-	srv2.Handle(OffsetRequest, func(request Serializable) Serializable {
+	srv2.Handle(proto.OffsetReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.OffsetReq)
 		if req.ReplicaID != -1 {
 			handlerErr = fmt.Errorf("expected -1 replica id, got %d", req.ReplicaID)
@@ -1032,7 +1099,7 @@ func TestLeaderConnectionFailover(t *testing.T) {
 	host1, port1 := srv1.HostPort()
 	host2, port2 := srv2.HostPort()
 
-	srv1.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv1.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
@@ -1059,7 +1126,7 @@ func TestLeaderConnectionFailover(t *testing.T) {
 		}
 	})
 
-	srv2.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv2.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
@@ -1149,10 +1216,10 @@ func TestProducerFailoverRequestTimeout(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
 	requestsCount := 0
-	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		requestsCount++
 		return &proto.ProduceResp{
@@ -1195,10 +1262,10 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
 	requestsCount := 0
-	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		requestsCount++
 
@@ -1260,10 +1327,10 @@ func TestProducerNoCreateTopic(t *testing.T) {
 	defer srv.Close()
 
 	md := NewMetadataHandler(srv, false)
-	srv.Handle(MetadataRequest, md.Handler())
+	srv.Handle(proto.MetadataReqKind, md.Handler())
 
 	produces := 0
-	srv.Handle(ProduceRequest,
+	srv.Handle(proto.ProduceReqKind,
 		func(request Serializable) Serializable {
 			produces++
 
@@ -1320,10 +1387,10 @@ func TestProducerTryCreateTopic(t *testing.T) {
 	defer srv.Close()
 
 	md := NewMetadataHandler(srv, true)
-	srv.Handle(MetadataRequest, md.Handler())
+	srv.Handle(proto.MetadataReqKind, md.Handler())
 
 	produces := 0
-	srv.Handle(ProduceRequest,
+	srv.Handle(proto.ProduceReqKind,
 		func(request Serializable) Serializable {
 			produces++
 
@@ -1433,11 +1500,11 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 		}
 	}
 
-	srv1.Handle(MetadataRequest, metadataHandler("srv1"))
-	srv2.Handle(MetadataRequest, metadataHandler("srv2"))
+	srv1.Handle(proto.MetadataReqKind, metadataHandler("srv1"))
+	srv2.Handle(proto.MetadataReqKind, metadataHandler("srv2"))
 
 	var fetch1Calls int
-	srv1.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv1.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		fetch1Calls++
 		req := request.(*proto.FetchReq)
 
@@ -1481,7 +1548,7 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 	})
 
 	var fetch2Calls int
-	srv2.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv2.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		fetch2Calls++
 		req := request.(*proto.FetchReq)
 		return &proto.FetchResp{
@@ -1551,10 +1618,10 @@ func TestConsumerFailover(t *testing.T) {
 		{Value: []byte("second")},
 	}
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
 	respCount := 0
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		respCount++
 		req := request.(*proto.FetchReq)
 
@@ -1642,7 +1709,7 @@ func TestProducerBrokenPipe(t *testing.T) {
 	host1, port1 := srv1.HostPort()
 	host2, port2 := srv2.HostPort()
 
-	srv1.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv1.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
@@ -1671,7 +1738,7 @@ func TestProducerBrokenPipe(t *testing.T) {
 			},
 		}
 	})
-	srv1.Handle(ProduceRequest, func(request Serializable) Serializable {
+	srv1.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		return &proto.ProduceResp{
 			CorrelationID: req.CorrelationID,
@@ -1690,7 +1757,7 @@ func TestProducerBrokenPipe(t *testing.T) {
 	})
 	// after closing first server, which started as leader, broker should ask
 	// other nodes about the leader and refresh connections
-	srv2.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv2.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
@@ -1719,7 +1786,7 @@ func TestProducerBrokenPipe(t *testing.T) {
 			},
 		}
 	})
-	srv2.Handle(ProduceRequest, func(request Serializable) Serializable {
+	srv2.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		return &proto.ProduceResp{
 			CorrelationID: req.CorrelationID,
@@ -1771,8 +1838,8 @@ func TestFetchOffset(t *testing.T) {
 	srv := NewServer()
 	srv.Start()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		off := req.Topics[0].Partitions[0].FetchOffset
 		if off != offset {
@@ -1826,7 +1893,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 
 	longBytes := []byte(strings.Repeat(`xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`, 1000))
 
-	srv1.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv1.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
@@ -1855,7 +1922,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 			},
 		}
 	})
-	srv1.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv1.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
@@ -1877,7 +1944,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 
 	// after closing first server, which started as leader, broker should ask
 	// other nodes about the leader and refresh connections
-	srv2.Handle(MetadataRequest, func(request Serializable) Serializable {
+	srv2.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
 			CorrelationID: req.CorrelationID,
@@ -1906,7 +1973,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 			},
 		}
 	})
-	srv2.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv2.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		return &proto.FetchResp{
 			CorrelationID: req.CorrelationID,
@@ -1958,8 +2025,8 @@ func TestOffsetCoordinator(t *testing.T) {
 
 	setOffset := int64(-1)
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
-	srv.Handle(ConsumerMetadataRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.ConsumerMetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ConsumerMetadataReq)
 		host, port := srv.HostPort()
 		return &proto.ConsumerMetadataResp{
@@ -1970,7 +2037,7 @@ func TestOffsetCoordinator(t *testing.T) {
 			CoordinatorPort: int32(port),
 		}
 	})
-	srv.Handle(OffsetCommitRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.OffsetCommitReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.OffsetCommitReq)
 		setOffset = req.Topics[0].Partitions[0].Offset
 		return &proto.OffsetCommitResp{
@@ -1988,7 +2055,7 @@ func TestOffsetCoordinator(t *testing.T) {
 			},
 		}
 	})
-	srv.Handle(OffsetFetchRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.OffsetFetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.OffsetFetchReq)
 		var partition proto.OffsetFetchRespPartition
 		if setOffset == -1 {
@@ -2048,8 +2115,8 @@ func TestOffsetCoordinatorNoCoordinatorError(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
-	srv.Handle(ConsumerMetadataRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.ConsumerMetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ConsumerMetadataReq)
 		return &proto.ConsumerMetadataResp{
 			CorrelationID:   req.CorrelationID,
@@ -2085,10 +2152,10 @@ func benchmarkConsumer(b *testing.B, messagesPerResp int) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
 	var msgOffset int64
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		messages := make([]*proto.Message, messagesPerResp)
 
@@ -2150,10 +2217,10 @@ func benchmarkConsumerConcurrent(b *testing.B, concurrentConsumers int) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
 	var msgOffset int64
-	srv.Handle(FetchRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		messages := make([]*proto.Message, concurrentConsumers*2000)
 
@@ -2227,10 +2294,10 @@ func benchmarkProducer(b *testing.B, messagesPerReq int64) {
 	srv.Start()
 	defer srv.Close()
 
-	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
 
 	var msgOffset int64
-	srv.Handle(ProduceRequest, func(request Serializable) Serializable {
+	srv.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		msgOffset += messagesPerReq
 		return &proto.ProduceResp{
