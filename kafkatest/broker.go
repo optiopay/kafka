@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/optiopay/kafka"
@@ -183,7 +184,8 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Mes
 	if p.ResponseError != nil {
 		return 0, p.ResponseError
 	}
-	off := p.ResponseOffset
+	off := atomic.AddInt64(&p.ResponseOffset, int64(len(messages)))
+	off -= int64(len(messages))
 
 	for i, msg := range messages {
 		msg.Offset = off + int64(i)
@@ -195,7 +197,6 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Mes
 		Partition: partition,
 		Messages:  messages,
 	}
-	p.ResponseOffset += int64(len(messages))
 	return off, nil
 }
 
