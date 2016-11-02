@@ -159,7 +159,7 @@ func (c *Consumer) Consume() (*proto.Message, error) {
 type Producer struct {
 	Broker *Broker
 
-	// ResponseOffset is offset counter returned and incremented by every
+	// responseOffset is offset counter returned and incremented by every
 	// Produce method call. By default set to 1.
 	responseOffset int64
 	offsetMutex    sync.Mutex
@@ -208,7 +208,7 @@ func (p *Producer) Produce(topic string, partition int32, messages ...*proto.Mes
 		Partition: partition,
 		Messages:  messages,
 	}
-	p.responseOffset = int64(len(messages))
+	p.responseOffset += int64(len(messages))
 	return off, nil
 }
 
