@@ -83,8 +83,11 @@ func produceStdin(broker kafka.Client) {
 }
 
 func main() {
+    conf := kafka.NewBrokerConf("test-client")
+    conf.AllowTopicCreation = true
+
     // connect to kafka cluster
-    broker, err := kafka.Dial(kafkaAddrs, kafka.NewBrokerConf("test-client"))
+    broker, err := kafka.Dial(kafkaAddrs, conf)
     if err != nil {
         log.Fatalf("cannot connect to kafka cluster: %s", err)
     }
