@@ -1815,6 +1815,44 @@ func TestFetchOffset(t *testing.T) {
 	}
 }
 
+func TestLatestOffset(t *testing.T) {
+	const offset = 94
+
+	srv := NewServer()
+	srv.Start()
+
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(OffsetRequest, func(request Serializable) Serializable {
+		req := request.(*proto.OffsetReq)
+		return &proto.OffsetResp{
+			CorrelationID: req.CorrelationID,
+			Topics: []proto.OffsetRespTopic{
+				{
+					Name: "test",
+					Partitions: []proto.OffsetRespPartition{
+						{
+							ID:      0,
+							Offsets: []int64{offset},
+						},
+					},
+				},
+			},
+		}
+	})
+
+	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("test-fetch-offset"))
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+	x, err := broker.OffsetLatest("test", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x != offset {
+		t.Fatalf("Expected LatestOffset equal %d got %d", offset, x)
+	}
+}
+
 func TestConsumerBrokenPipe(t *testing.T) {
 	srv1 := NewServer()
 	srv1.Start()
