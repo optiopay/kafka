@@ -630,7 +630,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 	for retry := 0; retry < b.conf.RetryErrLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(b.conf.RetryErrWait)
-			err = b.refreshMetadata()
+			err = b.muRefreshMetadata()
 			if err != nil {
 				continue
 			}
