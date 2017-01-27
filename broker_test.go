@@ -1828,7 +1828,7 @@ func TestLatestOffset(t *testing.T) {
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.OffsetRespTopic{
 				{
-					Name: "test",
+					Name: "test1",
 					Partitions: []proto.OffsetRespPartition{
 						{
 							ID:      0,
@@ -1840,17 +1840,32 @@ func TestLatestOffset(t *testing.T) {
 		}
 	})
 
-	broker, err := Dial([]string{srv.Address()}, newTestBrokerConf("test-fetch-offset"))
+	conf := newTestBrokerConf("test-latest-offset")
+	conf.RetryErrWait = time.Millisecond
+	broker, err := Dial([]string{srv.Address()}, conf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
 	}
-	x, err := broker.OffsetLatest("test", 0)
-	if err != nil {
-		t.Fatal(err)
+
+	var wg sync.WaitGroup
+	ch := make(chan struct{})
+
+	getLatest := func() {
+		_ = <-ch
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			broker.OffsetLatest("test", 0)
+		}
 	}
-	if x != offset {
-		t.Fatalf("Expected LatestOffset equal %d got %d", offset, x)
-	}
+
+	wg.Add(1)
+	go getLatest()
+
+	wg.Add(1)
+	go getLatest()
+
+	close(ch)
+	wg.Wait()
 }
 
 func TestConsumerBrokenPipe(t *testing.T) {
