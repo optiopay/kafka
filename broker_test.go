@@ -1759,6 +1759,7 @@ To get the error EPIPE, you need to send large amount of data after closing the 
 	}
 
 	srv1.Close()
+	time.Sleep(100 * time.Millisecond)
 
 	if _, err = producer.Produce("test", 0, &proto.Message{Value: data}); err != nil {
 		t.Fatalf("cannot produce: %s", err)
@@ -1997,6 +1998,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 	}
 
 	srv1.Close()
+	time.Sleep(100 * time.Millisecond)
 
 	// this should succeed after reconnecting to second node
 	if _, err = consumer.Consume(); err != nil {
