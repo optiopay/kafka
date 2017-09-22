@@ -1719,18 +1719,18 @@ type DeleteTopicsResp struct {
 }
 
 type TopicErrorCode struct {
-	Topic     string
-	ErrorCode int16
+	Topic string
+	Err   error
 }
 
 func (toc *TopicErrorCode) read(dec *decoder) {
 	toc.Topic = dec.DecodeString()
-	toc.ErrorCode = dec.DecodeInt16()
+	toc.Err = errFromNo(dec.DecodeInt16())
 }
 
 func (toc TopicErrorCode) write(enc *encoder) {
 	enc.EncodeString(toc.Topic)
-	enc.EncodeInt16(toc.ErrorCode)
+	enc.EncodeError(toc.Err)
 }
 
 func ReadDeleteTopicsResp(r io.Reader) (*DeleteTopicsResp, error) {
