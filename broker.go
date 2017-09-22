@@ -308,7 +308,7 @@ func (b *Broker) fetchMetadata(metadataVersion int16, topics ...string) (*proto.
 			Topics:   topics,
 		})
 		if err != nil {
-			b.conf.Logger.Debug("cannot fetch metadata from node",
+			b.conf.Logger.Debug("cannot fetch metadata from connected node",
 				"nodeID", nodeID,
 				"error", err)
 			continue
@@ -338,7 +338,7 @@ func (b *Broker) fetchMetadata(metadataVersion int16, topics ...string) (*proto.
 		_ = conn.Close()
 
 		if err != nil {
-			b.conf.Logger.Debug("cannot fetch metadata from node",
+			b.conf.Logger.Debug("cannot fetch metadata from newly connected node",
 				"nodeID", nodeID,
 				"error", err)
 			continue

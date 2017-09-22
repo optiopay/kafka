@@ -362,20 +362,14 @@ func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
 			req.Topics[i] = dec.DecodeString()
 		}
 	case 1, 2, 3:
-		isNull, l := dec.DecodeNullableArrayLen()
-		if !isNull {
-			req.Topics = make([]string, l)
-			for i := range req.Topics {
-				req.Topics[i] = dec.DecodeString()
-			}
+		req.Topics = make([]string, dec.DecodeArrayLen())
+		for i := range req.Topics {
+			req.Topics[i] = dec.DecodeString()
 		}
 	case 4, 5:
-		isNull, l := dec.DecodeNullableArrayLen()
-		if !isNull {
-			req.Topics = make([]string, l)
-			for i := range req.Topics {
-				req.Topics[i] = dec.DecodeString()
-			}
+		req.Topics = make([]string, dec.DecodeArrayLen())
+		for i := range req.Topics {
+			req.Topics[i] = dec.DecodeString()
 		}
 		req.AllowAutoTopicCreation = dec.DecodeBool()
 	default:
@@ -406,12 +400,12 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 			enc.Encode(name)
 		}
 	case 1, 2, 3:
-		enc.EncodeNullableArrayLen(r.Topics == nil, len(r.Topics))
+		enc.EncodeArrayLen(len(r.Topics))
 		for _, name := range r.Topics {
 			enc.Encode(name)
 		}
 	case 4, 5:
-		enc.EncodeNullableArrayLen(r.Topics == nil, len(r.Topics))
+		enc.EncodeArrayLen(len(r.Topics))
 		for _, name := range r.Topics {
 			enc.Encode(name)
 		}

@@ -150,15 +150,11 @@ func (d *decoder) DecodeString() string {
 }
 
 func (d *decoder) DecodeArrayLen() int {
-	return int(d.DecodeInt32())
-}
-
-func (d *decoder) DecodeNullableArrayLen() (bool, int) {
-	x := int(d.DecodeInt32())
-	if x < 0 {
-		return true, 0
+	if x := int(d.DecodeInt32()); x < 0 {
+		return 0
+	} else {
+		return x
 	}
-	return false, x
 }
 
 func (d *decoder) DecodeBytes() []byte {
@@ -380,14 +376,6 @@ func (e *encoder) EncodeError(err error) {
 
 func (e *encoder) EncodeArrayLen(length int) {
 	e.EncodeInt32(int32(length))
-}
-
-func (e *encoder) EncodeNullableArrayLen(isNull bool, length int) {
-	if isNull {
-		e.EncodeInt32(-1)
-	} else {
-		e.EncodeInt32(int32(length))
-	}
 }
 
 func (e *encoder) Err() error {
