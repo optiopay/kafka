@@ -29,6 +29,7 @@ const (
 	OffsetCommitReqKind     = 8
 	OffsetFetchReqKind      = 9
 	ConsumerMetadataReqKind = 10
+	DeleteTopicsReqKind     = 20
 
 	// receive the latest offset (i.e. the offset of the next coming message)
 	OffsetReqTimeLatest = -1
@@ -1452,6 +1453,133 @@ func (r *OffsetResp) Bytes() ([]byte, error) {
 				enc.Encode(off)
 			}
 		}
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+type DeleteTopicsReq struct {
+	CorrelationID int32
+	ClientID      string
+	Topics        []string
+	Timeout       int32
+}
+
+func ReadDeleteTopicsReq(r io.Reader) (*DeleteTopicsReq, error) {
+	var req DeleteTopicsReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	req.Topics = make([]string, dec.DecodeArrayLen())
+	for ti := range req.Topics {
+		req.Topics[ti] = dec.DecodeString()
+	}
+	req.Timeout = dec.DecodeInt32()
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
+func (r *DeleteTopicsReq) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(int16(OffsetReqKind))
+	enc.Encode(int16(0))
+	enc.Encode(r.CorrelationID)
+	enc.Encode(r.ClientID)
+
+	enc.EncodeArrayLen(len(r.Topics))
+	for _, topic := range r.Topics {
+		enc.EncodeString(topic)
+	}
+	enc.EncodeInt32(r.Timeout)
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+func (r *DeleteTopicsReq) WriteTo(w io.Writer) (int64, error) {
+	b, err := r.Bytes()
+	if err != nil {
+		return 0, err
+	}
+	n, err := w.Write(b)
+	return int64(n), err
+}
+
+type DeleteTopicsResp struct {
+	CorrelationID   int32
+	TopicErrorCodes []TopicErrorCode
+}
+
+type TopicErrorCode struct {
+	Topic     string
+	ErrorCode int16
+}
+
+func (toc *TopicErrorCode) read(dec *decoder) {
+	toc.Topic = dec.DecodeString()
+	toc.ErrorCode = dec.DecodeInt16()
+}
+
+func (toc TopicErrorCode) write(enc *encoder) {
+	enc.EncodeString(toc.Topic)
+	enc.EncodeInt16(toc.ErrorCode)
+}
+
+func ReadDeleteTopicsResp(r io.Reader) (*DeleteTopicsResp, error) {
+	var resp DeleteTopicsResp
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	resp.CorrelationID = dec.DecodeInt32()
+	resp.TopicErrorCodes = make([]TopicErrorCode, dec.DecodeArrayLen())
+	for ti := range resp.TopicErrorCodes {
+		resp.TopicErrorCodes[ti].read(dec)
+	}
+
+	if err := dec.Err(); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (r *DeleteTopicsResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeArrayLen(len(r.TopicErrorCodes))
+	for _, toc := range r.TopicErrorCodes {
+		toc.write(enc)
 	}
 
 	if enc.Err() != nil {

@@ -378,3 +378,25 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 	}
 	return proto.ReadOffsetFetchResp(bytes.NewReader(b))
 }
+
+func (c *connection) DeleteTopics(req *proto.DeleteTopicsReq) (*proto.DeleteTopicsResp, error) {
+	var ok bool
+	if req.CorrelationID, ok = <-c.nextID; !ok {
+		return nil, c.stopErr
+	}
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		c.logger.Error("msg", "failed waiting for response", "error", err)
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+	if _, err := req.WriteTo(c.rw); err != nil {
+		c.logger.Error("msg", "cannot write", "error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
+	b, ok := <-respc
+	if !ok {
+		return nil, c.stopErr
+	}
+	return proto.ReadDeleteTopicsResp(bytes.NewReader(b))
+}
