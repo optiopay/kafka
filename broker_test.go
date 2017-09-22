@@ -60,11 +60,15 @@ func (m *MetadataTester) Handler() RequestHandler {
 		}
 
 		resp := &proto.MetadataResp{
+			Version:       req.Version,
 			CorrelationID: req.CorrelationID,
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: m.host, Port: int32(m.port)},
 			},
 			Topics: []proto.MetadataRespTopic{},
+		}
+		if req.Version >= proto.MetadataV1 {
+			resp.ControllerID = 1
 		}
 
 		wantsTopic := make(map[string]bool)
@@ -2122,6 +2126,39 @@ func TestOffsetCoordinatorNoCoordinatorError(t *testing.T) {
 	coordConf := NewOffsetCoordinatorConf("test-group")
 	if _, err := broker.OffsetCoordinator(coordConf); err != proto.ErrNoCoordinator {
 		t.Fatalf("expected %q error, got %v", proto.ErrNoCoordinator, err)
+	}
+}
+
+func TestDeleteTopics(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(MetadataRequest, NewMetadataHandler(srv, false).Handler())
+	srv.Handle(DeleteTopicsRequest, func(request Serializable) Serializable {
+		req := request.(*proto.DeleteTopicsReq)
+		return &proto.DeleteTopicsResp{
+			CorrelationID:   req.CorrelationID,
+			TopicErrorCodes: nil,
+		}
+	})
+
+	conf := newTestBrokerConf("tester")
+	//conf.Logger = testLogger{t}
+	broker, err := Dial([]string{srv.Address()}, conf)
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	adminConf := NewAdminConf()
+	//adminConf.Logger = testLogger{t}
+	admin, err := broker.Admin(adminConf)
+	if err != nil {
+		t.Fatalf("cannot create admin client: %s", err)
+	}
+
+	if _, err := admin.DeleteTopics([]string{"foo"}, 123); err != nil {
+		t.Fatalf("cannot delete topics: %s", err)
 	}
 }
 

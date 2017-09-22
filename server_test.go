@@ -20,6 +20,7 @@ const (
 	OffsetCommitRequest     = 8
 	OffsetFetchRequest      = 9
 	ConsumerMetadataRequest = 10
+	DeleteTopicsRequest     = 20
 )
 
 type Serializable interface {
@@ -153,6 +154,8 @@ func (srv *Server) handleClient(c net.Conn) {
 			request, err = proto.ReadOffsetCommitReq(bytes.NewBuffer(b))
 		case OffsetFetchRequest:
 			request, err = proto.ReadOffsetFetchReq(bytes.NewBuffer(b))
+		case DeleteTopicsRequest:
+			request, err = proto.ReadDeleteTopicsReq(bytes.NewBuffer(b))
 		}
 
 		if err != nil {
@@ -259,6 +262,8 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 	case *proto.OffsetCommitReq:
 		panic("not implemented")
 	case *proto.OffsetFetchReq:
+		panic("not implemented")
+	case *proto.DeleteTopicsReq:
 		panic("not implemented")
 	default:
 		panic(fmt.Sprintf("unknown message type: %T", req))

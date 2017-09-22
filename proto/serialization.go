@@ -22,6 +22,10 @@ func NewDecoder(r io.Reader) *decoder {
 	}
 }
 
+func (d *decoder) DecodeBool() bool {
+	return d.DecodeInt8() != 0
+}
+
 func (d *decoder) DecodeInt8() int8 {
 	if d.err != nil {
 		return 0
@@ -71,6 +75,14 @@ func (d *decoder) DecodeInt32() int32 {
 		return 0
 	}
 	return int32(binary.BigEndian.Uint32(b))
+}
+
+func (d *decoder) DecodeInt32Array() []int32 {
+	result := make([]int32, d.DecodeArrayLen())
+	for i := range result {
+		result[i] = d.DecodeInt32()
+	}
+	return result
 }
 
 func (d *decoder) DecodeUint32() uint32 {
@@ -138,7 +150,11 @@ func (d *decoder) DecodeString() string {
 }
 
 func (d *decoder) DecodeArrayLen() int {
-	return int(d.DecodeInt32())
+	if x := int(d.DecodeInt32()); x < 0 {
+		return 0
+	} else {
+		return x
+	}
 }
 
 func (d *decoder) DecodeBytes() []byte {
@@ -187,6 +203,12 @@ func (e *encoder) Encode(value interface{}) {
 	var b []byte
 
 	switch val := value.(type) {
+	case bool:
+		if val {
+			e.EncodeInt8(1)
+		} else {
+			e.EncodeInt8(0)
+		}
 	case int8:
 		_, e.err = e.w.Write([]byte{byte(val)})
 	case int16:
@@ -241,6 +263,14 @@ func (e *encoder) Encode(value interface{}) {
 	if b != nil {
 		e.err = writeAll(e.w, b)
 		return
+	}
+}
+
+func (e *encoder) EncodeBool(val bool) {
+	if val {
+		e.EncodeInt8(1)
+	} else {
+		e.EncodeInt8(0)
 	}
 }
 
