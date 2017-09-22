@@ -330,10 +330,18 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 	}
 }
 
+const (
+	MetadataV0 = int16(0)
+	MetadataV1 = int16(1)
+	MetadataV2 = int16(2)
+)
+
 type MetadataReq struct {
-	CorrelationID int32
-	ClientID      string
-	Topics        []string
+	Version                int16
+	CorrelationID          int32
+	ClientID               string
+	Topics                 []string
+	AllowAutoTopicCreation bool
 }
 
 func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
@@ -343,12 +351,35 @@ func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
 	// total message size
 	_ = dec.DecodeInt32()
 	// api key + api version
-	_ = dec.DecodeInt32()
+	_ = dec.DecodeInt16()
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
-	req.Topics = make([]string, dec.DecodeArrayLen())
-	for i := range req.Topics {
-		req.Topics[i] = dec.DecodeString()
+	switch req.Version {
+	case 0:
+		req.Topics = make([]string, dec.DecodeArrayLen())
+		for i := range req.Topics {
+			req.Topics[i] = dec.DecodeString()
+		}
+	case 1, 2, 3:
+		isNull, l := dec.DecodeNullableArrayLen()
+		if !isNull {
+			req.Topics = make([]string, l)
+			for i := range req.Topics {
+				req.Topics[i] = dec.DecodeString()
+			}
+		}
+	case 4, 5:
+		isNull, l := dec.DecodeNullableArrayLen()
+		if !isNull {
+			req.Topics = make([]string, l)
+			for i := range req.Topics {
+				req.Topics[i] = dec.DecodeString()
+			}
+		}
+		req.AllowAutoTopicCreation = dec.DecodeBool()
+	default:
+		return nil, fmt.Errorf("unsupported MetadataReq version %d", req.Version)
 	}
 
 	if dec.Err() != nil {
@@ -364,13 +395,29 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(int16(MetadataReqKind))
-	enc.Encode(int16(0))
+	enc.EncodeInt16(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
-	enc.EncodeArrayLen(len(r.Topics))
-	for _, name := range r.Topics {
-		enc.Encode(name)
+	switch r.Version {
+	case 0:
+		enc.EncodeArrayLen(len(r.Topics))
+		for _, name := range r.Topics {
+			enc.Encode(name)
+		}
+	case 1, 2, 3:
+		enc.EncodeNullableArrayLen(r.Topics == nil, len(r.Topics))
+		for _, name := range r.Topics {
+			enc.Encode(name)
+		}
+	case 4, 5:
+		enc.EncodeNullableArrayLen(r.Topics == nil, len(r.Topics))
+		for _, name := range r.Topics {
+			enc.Encode(name)
+		}
+		enc.EncodeBool(r.AllowAutoTopicCreation)
+	default:
+		return nil, fmt.Errorf("unsupported MetadataReq version %d", r.Version)
 	}
 
 	if enc.Err() != nil {
@@ -394,29 +441,149 @@ func (r *MetadataReq) WriteTo(w io.Writer) (int64, error) {
 }
 
 type MetadataResp struct {
+	Version       int16
 	CorrelationID int32
 	Brokers       []MetadataRespBroker
+	ClusterID     string
+	ControllerID  int32
 	Topics        []MetadataRespTopic
 }
+
+func (r MetadataResp) HasClusterID() bool    { return r.Version >= 2 }
+func (r MetadataResp) HasControllerID() bool { return r.Version >= 1 }
 
 type MetadataRespBroker struct {
 	NodeID int32
 	Host   string
 	Port   int32
+	Rack   string
+}
+
+func (mrb *MetadataRespBroker) read(dec *decoder, version int16) {
+	mrb.NodeID = dec.DecodeInt32()
+	mrb.Host = dec.DecodeString()
+	mrb.Port = dec.DecodeInt32()
+	switch version {
+	case 0:
+		// Do nothing more
+	case 1:
+		mrb.Rack = dec.DecodeString()
+	default:
+		dec.err = fmt.Errorf("unknown MetadataRespBroker version %d", version)
+	}
+}
+
+func (mrb MetadataRespBroker) write(enc *encoder, version int16) {
+	enc.EncodeInt32(mrb.NodeID)
+	enc.EncodeString(mrb.Host)
+	enc.EncodeInt32(mrb.Port)
+	switch version {
+	case 0:
+		// Do nothing more
+	case 1:
+		enc.EncodeString(mrb.Rack)
+	default:
+		enc.err = fmt.Errorf("unknown MetadataRespBroker version %d", version)
+	}
 }
 
 type MetadataRespTopic struct {
 	Name       string
 	Err        error
+	IsInternal bool
 	Partitions []MetadataRespPartition
 }
 
+func (mrt *MetadataRespTopic) read(dec *decoder, version int16) {
+	switch version {
+	case 0:
+		mrt.Err = errFromNo(dec.DecodeInt16())
+		mrt.Name = dec.DecodeString()
+		mrt.Partitions = make([]MetadataRespPartition, dec.DecodeArrayLen())
+		for pi := range mrt.Partitions {
+			mrt.Partitions[pi].read(dec, 0)
+		}
+	case 1, 2:
+		mrt.Err = errFromNo(dec.DecodeInt16())
+		mrt.Name = dec.DecodeString()
+		mrt.Partitions = make([]MetadataRespPartition, dec.DecodeArrayLen())
+		for pi := range mrt.Partitions {
+			mrt.Partitions[pi].read(dec, version)
+		}
+	default:
+		dec.err = fmt.Errorf("unknown MetadataRespTopic version %d", version)
+	}
+}
+
+func (mrt MetadataRespTopic) write(enc *encoder, version int16) {
+	switch version {
+	case 0:
+		enc.EncodeError(mrt.Err)
+		enc.Encode(mrt.Name)
+		enc.EncodeArrayLen(len(mrt.Partitions))
+		for _, part := range mrt.Partitions {
+			part.write(enc, 0)
+		}
+	case 1, 2:
+		enc.EncodeError(mrt.Err)
+		enc.Encode(mrt.Name)
+		enc.EncodeBool(mrt.IsInternal)
+		enc.EncodeArrayLen(len(mrt.Partitions))
+		for _, part := range mrt.Partitions {
+			part.write(enc, version)
+		}
+	default:
+		enc.err = fmt.Errorf("unknown MetadataRespTopic version %d", version)
+	}
+}
+
 type MetadataRespPartition struct {
-	ID       int32
-	Err      error
-	Leader   int32
-	Replicas []int32
-	Isrs     []int32
+	ID              int32
+	Err             error
+	Leader          int32
+	Replicas        []int32
+	Isrs            []int32
+	OfflineReplicas []int32
+}
+
+func (mrp *MetadataRespPartition) read(dec *decoder, version int16) {
+	switch version {
+	case 0, 1:
+		mrp.Err = errFromNo(dec.DecodeInt16())
+		mrp.ID = dec.DecodeInt32()
+		mrp.Leader = dec.DecodeInt32()
+		mrp.Replicas = dec.DecodeInt32Array()
+		mrp.Isrs = dec.DecodeInt32Array()
+	case 2:
+		mrp.Err = errFromNo(dec.DecodeInt16())
+		mrp.ID = dec.DecodeInt32()
+		mrp.Leader = dec.DecodeInt32()
+		mrp.Replicas = dec.DecodeInt32Array()
+		mrp.Isrs = dec.DecodeInt32Array()
+		mrp.OfflineReplicas = dec.DecodeInt32Array()
+	default:
+		dec.err = fmt.Errorf("unknown MetadataRespPartition version %d", version)
+	}
+}
+
+func (mrp MetadataRespPartition) write(enc *encoder, version int16) {
+	switch version {
+	case 0, 1:
+		enc.EncodeError(mrp.Err)
+		enc.Encode(mrp.ID)
+		enc.Encode(mrp.Leader)
+		enc.Encode(mrp.Replicas)
+		enc.Encode(mrp.Isrs)
+	case 2:
+		enc.EncodeError(mrp.Err)
+		enc.Encode(mrp.ID)
+		enc.Encode(mrp.Leader)
+		enc.Encode(mrp.Replicas)
+		enc.Encode(mrp.Isrs)
+		enc.Encode(mrp.OfflineReplicas)
+	default:
+		enc.err = fmt.Errorf("unknown MetadataRespPartition version %d", version)
+	}
 }
 
 func (r *MetadataResp) Bytes() ([]byte, error) {
@@ -426,24 +593,39 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(r.CorrelationID)
-	enc.EncodeArrayLen(len(r.Brokers))
-	for _, broker := range r.Brokers {
-		enc.Encode(broker.NodeID)
-		enc.Encode(broker.Host)
-		enc.Encode(broker.Port)
-	}
-	enc.EncodeArrayLen(len(r.Topics))
-	for _, topic := range r.Topics {
-		enc.EncodeError(topic.Err)
-		enc.Encode(topic.Name)
-		enc.EncodeArrayLen(len(topic.Partitions))
-		for _, part := range topic.Partitions {
-			enc.EncodeError(part.Err)
-			enc.Encode(part.ID)
-			enc.Encode(part.Leader)
-			enc.Encode(part.Replicas)
-			enc.Encode(part.Isrs)
+	switch r.Version {
+	case 0:
+		enc.EncodeArrayLen(len(r.Brokers))
+		for _, broker := range r.Brokers {
+			broker.write(enc, 0)
 		}
+		enc.EncodeArrayLen(len(r.Topics))
+		for _, topic := range r.Topics {
+			topic.write(enc, 0)
+		}
+	case 1:
+		enc.EncodeArrayLen(len(r.Brokers))
+		for _, broker := range r.Brokers {
+			broker.write(enc, 1)
+		}
+		enc.EncodeInt32(r.ControllerID)
+		enc.EncodeArrayLen(len(r.Topics))
+		for _, topic := range r.Topics {
+			topic.write(enc, 1)
+		}
+	case 2:
+		enc.EncodeArrayLen(len(r.Brokers))
+		for _, broker := range r.Brokers {
+			broker.write(enc, 1)
+		}
+		enc.EncodeString(r.ClusterID)
+		enc.EncodeInt32(r.ControllerID)
+		enc.EncodeArrayLen(len(r.Topics))
+		for _, topic := range r.Topics {
+			topic.write(enc, 1)
+		}
+	default:
+		return nil, fmt.Errorf("unknown MetadataResp version %d", r.Version)
 	}
 
 	if enc.Err() != nil {
@@ -457,44 +639,49 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
-	var resp MetadataResp
+func ReadMetadataResp(r io.Reader, version int16) (*MetadataResp, error) {
+	resp := MetadataResp{
+		Version: version,
+	}
 	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
 	resp.CorrelationID = dec.DecodeInt32()
 
-	resp.Brokers = make([]MetadataRespBroker, dec.DecodeArrayLen())
-	for i := range resp.Brokers {
-		var b = &resp.Brokers[i]
-		b.NodeID = dec.DecodeInt32()
-		b.Host = dec.DecodeString()
-		b.Port = dec.DecodeInt32()
-	}
-
-	resp.Topics = make([]MetadataRespTopic, dec.DecodeArrayLen())
-	for ti := range resp.Topics {
-		var t = &resp.Topics[ti]
-		t.Err = errFromNo(dec.DecodeInt16())
-		t.Name = dec.DecodeString()
-		t.Partitions = make([]MetadataRespPartition, dec.DecodeArrayLen())
-		for pi := range t.Partitions {
-			var p = &t.Partitions[pi]
-			p.Err = errFromNo(dec.DecodeInt16())
-			p.ID = dec.DecodeInt32()
-			p.Leader = dec.DecodeInt32()
-
-			p.Replicas = make([]int32, dec.DecodeArrayLen())
-			for ri := range p.Replicas {
-				p.Replicas[ri] = dec.DecodeInt32()
-			}
-
-			p.Isrs = make([]int32, dec.DecodeArrayLen())
-			for ii := range p.Isrs {
-				p.Isrs[ii] = dec.DecodeInt32()
-			}
+	switch resp.Version {
+	case 0:
+		resp.Brokers = make([]MetadataRespBroker, dec.DecodeArrayLen())
+		for i := range resp.Brokers {
+			resp.Brokers[i].read(dec, 0)
 		}
+		resp.Topics = make([]MetadataRespTopic, dec.DecodeArrayLen())
+		for ti := range resp.Topics {
+			resp.Topics[ti].read(dec, 0)
+		}
+	case 1:
+		resp.Brokers = make([]MetadataRespBroker, dec.DecodeArrayLen())
+		for i := range resp.Brokers {
+			resp.Brokers[i].read(dec, 1)
+		}
+		resp.ControllerID = dec.DecodeInt32()
+		resp.Topics = make([]MetadataRespTopic, dec.DecodeArrayLen())
+		for ti := range resp.Topics {
+			resp.Topics[ti].read(dec, 1)
+		}
+	case 2:
+		resp.Brokers = make([]MetadataRespBroker, dec.DecodeArrayLen())
+		for i := range resp.Brokers {
+			resp.Brokers[i].read(dec, 1)
+		}
+		resp.ClusterID = dec.DecodeString()
+		resp.ControllerID = dec.DecodeInt32()
+		resp.Topics = make([]MetadataRespTopic, dec.DecodeArrayLen())
+		for ti := range resp.Topics {
+			resp.Topics[ti].read(dec, 1)
+		}
+	default:
+		return nil, fmt.Errorf("unknown MetadataResp version %d", resp.Version)
 	}
 
 	if dec.Err() != nil {
@@ -1501,7 +1688,7 @@ func (r *DeleteTopicsReq) Bytes() ([]byte, error) {
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(OffsetReqKind))
+	enc.Encode(int16(DeleteTopicsReqKind))
 	enc.Encode(int16(0))
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)

@@ -33,6 +33,7 @@ var (
 	_ Consumer          = &consumer{}
 	_ Producer          = &producer{}
 	_ OffsetCoordinator = &offsetCoordinator{}
+	_ Admin             = &admin{}
 )
 
 // Client is the interface implemented by Broker.
@@ -40,6 +41,7 @@ type Client interface {
 	Producer(conf ProducerConf) Producer
 	Consumer(conf ConsumerConf) (Consumer, error)
 	OffsetCoordinator(conf OffsetCoordinatorConf) (OffsetCoordinator, error)
+	Admin(conf AdminConf) (Admin, error)
 	OffsetEarliest(topic string, partition int32) (offset int64, err error)
 	OffsetLatest(topic string, partition int32) (offset int64, err error)
 	Close()
@@ -76,6 +78,11 @@ type OffsetCoordinator interface {
 	Offset(topic string, partition int32) (offset int64, metadata string, err error)
 }
 
+// Admin write the admin-client methods.
+type Admin interface {
+	DeleteTopics(topics []string, timeout int32) ([]proto.TopicErrorCode, error)
+}
+
 type topicPartition struct {
 	topic     string
 	partition int32
@@ -86,10 +93,12 @@ func (tp topicPartition) String() string {
 }
 
 type clusterMetadata struct {
-	created    time.Time
-	nodes      map[int32]string         // node ID to address
-	endpoints  map[topicPartition]int32 // partition to leader node ID
-	partitions map[string]int32         // topic to number of partitions
+	created      time.Time
+	nodes        map[int32]string         // node ID to address
+	endpoints    map[topicPartition]int32 // partition to leader node ID
+	partitions   map[string]int32         // topic to number of partitions
+	controllerID *int32                   // node ID of controller
+	clusterID    string                   // ID of the cluster
 }
 
 // BrokerConf represents the configuration of a broker.
@@ -221,7 +230,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 			time.Sleep(conf.DialRetryWait)
 		}
 
-		err := broker.refreshMetadata()
+		err := broker.refreshMetadata(proto.MetadataV0)
 
 		if err == nil {
 			return broker, nil
@@ -256,15 +265,15 @@ func (b *Broker) Close() {
 func (b *Broker) Metadata() (*proto.MetadataResp, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.fetchMetadata()
+	return b.fetchMetadata(proto.MetadataV0)
 }
 
 // refreshMetadata is requesting metadata information from any node and refresh
 // internal cached representation.
 // Because it's changing internal state, this method requires lock protection,
 // but it does not acquire nor release lock itself.
-func (b *Broker) refreshMetadata() error {
-	meta, err := b.fetchMetadata()
+func (b *Broker) refreshMetadata(metadataVersion int16) error {
+	meta, err := b.fetchMetadata(metadataVersion)
 	if err == nil {
 		b.cacheMetadata(meta)
 	}
@@ -272,9 +281,9 @@ func (b *Broker) refreshMetadata() error {
 }
 
 // muRefreshMetadata calls refreshMetadata, but protects it with broker's lock.
-func (b *Broker) muRefreshMetadata() error {
+func (b *Broker) muRefreshMetadata(metadataVersion int16) error {
 	b.mu.Lock()
-	err := b.refreshMetadata()
+	err := b.refreshMetadata(metadataVersion)
 	b.mu.Unlock()
 	return err
 }
@@ -287,13 +296,14 @@ func (b *Broker) muRefreshMetadata() error {
 //
 // Because it's using metadata information to find node connections it's not
 // thread safe and using it require locking.
-func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
+func (b *Broker) fetchMetadata(metadataVersion int16, topics ...string) (*proto.MetadataResp, error) {
 	checkednodes := make(map[int32]bool)
 
 	// try all existing connections first
 	for nodeID, conn := range b.conns {
 		checkednodes[nodeID] = true
 		resp, err := conn.Metadata(&proto.MetadataReq{
+			Version:  metadataVersion,
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
 		})
@@ -319,6 +329,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 			continue
 		}
 		resp, err := conn.Metadata(&proto.MetadataReq{
+			Version:  metadataVersion,
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
 		})
@@ -344,6 +355,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 			continue
 		}
 		resp, err := conn.Metadata(&proto.MetadataReq{
+			Version:  metadataVersion,
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
 		})
@@ -370,10 +382,19 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 			"age", time.Now().Sub(b.metadata.created))
 	}
 	b.metadata = clusterMetadata{
-		created:    time.Now(),
-		nodes:      make(map[int32]string),
-		endpoints:  make(map[topicPartition]int32),
-		partitions: make(map[string]int32),
+		created:      time.Now(),
+		nodes:        make(map[int32]string),
+		endpoints:    make(map[topicPartition]int32),
+		partitions:   make(map[string]int32),
+		controllerID: nil,
+		clusterID:    "",
+	}
+	if resp.HasControllerID() {
+		id := resp.ControllerID
+		b.metadata.controllerID = &id
+	}
+	if resp.HasClusterID() {
+		b.metadata.clusterID = resp.ClusterID
 	}
 	var debugmsg []interface{}
 	for _, node := range resp.Brokers {
@@ -436,7 +457,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 
 		nodeID, ok := b.metadata.endpoints[tp]
 		if !ok {
-			err = b.refreshMetadata()
+			err = b.refreshMetadata(proto.MetadataV0)
 			if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot refresh metadata",
 					"error", err)
@@ -449,7 +470,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 				// is a brand new topic, so try to get metadata on it (which will trigger
 				// the creation process)
 				if b.conf.AllowTopicCreation {
-					_, err := b.fetchMetadata(topic)
+					_, err := b.fetchMetadata(proto.MetadataV0, topic)
 					if err != nil {
 						b.conf.Logger.Info("failed to fetch metadata for new topic",
 							"topic", topic,
@@ -540,7 +561,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 		}
 
 		// if none of the connections worked out, try with fresh data
-		if err := b.refreshMetadata(); err != nil {
+		if err := b.refreshMetadata(proto.MetadataV0); err != nil {
 			b.conf.Logger.Debug("cannot refresh metadata",
 				"error", err)
 			resErr = err
@@ -600,6 +621,64 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 	return nil, resErr
 }
 
+// muControllerConnection returns connection to controller of the cluster.
+//
+// Failed connection retry is controlled by broker configuration.
+func (b *Broker) muControllerConnection() (*connection, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	lastErr := fmt.Errorf("cannot get controller connection")
+
+	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
+		if retry != 0 {
+			b.mu.Unlock()
+			b.conf.Logger.Debug("cannot get controller connection",
+				"retry", retry,
+				"sleep", b.conf.LeaderRetryWait.String())
+			time.Sleep(b.conf.LeaderRetryWait)
+			b.mu.Lock()
+		}
+
+		controllerID := b.metadata.controllerID
+		if controllerID == nil {
+			if err := b.refreshMetadata(proto.MetadataV1); err != nil {
+				b.conf.Logger.Info("cannot get controller connection: cannot refresh metadata",
+					"error", err)
+				lastErr = err
+				continue
+			}
+			controllerID = b.metadata.controllerID
+			if controllerID == nil {
+				b.conf.Logger.Info("cannot get controller connection: unknown controller ID")
+				continue
+			}
+		}
+		nodeID := *controllerID
+
+		conn, ok := b.conns[nodeID]
+		if !ok {
+			addr, ok := b.metadata.nodes[nodeID]
+			if !ok {
+				b.conf.Logger.Info("cannot get controller connection: no information about node",
+					"nodeID", nodeID)
+				continue
+			}
+			var err error
+			conn, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			if err != nil {
+				b.conf.Logger.Info("cannot get controller connection: cannot connect to node",
+					"address", addr,
+					"error", err)
+				lastErr = err
+				continue
+			}
+			b.conns[nodeID] = conn
+		}
+		return conn, nil
+	}
+	return nil, lastErr
+}
+
 // muCloseDeadConnection is closing and removing any reference to given
 // connection. Because we remove dead connection, additional request to refresh
 // metadata is made
@@ -615,7 +694,7 @@ func (b *Broker) muCloseDeadConnection(conn *connection) {
 				"nodeID", nid)
 			delete(b.conns, nid)
 			_ = c.Close()
-			if err := b.refreshMetadata(); err != nil {
+			if err := b.refreshMetadata(proto.MetadataV0); err != nil {
 				b.conf.Logger.Debug("cannot refresh metadata",
 					"error", err)
 			}
@@ -630,7 +709,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 	for retry := 0; retry < b.conf.RetryErrLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(b.conf.RetryErrWait)
-			err = b.muRefreshMetadata()
+			err = b.muRefreshMetadata(proto.MetadataV0)
 			if err != nil {
 				continue
 			}
@@ -794,7 +873,7 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 			// we cannot handle this error here, because there is no direct
 			// access to connection
 		default:
-			if err := p.broker.muRefreshMetadata(); err != nil {
+			if err := p.broker.muRefreshMetadata(proto.MetadataV0); err != nil {
 				p.conf.Logger.Debug("cannot refresh metadata",
 					"error", err)
 			}
@@ -1164,7 +1243,7 @@ consumeRetryLoop:
 					c.conf.Logger.Debug("cannot fetch messages",
 						"retry", retry,
 						"error", part.Err)
-					if err := c.broker.muRefreshMetadata(); err != nil {
+					if err := c.broker.muRefreshMetadata(proto.MetadataV0); err != nil {
 						c.conf.Logger.Debug("cannot refresh metadata",
 							"error", err)
 					}
@@ -1397,4 +1476,96 @@ func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64,
 	}
 
 	return 0, "", resErr
+}
+
+// AdminConf represents the configuration of an admin-client.
+type AdminConf struct {
+	// RetryErrLimit limits messages fetch retry upon failure. By default 10.
+	RetryErrLimit int
+
+	// RetryErrWait controls wait duration between retries after failed fetch
+	// request. By default 500ms.
+	RetryErrWait time.Duration
+
+	// Logger used by consumer. By default, reuse logger assigned to broker.
+	Logger Logger
+}
+
+// NewAdminConf returns default AdminConf configuration.
+func NewAdminConf() AdminConf {
+	return AdminConf{
+		RetryErrLimit: 10,
+		RetryErrWait:  time.Millisecond * 500,
+		Logger:        nil,
+	}
+}
+
+type admin struct {
+	conf   AdminConf
+	broker *Broker
+
+	mu   sync.Mutex
+	conn *connection
+}
+
+// Admin returns and admin-client for the cluster.
+func (b *Broker) Admin(conf AdminConf) (Admin, error) {
+	conn, err := b.muControllerConnection()
+	if err != nil {
+		return nil, err
+	}
+	if conf.Logger == nil {
+		conf.Logger = b.conf.Logger
+	}
+	c := &admin{
+		broker: b,
+		conf:   conf,
+		conn:   conn,
+	}
+	return c, nil
+}
+
+// DeleteTopics removes a given set of topics from the cluster.
+func (c *admin) DeleteTopics(topics []string, timeout int32) ([]proto.TopicErrorCode, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	lastErr := fmt.Errorf("DeleteTopics failed")
+	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if retry != 0 {
+			c.mu.Unlock()
+			time.Sleep(c.conf.RetryErrWait)
+			c.mu.Lock()
+		}
+
+		// connection can be set to nil if previously reference connection died
+		if c.conn == nil {
+			conn, err := c.broker.muControllerConnection()
+			if err != nil {
+				c.conf.Logger.Debug("cannot connect to coordinator",
+					"error", err)
+				lastErr = err
+				continue
+			}
+			c.conn = conn
+		}
+		resp, err := c.conn.DeleteTopics(&proto.DeleteTopicsReq{
+			Topics:  topics,
+			Timeout: timeout,
+		})
+
+		switch err {
+		case io.EOF, syscall.EPIPE:
+			c.conf.Logger.Debug("connection died while deleting topics")
+			c.broker.muCloseDeadConnection(c.conn)
+			c.conn = nil
+			lastErr = err
+		case nil:
+			return resp.TopicErrorCodes, nil
+		default:
+			lastErr = err
+		}
+	}
+
+	return nil, lastErr
 }

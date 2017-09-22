@@ -197,7 +197,7 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadMetadataResp(bytes.NewReader(b))
+	return proto.ReadMetadataResp(bytes.NewReader(b), req.Version)
 }
 
 // Produce sends given produce request to kafka node and returns related
