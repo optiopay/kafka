@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -39,11 +40,11 @@ var (
 // Client is the interface implemented by Broker.
 type Client interface {
 	Producer(conf ProducerConf) Producer
-	Consumer(conf ConsumerConf) (Consumer, error)
-	OffsetCoordinator(conf OffsetCoordinatorConf) (OffsetCoordinator, error)
-	Admin(conf AdminConf) (Admin, error)
-	OffsetEarliest(topic string, partition int32) (offset int64, err error)
-	OffsetLatest(topic string, partition int32) (offset int64, err error)
+	Consumer(ctx context.Context, conf ConsumerConf) (Consumer, error)
+	OffsetCoordinator(ctx context.Context, conf OffsetCoordinatorConf) (OffsetCoordinator, error)
+	Admin(ctx context.Context, conf AdminConf) (Admin, error)
+	OffsetEarliest(ctx context.Context, topic string, partition int32) (offset int64, err error)
+	OffsetLatest(ctx context.Context, topic string, partition int32) (offset int64, err error)
 	Close()
 }
 
@@ -52,7 +53,7 @@ type Client interface {
 // Consume reads a message from a consumer, returning an error when
 // encountered.
 type Consumer interface {
-	Consume() (*proto.Message, error)
+	Consume(ctx context.Context) (*proto.Message, error)
 }
 
 // BatchConsumer is the interface that wraps the ConsumeBatch method.
@@ -60,7 +61,7 @@ type Consumer interface {
 // ConsumeBatch reads a batch of messages from a consumer, returning an error
 // when encountered.
 type BatchConsumer interface {
-	ConsumeBatch() ([]*proto.Message, error)
+	ConsumeBatch(ctx context.Context) ([]*proto.Message, error)
 }
 
 // Producer is the interface that wraps the Produce method.
@@ -69,18 +70,18 @@ type BatchConsumer interface {
 // It returns the offset of the first message and any error encountered.
 // The offset of each message is also updated accordingly.
 type Producer interface {
-	Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error)
+	Produce(ctx context.Context, topic string, partition int32, messages ...*proto.Message) (offset int64, err error)
 }
 
 // OffsetCoordinator is the interface which wraps the Commit and Offset methods.
 type OffsetCoordinator interface {
-	Commit(topic string, partition int32, offset int64) error
-	Offset(topic string, partition int32) (offset int64, metadata string, err error)
+	Commit(ctx context.Context, topic string, partition int32, offset int64) error
+	Offset(ctx context.Context, topic string, partition int32) (offset int64, metadata string, err error)
 }
 
 // Admin write the admin-client methods.
 type Admin interface {
-	DeleteTopics(topics []string, timeout int32) ([]proto.TopicErrorCode, error)
+	DeleteTopics(ctx context.Context, topics []string, timeout int32) ([]proto.TopicErrorCode, error)
 }
 
 type topicPartition struct {
@@ -211,7 +212,7 @@ type Broker struct {
 // successful metadata fetch, returns broker.
 //
 // The returned broker is not initially connected to any kafka node.
-func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
+func Dial(ctx context.Context, nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 	if len(nodeAddresses) == 0 {
 		return nil, errors.New("no addresses provided")
 	}
@@ -230,7 +231,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 			time.Sleep(conf.DialRetryWait)
 		}
 
-		err := broker.refreshMetadata(proto.MetadataV0)
+		err := broker.refreshMetadata(ctx, proto.MetadataV0)
 
 		if err == nil {
 			return broker, nil
@@ -262,18 +263,18 @@ func (b *Broker) Close() {
 }
 
 // Metadata requests metadata information from any node.
-func (b *Broker) Metadata() (*proto.MetadataResp, error) {
+func (b *Broker) Metadata(ctx context.Context) (*proto.MetadataResp, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.fetchMetadata(proto.MetadataV0)
+	return b.fetchMetadata(ctx, proto.MetadataV0)
 }
 
 // refreshMetadata is requesting metadata information from any node and refresh
 // internal cached representation.
 // Because it's changing internal state, this method requires lock protection,
 // but it does not acquire nor release lock itself.
-func (b *Broker) refreshMetadata(metadataVersion int16) error {
-	meta, err := b.fetchMetadata(metadataVersion)
+func (b *Broker) refreshMetadata(ctx context.Context, metadataVersion int16) error {
+	meta, err := b.fetchMetadata(ctx, metadataVersion)
 	if err == nil {
 		b.cacheMetadata(meta)
 	}
@@ -281,9 +282,9 @@ func (b *Broker) refreshMetadata(metadataVersion int16) error {
 }
 
 // muRefreshMetadata calls refreshMetadata, but protects it with broker's lock.
-func (b *Broker) muRefreshMetadata(metadataVersion int16) error {
+func (b *Broker) muRefreshMetadata(ctx context.Context, metadataVersion int16) error {
 	b.mu.Lock()
-	err := b.refreshMetadata(metadataVersion)
+	err := b.refreshMetadata(ctx, metadataVersion)
 	b.mu.Unlock()
 	return err
 }
@@ -296,13 +297,13 @@ func (b *Broker) muRefreshMetadata(metadataVersion int16) error {
 //
 // Because it's using metadata information to find node connections it's not
 // thread safe and using it require locking.
-func (b *Broker) fetchMetadata(metadataVersion int16, topics ...string) (*proto.MetadataResp, error) {
+func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topics ...string) (*proto.MetadataResp, error) {
 	checkednodes := make(map[int32]bool)
 
 	// try all existing connections first
 	for nodeID, conn := range b.conns {
 		checkednodes[nodeID] = true
-		resp, err := conn.Metadata(&proto.MetadataReq{
+		resp, err := conn.Metadata(ctx, &proto.MetadataReq{
 			Version:  metadataVersion,
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
@@ -328,7 +329,7 @@ func (b *Broker) fetchMetadata(metadataVersion int16, topics ...string) (*proto.
 				"error", err)
 			continue
 		}
-		resp, err := conn.Metadata(&proto.MetadataReq{
+		resp, err := conn.Metadata(ctx, &proto.MetadataReq{
 			Version:  metadataVersion,
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
@@ -354,7 +355,7 @@ func (b *Broker) fetchMetadata(metadataVersion int16, topics ...string) (*proto.
 				"error", err)
 			continue
 		}
-		resp, err := conn.Metadata(&proto.MetadataReq{
+		resp, err := conn.Metadata(ctx, &proto.MetadataReq{
 			Version:  metadataVersion,
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
@@ -437,7 +438,7 @@ func (b *Broker) PartitionCount(topic string) (int32, error) {
 // the leader we will return a random broker. The broker will error if we end
 // up producing to it incorrectly (i.e., our metadata happened to be out of
 // date).
-func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connection, err error) {
+func (b *Broker) muLeaderConnection(ctx context.Context, topic string, partition int32) (conn *connection, err error) {
 	tp := topicPartition{topic, partition}
 
 	b.mu.Lock()
@@ -457,7 +458,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 
 		nodeID, ok := b.metadata.endpoints[tp]
 		if !ok {
-			err = b.refreshMetadata(proto.MetadataV0)
+			err = b.refreshMetadata(ctx, proto.MetadataV0)
 			if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot refresh metadata",
 					"error", err)
@@ -470,7 +471,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 				// is a brand new topic, so try to get metadata on it (which will trigger
 				// the creation process)
 				if b.conf.AllowTopicCreation {
-					_, err := b.fetchMetadata(proto.MetadataV0, topic)
+					_, err := b.fetchMetadata(ctx, proto.MetadataV0, topic)
 					if err != nil {
 						b.conf.Logger.Info("failed to fetch metadata for new topic",
 							"topic", topic,
@@ -514,7 +515,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 // coordinatorConnection returns connection to offset coordinator for given group.
 //
 // Failed connection retry is controlled by broker configuration.
-func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection, resErr error) {
+func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup string) (conn *connection, resErr error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -527,7 +528,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 
 		// first try all already existing connections
 		for _, conn := range b.conns {
-			resp, err := conn.ConsumerMetadata(&proto.ConsumerMetadataReq{
+			resp, err := conn.ConsumerMetadata(ctx, &proto.ConsumerMetadataReq{
 				ClientID:      b.conf.ClientID,
 				ConsumerGroup: consumerGroup,
 			})
@@ -561,7 +562,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 		}
 
 		// if none of the connections worked out, try with fresh data
-		if err := b.refreshMetadata(proto.MetadataV0); err != nil {
+		if err := b.refreshMetadata(ctx, proto.MetadataV0); err != nil {
 			b.conf.Logger.Debug("cannot refresh metadata",
 				"error", err)
 			resErr = err
@@ -584,7 +585,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			}
 			b.conns[nodeID] = conn
 
-			resp, err := conn.ConsumerMetadata(&proto.ConsumerMetadataReq{
+			resp, err := conn.ConsumerMetadata(ctx, &proto.ConsumerMetadataReq{
 				ClientID:      b.conf.ClientID,
 				ConsumerGroup: consumerGroup,
 			})
@@ -624,7 +625,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 // muControllerConnection returns connection to controller of the cluster.
 //
 // Failed connection retry is controlled by broker configuration.
-func (b *Broker) muControllerConnection() (*connection, error) {
+func (b *Broker) muControllerConnection(ctx context.Context) (*connection, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	lastErr := fmt.Errorf("cannot get controller connection")
@@ -641,7 +642,7 @@ func (b *Broker) muControllerConnection() (*connection, error) {
 
 		controllerID := b.metadata.controllerID
 		if controllerID == nil {
-			if err := b.refreshMetadata(proto.MetadataV1); err != nil {
+			if err := b.refreshMetadata(ctx, proto.MetadataV1); err != nil {
 				b.conf.Logger.Info("cannot get controller connection: cannot refresh metadata",
 					"error", err)
 				lastErr = err
@@ -684,7 +685,7 @@ func (b *Broker) muControllerConnection() (*connection, error) {
 // metadata is made
 //
 // muCloseDeadConnection call it protected with broker's lock.
-func (b *Broker) muCloseDeadConnection(conn *connection) {
+func (b *Broker) muCloseDeadConnection(ctx context.Context, conn *connection) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -694,7 +695,7 @@ func (b *Broker) muCloseDeadConnection(conn *connection) {
 				"nodeID", nid)
 			delete(b.conns, nid)
 			_ = c.Close()
-			if err := b.refreshMetadata(proto.MetadataV0); err != nil {
+			if err := b.refreshMetadata(ctx, proto.MetadataV0); err != nil {
 				b.conf.Logger.Debug("cannot refresh metadata",
 					"error", err)
 			}
@@ -705,22 +706,22 @@ func (b *Broker) muCloseDeadConnection(conn *connection) {
 
 // offset will return offset value for given partition. Use timems to specify
 // which offset value should be returned.
-func (b *Broker) offset(topic string, partition int32, timems int64) (offset int64, err error) {
+func (b *Broker) offset(ctx context.Context, topic string, partition int32, timems int64) (offset int64, err error) {
 	for retry := 0; retry < b.conf.RetryErrLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(b.conf.RetryErrWait)
-			err = b.muRefreshMetadata(proto.MetadataV0)
+			err = b.muRefreshMetadata(ctx, proto.MetadataV0)
 			if err != nil {
 				continue
 			}
 		}
 		var conn *connection
-		conn, err = b.muLeaderConnection(topic, partition)
+		conn, err = b.muLeaderConnection(ctx, topic, partition)
 		if err != nil {
 			return 0, err
 		}
 		var resp *proto.OffsetResp
-		resp, err = conn.Offset(&proto.OffsetReq{
+		resp, err = conn.Offset(ctx, &proto.OffsetReq{
 			ClientID:  b.conf.ClientID,
 			ReplicaID: -1, // any client
 			Topics: []proto.OffsetReqTopic{
@@ -745,7 +746,7 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 					"topic", topic,
 					"partition", partition,
 					"error", err)
-				b.muCloseDeadConnection(conn)
+				b.muCloseDeadConnection(ctx, conn)
 			}
 			continue
 		}
@@ -778,13 +779,13 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 }
 
 // OffsetEarliest returns the oldest offset available on the given partition.
-func (b *Broker) OffsetEarliest(topic string, partition int32) (offset int64, err error) {
-	return b.offset(topic, partition, -2)
+func (b *Broker) OffsetEarliest(ctx context.Context, topic string, partition int32) (offset int64, err error) {
+	return b.offset(ctx, topic, partition, -2)
 }
 
 // OffsetLatest return the offset of the next message produced in given partition
-func (b *Broker) OffsetLatest(topic string, partition int32) (offset int64, err error) {
-	return b.offset(topic, partition, -1)
+func (b *Broker) OffsetLatest(ctx context.Context, topic string, partition int32) (offset int64, err error) {
+	return b.offset(ctx, topic, partition, -1)
 }
 
 // ProducerConf represents the configuration of a producer.
@@ -851,14 +852,14 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 // RetryLimit and RetryWait attributes.
 //
 // Upon a successful call, the message's Offset field is updated.
-func (p *producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
+func (p *producer) Produce(ctx context.Context, topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(p.conf.RetryWait)
 		}
 
-		offset, err = p.produce(topic, partition, messages...)
+		offset, err = p.produce(ctx, topic, partition, messages...)
 
 		switch err {
 		case nil:
@@ -873,7 +874,7 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 			// we cannot handle this error here, because there is no direct
 			// access to connection
 		default:
-			if err := p.broker.muRefreshMetadata(proto.MetadataV0); err != nil {
+			if err := p.broker.muRefreshMetadata(ctx, proto.MetadataV0); err != nil {
 				p.conf.Logger.Debug("cannot refresh metadata",
 					"error", err)
 			}
@@ -888,8 +889,8 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 }
 
 // produce send produce request to leader for given destination.
-func (p *producer) produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
-	conn, err := p.broker.muLeaderConnection(topic, partition)
+func (p *producer) produce(ctx context.Context, topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
+	conn, err := p.broker.muLeaderConnection(ctx, topic, partition)
 	if err != nil {
 		return 0, err
 	}
@@ -912,7 +913,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 		},
 	}
 
-	resp, err := conn.Produce(&req)
+	resp, err := conn.Produce(ctx, &req)
 	if err != nil {
 		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
 			// Connection is broken, so should be closed, but the error is
@@ -922,7 +923,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 				"topic", topic,
 				"partition", partition,
 				"error", err)
-			p.broker.muCloseDeadConnection(conn)
+			p.broker.muCloseDeadConnection(ctx, conn)
 		}
 		return 0, err
 	}
@@ -1051,17 +1052,17 @@ type consumer struct {
 }
 
 // Consumer creates a new consumer instance, bound to the broker.
-func (b *Broker) Consumer(conf ConsumerConf) (Consumer, error) {
-	return b.consumer(conf)
+func (b *Broker) Consumer(ctx context.Context, conf ConsumerConf) (Consumer, error) {
+	return b.consumer(ctx, conf)
 }
 
 // BatchConsumer creates a new BatchConsumer instance, bound to the broker.
-func (b *Broker) BatchConsumer(conf ConsumerConf) (BatchConsumer, error) {
-	return b.consumer(conf)
+func (b *Broker) BatchConsumer(ctx context.Context, conf ConsumerConf) (BatchConsumer, error) {
+	return b.consumer(ctx, conf)
 }
 
-func (b *Broker) consumer(conf ConsumerConf) (*consumer, error) {
-	conn, err := b.muLeaderConnection(conf.Topic, conf.Partition)
+func (b *Broker) consumer(ctx context.Context, conf ConsumerConf) (*consumer, error) {
+	conn, err := b.muLeaderConnection(ctx, conf.Topic, conf.Partition)
 	if err != nil {
 		return nil, err
 	}
@@ -1072,13 +1073,13 @@ func (b *Broker) consumer(conf ConsumerConf) (*consumer, error) {
 	if offset < 0 {
 		switch offset {
 		case StartOffsetNewest:
-			off, err := b.OffsetLatest(conf.Topic, conf.Partition)
+			off, err := b.OffsetLatest(ctx, conf.Topic, conf.Partition)
 			if err != nil {
 				return nil, err
 			}
 			offset = off
 		case StartOffsetOldest:
-			off, err := b.OffsetEarliest(conf.Topic, conf.Partition)
+			off, err := b.OffsetEarliest(ctx, conf.Topic, conf.Partition)
 			if err != nil {
 				return nil, err
 			}
@@ -1105,12 +1106,12 @@ func (b *Broker) consumer(conf ConsumerConf) (*consumer, error) {
 // consume can retry sending request on common errors. This behaviour can
 // be configured with RetryErrLimit and RetryErrWait consumer configuration
 // attributes.
-func (c *consumer) consume() ([]*proto.Message, error) {
+func (c *consumer) consume(ctx context.Context) ([]*proto.Message, error) {
 	var msgbuf []*proto.Message
 	var retry int
 	for len(msgbuf) == 0 {
 		var err error
-		msgbuf, err = c.fetch()
+		msgbuf, err = c.fetch(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1128,13 +1129,13 @@ func (c *consumer) consume() ([]*proto.Message, error) {
 	return msgbuf, nil
 }
 
-func (c *consumer) Consume() (*proto.Message, error) {
+func (c *consumer) Consume(ctx context.Context) (*proto.Message, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if len(c.msgbuf) == 0 {
 		var err error
-		c.msgbuf, err = c.consume()
+		c.msgbuf, err = c.consume(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1146,11 +1147,11 @@ func (c *consumer) Consume() (*proto.Message, error) {
 	return msg, nil
 }
 
-func (c *consumer) ConsumeBatch() ([]*proto.Message, error) {
+func (c *consumer) ConsumeBatch(ctx context.Context) ([]*proto.Message, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	batch, err := c.consume()
+	batch, err := c.consume(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1162,7 +1163,7 @@ func (c *consumer) ConsumeBatch() ([]*proto.Message, error) {
 // fetch and return next batch of messages. In case of certain set of errors,
 // retry sending fetch request. Retry behaviour can be configured with
 // RetryErrLimit and RetryErrWait consumer configuration attributes.
-func (c *consumer) fetch() ([]*proto.Message, error) {
+func (c *consumer) fetch(ctx context.Context) ([]*proto.Message, error) {
 	req := proto.FetchReq{
 		ClientID:    c.broker.conf.ClientID,
 		MaxWaitTime: c.conf.RequestTimeout,
@@ -1189,7 +1190,7 @@ consumeRetryLoop:
 		}
 
 		if c.conn == nil {
-			conn, err := c.broker.muLeaderConnection(c.conf.Topic, c.conf.Partition)
+			conn, err := c.broker.muLeaderConnection(ctx, c.conf.Topic, c.conf.Partition)
 			if err != nil {
 				resErr = err
 				continue
@@ -1197,7 +1198,7 @@ consumeRetryLoop:
 			c.conn = conn
 		}
 
-		resp, err := c.conn.Fetch(&req)
+		resp, err := c.conn.Fetch(ctx, &req)
 		resErr = err
 
 		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
@@ -1205,7 +1206,7 @@ consumeRetryLoop:
 				"topic", c.conf.Topic,
 				"partition", c.conf.Partition,
 				"error", err)
-			c.broker.muCloseDeadConnection(c.conn)
+			c.broker.muCloseDeadConnection(ctx, c.conn)
 			c.conn = nil
 			continue
 		}
@@ -1214,7 +1215,7 @@ consumeRetryLoop:
 			c.conf.Logger.Debug("cannot fetch messages: unknown error",
 				"retry", retry,
 				"error", err)
-			c.broker.muCloseDeadConnection(c.conn)
+			c.broker.muCloseDeadConnection(ctx, c.conn)
 			c.conn = nil
 			continue
 		}
@@ -1243,7 +1244,7 @@ consumeRetryLoop:
 					c.conf.Logger.Debug("cannot fetch messages",
 						"retry", retry,
 						"error", part.Err)
-					if err := c.broker.muRefreshMetadata(proto.MetadataV0); err != nil {
+					if err := c.broker.muRefreshMetadata(ctx, proto.MetadataV0); err != nil {
 						c.conf.Logger.Debug("cannot refresh metadata",
 							"error", err)
 					}
@@ -1298,8 +1299,8 @@ type offsetCoordinator struct {
 
 // OffsetCoordinator returns offset management coordinator for single consumer
 // group, bound to broker.
-func (b *Broker) OffsetCoordinator(conf OffsetCoordinatorConf) (OffsetCoordinator, error) {
-	conn, err := b.muCoordinatorConnection(conf.ConsumerGroup)
+func (b *Broker) OffsetCoordinator(ctx context.Context, conf OffsetCoordinatorConf) (OffsetCoordinator, error) {
+	conn, err := b.muCoordinatorConnection(ctx, conf.ConsumerGroup)
 	if err != nil {
 		return nil, err
 	}
@@ -1319,19 +1320,19 @@ func (b *Broker) OffsetCoordinator(conf OffsetCoordinatorConf) (OffsetCoordinato
 // Commit can retry saving offset information on common errors. This behaviour
 // can be configured with with RetryErrLimit and RetryErrWait coordinator
 // configuration attributes.
-func (c *offsetCoordinator) Commit(topic string, partition int32, offset int64) error {
-	return c.commit(topic, partition, offset, "")
+func (c *offsetCoordinator) Commit(ctx context.Context, topic string, partition int32, offset int64) error {
+	return c.commit(ctx, topic, partition, offset, "")
 }
 
 // Commit works exactly like Commit method, but store extra metadata string
 // together with offset information.
-func (c *offsetCoordinator) CommitFull(topic string, partition int32, offset int64, metadata string) error {
-	return c.commit(topic, partition, offset, metadata)
+func (c *offsetCoordinator) CommitFull(ctx context.Context, topic string, partition int32, offset int64, metadata string) error {
+	return c.commit(ctx, topic, partition, offset, metadata)
 }
 
 // commit is saving offset and metadata information. Provides limited error
 // handling configurable through OffsetCoordinatorConf.
-func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, metadata string) (resErr error) {
+func (c *offsetCoordinator) commit(ctx context.Context, topic string, partition int32, offset int64, metadata string) (resErr error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -1344,7 +1345,7 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 
 		// connection can be set to nil if previously reference connection died
 		if c.conn == nil {
-			conn, err := c.broker.muCoordinatorConnection(c.conf.ConsumerGroup)
+			conn, err := c.broker.muCoordinatorConnection(ctx, c.conf.ConsumerGroup)
 			if err != nil {
 				resErr = err
 				c.conf.Logger.Debug("cannot connect to coordinator",
@@ -1355,7 +1356,7 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 			c.conn = conn
 		}
 
-		resp, err := c.conn.OffsetCommit(&proto.OffsetCommitReq{
+		resp, err := c.conn.OffsetCommit(ctx, &proto.OffsetCommitReq{
 			ClientID:      c.broker.conf.ClientID,
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetCommitReqTopic{
@@ -1374,7 +1375,7 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 				"topic", topic,
 				"partition", partition,
 				"consumGrp", c.conf.ConsumerGroup)
-			c.broker.muCloseDeadConnection(c.conn)
+			c.broker.muCloseDeadConnection(ctx, c.conn)
 			c.conn = nil
 		} else if err == nil {
 			for _, t := range resp.Topics {
@@ -1407,7 +1408,7 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 // Offset can retry sending request on common errors. This behaviour can be
 // configured with with RetryErrLimit and RetryErrWait coordinator
 // configuration attributes.
-func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64, metadata string, resErr error) {
+func (c *offsetCoordinator) Offset(ctx context.Context, topic string, partition int32) (offset int64, metadata string, resErr error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -1420,7 +1421,7 @@ func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64,
 
 		// connection can be set to nil if previously reference connection died
 		if c.conn == nil {
-			conn, err := c.broker.muCoordinatorConnection(c.conf.ConsumerGroup)
+			conn, err := c.broker.muCoordinatorConnection(ctx, c.conf.ConsumerGroup)
 			if err != nil {
 				c.conf.Logger.Debug("cannot connect to coordinator",
 					"consumGrp", c.conf.ConsumerGroup,
@@ -1430,7 +1431,7 @@ func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64,
 			}
 			c.conn = conn
 		}
-		resp, err := c.conn.OffsetFetch(&proto.OffsetFetchReq{
+		resp, err := c.conn.OffsetFetch(ctx, &proto.OffsetFetchReq{
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetFetchReqTopic{
 				{
@@ -1447,7 +1448,7 @@ func (c *offsetCoordinator) Offset(topic string, partition int32) (offset int64,
 				"topic", topic,
 				"partition", partition,
 				"consumGrp", c.conf.ConsumerGroup)
-			c.broker.muCloseDeadConnection(c.conn)
+			c.broker.muCloseDeadConnection(ctx, c.conn)
 			c.conn = nil
 		case nil:
 			for _, t := range resp.Topics {
@@ -1509,8 +1510,8 @@ type admin struct {
 }
 
 // Admin returns and admin-client for the cluster.
-func (b *Broker) Admin(conf AdminConf) (Admin, error) {
-	conn, err := b.muControllerConnection()
+func (b *Broker) Admin(ctx context.Context, conf AdminConf) (Admin, error) {
+	conn, err := b.muControllerConnection(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1526,7 +1527,7 @@ func (b *Broker) Admin(conf AdminConf) (Admin, error) {
 }
 
 // DeleteTopics removes a given set of topics from the cluster.
-func (c *admin) DeleteTopics(topics []string, timeout int32) ([]proto.TopicErrorCode, error) {
+func (c *admin) DeleteTopics(ctx context.Context, topics []string, timeout int32) ([]proto.TopicErrorCode, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -1540,7 +1541,7 @@ func (c *admin) DeleteTopics(topics []string, timeout int32) ([]proto.TopicError
 
 		// connection can be set to nil if previously reference connection died
 		if c.conn == nil {
-			conn, err := c.broker.muControllerConnection()
+			conn, err := c.broker.muControllerConnection(ctx)
 			if err != nil {
 				c.conf.Logger.Debug("cannot connect to coordinator",
 					"error", err)
@@ -1549,7 +1550,7 @@ func (c *admin) DeleteTopics(topics []string, timeout int32) ([]proto.TopicError
 			}
 			c.conn = conn
 		}
-		resp, err := c.conn.DeleteTopics(&proto.DeleteTopicsReq{
+		resp, err := c.conn.DeleteTopics(ctx, &proto.DeleteTopicsReq{
 			Topics:  topics,
 			Timeout: timeout,
 		})
@@ -1557,7 +1558,7 @@ func (c *admin) DeleteTopics(topics []string, timeout int32) ([]proto.TopicError
 		switch err {
 		case io.EOF, syscall.EPIPE:
 			c.conf.Logger.Debug("connection died while deleting topics")
-			c.broker.muCloseDeadConnection(c.conn)
+			c.broker.muCloseDeadConnection(ctx, c.conn)
 			c.conn = nil
 			lastErr = err
 		case nil:

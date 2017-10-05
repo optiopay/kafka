@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
@@ -17,7 +18,7 @@ func newRecordingProducer() *recordingProducer {
 	return &recordingProducer{msgs: make([]*proto.Message, 0)}
 }
 
-func (p *recordingProducer) Produce(topic string, part int32, msgs ...*proto.Message) (int64, error) {
+func (p *recordingProducer) Produce(ctx context.Context, topic string, part int32, msgs ...*proto.Message) (int64, error) {
 	p.Lock()
 	defer p.Unlock()
 
@@ -32,6 +33,7 @@ func (p *recordingProducer) Produce(topic string, part int32, msgs ...*proto.Mes
 }
 
 func TestRoundRobinProducer(t *testing.T) {
+	ctx := context.Background()
 	rec := newRecordingProducer()
 	p := NewRoundRobinProducer(rec, 3)
 
@@ -58,7 +60,7 @@ func TestRoundRobinProducer(t *testing.T) {
 		for i, value := range values {
 			msgs[i] = &proto.Message{Value: value}
 		}
-		if _, err := p.Distribute("test-topic", msgs...); err != nil {
+		if _, err := p.Distribute(ctx, "test-topic", msgs...); err != nil {
 			t.Errorf("cannot distribute %d message: %s", i, err)
 		}
 	}
@@ -85,6 +87,7 @@ func TestRoundRobinProducer(t *testing.T) {
 }
 
 func TestHashProducer(t *testing.T) {
+	ctx := context.Background()
 	const parts = 3
 	rec := newRecordingProducer()
 	p := NewHashProducer(rec, parts)
@@ -95,7 +98,7 @@ func TestHashProducer(t *testing.T) {
 	}
 	for i, key := range keys {
 		msg := &proto.Message{Key: key}
-		if _, err := p.Distribute("test-topic", msg); err != nil {
+		if _, err := p.Distribute(ctx, "test-topic", msg); err != nil {
 			t.Errorf("cannot distribute %d message: %s", i, err)
 		}
 	}
@@ -119,6 +122,7 @@ func TestHashProducer(t *testing.T) {
 }
 
 func TestRandomProducerIsConcurrencySafe(t *testing.T) {
+	ctx := context.Background()
 	const workers = 100
 
 	p := NewRandomProducer(nullproducer{}, 4)
@@ -136,7 +140,7 @@ func TestRandomProducerIsConcurrencySafe(t *testing.T) {
 			<-start
 
 			for n := 0; n < 1000; n++ {
-				if _, err := p.Distribute("x", msg); err != nil {
+				if _, err := p.Distribute(ctx, "x", msg); err != nil {
 					t.Errorf("cannot distribute: %s", err)
 				}
 			}
@@ -149,6 +153,6 @@ func TestRandomProducerIsConcurrencySafe(t *testing.T) {
 
 type nullproducer struct{}
 
-func (nullproducer) Produce(topic string, part int32, msgs ...*proto.Message) (int64, error) {
+func (nullproducer) Produce(ctx context.Context, topic string, part int32, msgs ...*proto.Message) (int64, error) {
 	return 0, nil
 }
