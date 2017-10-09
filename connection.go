@@ -3,6 +3,7 @@ package kafka
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -176,7 +177,7 @@ func (c *connection) Close() error {
 // Metadata sends given metadata request to kafka node and returns related
 // metadata response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, error) {
+func (c *connection) Metadata(ctx context.Context, req *proto.MetadataReq) (*proto.MetadataResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -193,18 +194,23 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadMetadataResp(bytes.NewReader(b), req.Version)
+	case <-ctx.Done():
+		c.releaseWaiter(req.CorrelationID)
+		return nil, ctx.Err()
 	}
-	return proto.ReadMetadataResp(bytes.NewReader(b), req.Version)
 }
 
 // Produce sends given produce request to kafka node and returns related
 // response. Sending request with no ACKs flag will result with returning nil
 // right after sending request, without waiting for response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) {
+func (c *connection) Produce(ctx context.Context, req *proto.ProduceReq) (*proto.ProduceResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -226,16 +232,21 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadProduceResp(bytes.NewReader(b))
+	case <-ctx.Done():
+		c.releaseWaiter(req.CorrelationID)
+		return nil, ctx.Err()
 	}
-	return proto.ReadProduceResp(bytes.NewReader(b))
 }
 
 // Fetch sends given fetch request to kafka node and returns related response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
+func (c *connection) Fetch(ctx context.Context, req *proto.FetchReq) (*proto.FetchResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -252,41 +263,46 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
-	}
-	resp, err := proto.ReadFetchResp(bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-
-	// Compressed messages are returned in full batches for efficiency
-	// (the broker doesn't need to decompress).
-	// This means that it's possible to get some leading messages
-	// with a smaller offset than requested. Trim those.
-	for ti := range resp.Topics {
-		topic := &resp.Topics[ti]
-		reqTopic := &req.Topics[ti]
-		for pi := range topic.Partitions {
-			partition := &topic.Partitions[pi]
-			reqPartition := &reqTopic.Partitions[pi]
-			i := 0
-			for _, msg := range partition.Messages {
-				if msg.Offset >= reqPartition.FetchOffset {
-					break
-				}
-				i++
-			}
-			partition.Messages = partition.Messages[i:]
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
 		}
+		resp, err := proto.ReadFetchResp(bytes.NewReader(b))
+		if err != nil {
+			return nil, err
+		}
+
+		// Compressed messages are returned in full batches for efficiency
+		// (the broker doesn't need to decompress).
+		// This means that it's possible to get some leading messages
+		// with a smaller offset than requested. Trim those.
+		for ti := range resp.Topics {
+			topic := &resp.Topics[ti]
+			reqTopic := &req.Topics[ti]
+			for pi := range topic.Partitions {
+				partition := &topic.Partitions[pi]
+				reqPartition := &reqTopic.Partitions[pi]
+				i := 0
+				for _, msg := range partition.Messages {
+					if msg.Offset >= reqPartition.FetchOffset {
+						break
+					}
+					i++
+				}
+				partition.Messages = partition.Messages[i:]
+			}
+		}
+		return resp, nil
+	case <-ctx.Done():
+		c.releaseWaiter(req.CorrelationID)
+		return nil, ctx.Err()
 	}
-	return resp, nil
 }
 
 // Offset sends given offset request to kafka node and returns related response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
+func (c *connection) Offset(ctx context.Context, req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -306,14 +322,19 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadOffsetResp(bytes.NewReader(b))
+	case <-ctx.Done():
+		c.releaseWaiter(req.CorrelationID)
+		return nil, ctx.Err()
 	}
-	return proto.ReadOffsetResp(bytes.NewReader(b))
 }
 
-func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
+func (c *connection) ConsumerMetadata(ctx context.Context, req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -328,14 +349,19 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadConsumerMetadataResp(bytes.NewReader(b))
+	case <-ctx.Done():
+		c.releaseWaiter(req.CorrelationID)
+		return nil, ctx.Err()
 	}
-	return proto.ReadConsumerMetadataResp(bytes.NewReader(b))
 }
 
-func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetCommitResp, error) {
+func (c *connection) OffsetCommit(ctx context.Context, req *proto.OffsetCommitReq) (*proto.OffsetCommitResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -350,14 +376,19 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadOffsetCommitResp(bytes.NewReader(b))
+	case <-ctx.Done():
+		c.releaseWaiter(req.CorrelationID)
+		return nil, ctx.Err()
 	}
-	return proto.ReadOffsetCommitResp(bytes.NewReader(b))
 }
 
-func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchResp, error) {
+func (c *connection) OffsetFetch(ctx context.Context, req *proto.OffsetFetchReq) (*proto.OffsetFetchResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -372,14 +403,19 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadOffsetFetchResp(bytes.NewReader(b))
+	case <-ctx.Done():
+		c.releaseWaiter(req.CorrelationID)
+		return nil, ctx.Err()
 	}
-	return proto.ReadOffsetFetchResp(bytes.NewReader(b))
 }
 
-func (c *connection) DeleteTopics(req *proto.DeleteTopicsReq) (*proto.DeleteTopicsResp, error) {
+func (c *connection) DeleteTopics(ctx context.Context, req *proto.DeleteTopicsReq) (*proto.DeleteTopicsResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -394,9 +430,14 @@ func (c *connection) DeleteTopics(req *proto.DeleteTopicsReq) (*proto.DeleteTopi
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadDeleteTopicsResp(bytes.NewReader(b))
+	case <-ctx.Done():
+		c.releaseWaiter(req.CorrelationID)
+		return nil, ctx.Err()
 	}
-	return proto.ReadDeleteTopicsResp(bytes.NewReader(b))
 }

@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ type fetcher struct {
 	errors   []error
 }
 
-func (f *fetcher) Consume() (*proto.Message, error) {
+func (f *fetcher) Consume(ctx context.Context) (*proto.Message, error) {
 	// sleep a bit to let the other's work
 	time.Sleep(time.Microsecond * 500)
 
@@ -31,6 +32,7 @@ func (f *fetcher) Consume() (*proto.Message, error) {
 }
 
 func TestMultiplexerConsume(t *testing.T) {
+	ctx := context.Background()
 	fetchers := []Consumer{
 		&fetcher{
 			messages: []*proto.Message{
@@ -58,7 +60,7 @@ func TestMultiplexerConsume(t *testing.T) {
 
 	results := make(map[string]bool)
 
-	mx := Merge(fetchers...)
+	mx := Merge(ctx, fetchers...)
 	defer mx.Close()
 
 	for i := 0; i < 8; i++ {
@@ -87,12 +89,13 @@ func TestMultiplexerConsume(t *testing.T) {
 }
 
 func TestClosingMultiplexer(t *testing.T) {
+	ctx := context.Background()
 	fetchers := []Consumer{
 		&fetcher{errors: []error{errors.New("a1")}},
 		&fetcher{errors: []error{errors.New("b1")}},
 		&fetcher{errors: []error{errors.New("c1")}},
 	}
-	mx := Merge(fetchers...)
+	mx := Merge(ctx, fetchers...)
 
 	// closing more than once should be fine
 	for i := 0; i < 4; i++ {
@@ -110,7 +113,7 @@ type blockingFetcher struct {
 	stop chan struct{}
 }
 
-func (f *blockingFetcher) Consume() (*proto.Message, error) {
+func (f *blockingFetcher) Consume(ctx context.Context) (*proto.Message, error) {
 	<-f.stop
 	return nil, errors.New("blocking fetcher is done")
 }
@@ -120,12 +123,13 @@ func (f *blockingFetcher) Close() {
 }
 
 func TestClosingMultiplexerWithBlockingWorkers(t *testing.T) {
+	ctx := context.Background()
 	f1 := &blockingFetcher{make(chan struct{})}
 	defer f1.Close()
 	f2 := &blockingFetcher{make(chan struct{})}
 	defer f2.Close()
 
-	mx := Merge(f1, f2)
+	mx := Merge(ctx, f1, f2)
 	// close should be instant - without waiting for workers to finish
 	mx.Close()
 
@@ -135,12 +139,13 @@ func TestClosingMultiplexerWithBlockingWorkers(t *testing.T) {
 }
 
 func TestErrNoDataCloseMultiplexer(t *testing.T) {
+	ctx := context.Background()
 	fetchers := []Consumer{
 		&fetcher{errors: []error{ErrNoData}},
 		&fetcher{errors: []error{ErrNoData}, messages: []*proto.Message{{}}},
 		&fetcher{errors: []error{ErrNoData}},
 	}
-	mx := Merge(fetchers...)
+	mx := Merge(ctx, fetchers...)
 
 	if _, err := mx.Consume(); err != nil {
 		t.Fatalf("first consume should succeed, got %s", err)

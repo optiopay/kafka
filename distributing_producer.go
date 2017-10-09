@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -18,7 +19,7 @@ import (
 // partition, returning the post-commit offset and any error encountered. The
 // offset of each message is also updated accordingly.
 type DistributingProducer interface {
-	Distribute(topic string, messages ...*proto.Message) (offset int64, err error)
+	Distribute(ctx context.Context, topic string, messages ...*proto.Message) (offset int64, err error)
 }
 
 type randomProducer struct {
@@ -55,7 +56,7 @@ func NewRandomProducer(p Producer, numPartitions int32) DistributingProducer {
 // Distribute write messages to given kafka topic, randomly destination choosing
 // partition. All messages written within single Produce call are atomically
 // written to the same destination.
-func (p *randomProducer) Distribute(topic string, messages ...*proto.Message) (offset int64, err error) {
+func (p *randomProducer) Distribute(ctx context.Context, topic string, messages ...*proto.Message) (offset int64, err error) {
 	// In the case there are no partitions, which may happen for new topics
 	// when AllowTopicCreation is passed, we will write to partition 0
 	// since rand.Intn panics with 0
@@ -63,7 +64,7 @@ func (p *randomProducer) Distribute(topic string, messages ...*proto.Message) (o
 	if p.partitions > 0 {
 		part = p.rand.Intn(int(p.partitions))
 	}
-	return p.producer.Produce(topic, int32(part), messages...)
+	return p.producer.Produce(ctx, topic, int32(part), messages...)
 }
 
 type roundRobinProducer struct {
@@ -87,7 +88,7 @@ func NewRoundRobinProducer(p Producer, numPartitions int32) DistributingProducer
 // Distribute write messages to given kafka topic, choosing next destination
 // partition from internal cycle. All messages written within single Produce
 // call are atomically written to the same destination.
-func (p *roundRobinProducer) Distribute(topic string, messages ...*proto.Message) (offset int64, err error) {
+func (p *roundRobinProducer) Distribute(ctx context.Context, topic string, messages ...*proto.Message) (offset int64, err error) {
 	p.mu.Lock()
 	part := p.next
 	p.next++
@@ -96,7 +97,7 @@ func (p *roundRobinProducer) Distribute(topic string, messages ...*proto.Message
 	}
 	p.mu.Unlock()
 
-	return p.producer.Produce(topic, int32(part), messages...)
+	return p.producer.Produce(ctx, topic, int32(part), messages...)
 }
 
 type hashProducer struct {
@@ -120,7 +121,7 @@ func NewHashProducer(p Producer, numPartitions int32) DistributingProducer {
 //
 // All messages passed within single Produce call must hash to the same
 // destination, otherwise no message is written and error is returned.
-func (p *hashProducer) Distribute(topic string, messages ...*proto.Message) (offset int64, err error) {
+func (p *hashProducer) Distribute(ctx context.Context, topic string, messages ...*proto.Message) (offset int64, err error) {
 	if len(messages) == 0 {
 		return 0, errors.New("no messages")
 	}
@@ -139,7 +140,7 @@ func (p *hashProducer) Distribute(topic string, messages ...*proto.Message) (off
 		}
 	}
 
-	return p.producer.Produce(topic, part, messages...)
+	return p.producer.Produce(ctx, topic, part, messages...)
 }
 
 // messageHashPartition compute destination partition number for given key

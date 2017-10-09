@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"errors"
 	"sync"
 
@@ -37,7 +38,7 @@ type Mx struct {
 
 // Merge is merging consume result of any number of consumers into single stream
 // and expose them through returned multiplexer.
-func Merge(consumers ...Consumer) *Mx {
+func Merge(ctx context.Context, consumers ...Consumer) *Mx {
 	p := &Mx{
 		errc:    make(chan error),
 		msgc:    make(chan *proto.Message),
@@ -58,7 +59,7 @@ func Merge(consumers ...Consumer) *Mx {
 			}()
 
 			for {
-				msg, err := c.Consume()
+				msg, err := c.Consume(ctx)
 				if err != nil {
 					if err == ErrNoData {
 						return
