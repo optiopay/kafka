@@ -441,3 +441,30 @@ func (c *connection) DeleteTopics(ctx context.Context, req *proto.DeleteTopicsRe
 		return nil, ctx.Err()
 	}
 }
+
+func (c *connection) DescribeConfigs(ctx context.Context, req *proto.DescribeConfigsReq) (*proto.DescribeConfigsResp, error) {
+	var ok bool
+	if req.CorrelationID, ok = <-c.nextID; !ok {
+		return nil, c.stopErr
+	}
+	respc, err := c.respWaiter(req.CorrelationID)
+	if err != nil {
+		c.logger.Error("msg", "failed waiting for response", "error", err)
+		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+	if _, err := req.WriteTo(c.rw); err != nil {
+		c.logger.Error("msg", "cannot write", "error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
+	select {
+	case b, ok := <-respc:
+		if !ok {
+			return nil, c.stopErr
+		}
+		return proto.ReadDescribeConfigsResp(bytes.NewReader(b))
+	case <-ctx.Done():
+		c.releaseWaiter(req.CorrelationID)
+		return nil, ctx.Err()
+	}
+}

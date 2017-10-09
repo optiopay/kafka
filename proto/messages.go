@@ -30,6 +30,7 @@ const (
 	OffsetFetchReqKind      = 9
 	ConsumerMetadataReqKind = 10
 	DeleteTopicsReqKind     = 20
+	DescribeConfigsReqKind  = 32
 
 	// receive the latest offset (i.e. the offset of the next coming message)
 	OffsetReqTimeLatest = -1
@@ -1760,6 +1761,196 @@ func (r *DeleteTopicsResp) Bytes() ([]byte, error) {
 	enc.Encode(r.CorrelationID)
 	enc.EncodeArrayLen(len(r.TopicErrorCodes))
 	for _, toc := range r.TopicErrorCodes {
+		toc.write(enc)
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+type DescribeConfigsReq struct {
+	CorrelationID int32
+	ClientID      string
+	Resources     []ConfigResource
+}
+
+type ConfigResource struct {
+	ResourceType int8
+	ResourceName string
+	ConfigNames  []string
+}
+
+func (r *ConfigResource) read(dec *decoder) {
+	r.ResourceType = dec.DecodeInt8()
+	r.ResourceName = dec.DecodeString()
+	r.ConfigNames = make([]string, dec.DecodeArrayLen())
+	for ti := range r.ConfigNames {
+		r.ConfigNames[ti] = dec.DecodeString()
+	}
+}
+
+func (r ConfigResource) write(enc *encoder) {
+	enc.EncodeInt8(r.ResourceType)
+	enc.EncodeString(r.ResourceName)
+	enc.EncodeArrayLen(len(r.ConfigNames))
+	for _, name := range r.ConfigNames {
+		enc.EncodeString(name)
+	}
+}
+
+func ReadDescribeConfigsReq(r io.Reader) (*DescribeConfigsReq, error) {
+	var req DescribeConfigsReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	req.Resources = make([]ConfigResource, dec.DecodeArrayLen())
+	for ti := range req.Resources {
+		req.Resources[ti].read(dec)
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
+func (r *DescribeConfigsReq) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(int16(DescribeConfigsReqKind))
+	enc.Encode(int16(0))
+	enc.Encode(r.CorrelationID)
+	enc.Encode(r.ClientID)
+
+	enc.EncodeArrayLen(len(r.Resources))
+	for _, r := range r.Resources {
+		r.write(enc)
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+func (r *DescribeConfigsReq) WriteTo(w io.Writer) (int64, error) {
+	b, err := r.Bytes()
+	if err != nil {
+		return 0, err
+	}
+	n, err := w.Write(b)
+	return int64(n), err
+}
+
+type DescribeConfigsResp struct {
+	CorrelationID int32
+	ThrottleTime  int32 // in ms
+	Resources     []ConfigResourceEntry
+}
+
+type ConfigResourceEntry struct {
+	ErrorCode     int16
+	ErrorMessage  string
+	ResourceType  int8
+	ResourceName  string
+	ConfigEntries []ConfigEntry
+}
+
+func (e *ConfigResourceEntry) read(dec *decoder) {
+	e.ErrorCode = dec.DecodeInt16()
+	e.ErrorMessage = dec.DecodeString()
+	e.ResourceType = dec.DecodeInt8()
+	e.ResourceName = dec.DecodeString()
+	e.ConfigEntries = make([]ConfigEntry, dec.DecodeArrayLen())
+	for i, _ := range e.ConfigEntries {
+		e.ConfigEntries[i].read(dec)
+	}
+}
+
+func (e ConfigResourceEntry) write(enc *encoder) {
+	enc.EncodeInt16(e.ErrorCode)
+	enc.EncodeString(e.ErrorMessage)
+	enc.EncodeInt8(e.ResourceType)
+	enc.EncodeString(e.ResourceName)
+	enc.EncodeArrayLen(len(e.ConfigEntries))
+	for _, ce := range e.ConfigEntries {
+		ce.write(enc)
+	}
+}
+
+type ConfigEntry struct {
+	ConfigName  string
+	ConfigValue string
+	ReadOnly    bool
+	IsDefault   bool
+	IsSensitive bool
+}
+
+func (e *ConfigEntry) read(dec *decoder) {
+	e.ConfigName = dec.DecodeString()
+	e.ConfigValue = dec.DecodeString()
+	e.ReadOnly = dec.DecodeBool()
+	e.IsDefault = dec.DecodeBool()
+	e.IsSensitive = dec.DecodeBool()
+}
+
+func (e ConfigEntry) write(enc *encoder) {
+	enc.EncodeString(e.ConfigName)
+	enc.EncodeString(e.ConfigValue)
+	enc.EncodeBool(e.ReadOnly)
+	enc.EncodeBool(e.IsDefault)
+	enc.EncodeBool(e.IsSensitive)
+}
+
+func ReadDescribeConfigsResp(r io.Reader) (*DescribeConfigsResp, error) {
+	var resp DescribeConfigsResp
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	resp.CorrelationID = dec.DecodeInt32()
+	resp.ThrottleTime = dec.DecodeInt32()
+	resp.Resources = make([]ConfigResourceEntry, dec.DecodeArrayLen())
+	for ti := range resp.Resources {
+		resp.Resources[ti].read(dec)
+	}
+
+	if err := dec.Err(); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (r *DescribeConfigsResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(r.ThrottleTime)
+	enc.EncodeArrayLen(len(r.Resources))
+	for _, toc := range r.Resources {
 		toc.write(enc)
 	}
 
