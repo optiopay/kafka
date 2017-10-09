@@ -82,6 +82,7 @@ type OffsetCoordinator interface {
 // Admin write the admin-client methods.
 type Admin interface {
 	DeleteTopics(ctx context.Context, topics []string, timeout int32) ([]proto.TopicErrorCode, error)
+	DescribeConfigs(ctx context.Context, configs ...proto.ConfigResource) ([]proto.ConfigResourceEntry, error)
 }
 
 type topicPartition struct {
@@ -1563,6 +1564,49 @@ func (c *admin) DeleteTopics(ctx context.Context, topics []string, timeout int32
 			lastErr = err
 		case nil:
 			return resp.TopicErrorCodes, nil
+		default:
+			lastErr = err
+		}
+	}
+
+	return nil, lastErr
+}
+
+func (c *admin) DescribeConfigs(ctx context.Context, configs ...proto.ConfigResource) ([]proto.ConfigResourceEntry, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	lastErr := fmt.Errorf("DescribeConfigs failed")
+	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if retry != 0 {
+			c.mu.Unlock()
+			time.Sleep(c.conf.RetryErrWait)
+			c.mu.Lock()
+		}
+
+		// connection can be set to nil if previously reference connection died
+		if c.conn == nil {
+			conn, err := c.broker.muControllerConnection(ctx)
+			if err != nil {
+				c.conf.Logger.Debug("cannot connect to coordinator",
+					"error", err)
+				lastErr = err
+				continue
+			}
+			c.conn = conn
+		}
+		resp, err := c.conn.DescribeConfigs(ctx, &proto.DescribeConfigsReq{
+			Resources: configs,
+		})
+
+		switch err {
+		case io.EOF, syscall.EPIPE:
+			c.conf.Logger.Debug("connection died while describing configs")
+			c.broker.muCloseDeadConnection(ctx, c.conn)
+			c.conn = nil
+			lastErr = err
+		case nil:
+			return resp.Resources, nil
 		default:
 			lastErr = err
 		}
