@@ -60,6 +60,16 @@ const (
 	CompressionSnappy Compression = 2
 )
 
+type ResourceType int8
+
+const (
+	ResourceTypeUnknown ResourceType = 0
+	ResourceTypeAny     ResourceType = 1
+	ResourceTypeTopic   ResourceType = 2
+	ResourceTypeGroup   ResourceType = 3
+	ResourceTypeBroker  ResourceType = 4
+)
+
 // ReadReq returns request kind ID and byte representation of the whole message
 // in wire protocol format.
 func ReadReq(r io.Reader) (requestKind int16, b []byte, err error) {
@@ -1782,13 +1792,13 @@ type DescribeConfigsReq struct {
 }
 
 type ConfigResource struct {
-	ResourceType int8
+	ResourceType ResourceType
 	ResourceName string
 	ConfigNames  []string
 }
 
 func (r *ConfigResource) read(dec *decoder) {
-	r.ResourceType = dec.DecodeInt8()
+	r.ResourceType = ResourceType(dec.DecodeInt8())
 	r.ResourceName = dec.DecodeString()
 	r.ConfigNames = make([]string, dec.DecodeArrayLen())
 	for ti := range r.ConfigNames {
@@ -1797,7 +1807,7 @@ func (r *ConfigResource) read(dec *decoder) {
 }
 
 func (r ConfigResource) write(enc *encoder) {
-	enc.EncodeInt8(r.ResourceType)
+	enc.EncodeInt8(int8(r.ResourceType))
 	enc.EncodeString(r.ResourceName)
 	enc.EncodeArrayLen(len(r.ConfigNames))
 	for _, name := range r.ConfigNames {
@@ -1871,7 +1881,7 @@ type DescribeConfigsResp struct {
 type ConfigResourceEntry struct {
 	ErrorCode     int16
 	ErrorMessage  string
-	ResourceType  int8
+	ResourceType  ResourceType
 	ResourceName  string
 	ConfigEntries []ConfigEntry
 }
@@ -1879,7 +1889,7 @@ type ConfigResourceEntry struct {
 func (e *ConfigResourceEntry) read(dec *decoder) {
 	e.ErrorCode = dec.DecodeInt16()
 	e.ErrorMessage = dec.DecodeString()
-	e.ResourceType = dec.DecodeInt8()
+	e.ResourceType = ResourceType(dec.DecodeInt8())
 	e.ResourceName = dec.DecodeString()
 	e.ConfigEntries = make([]ConfigEntry, dec.DecodeArrayLen())
 	for i, _ := range e.ConfigEntries {
@@ -1890,7 +1900,7 @@ func (e *ConfigResourceEntry) read(dec *decoder) {
 func (e ConfigResourceEntry) write(enc *encoder) {
 	enc.EncodeInt16(e.ErrorCode)
 	enc.EncodeString(e.ErrorMessage)
-	enc.EncodeInt8(e.ResourceType)
+	enc.EncodeInt8(int8(e.ResourceType))
 	enc.EncodeString(e.ResourceName)
 	enc.EncodeArrayLen(len(e.ConfigEntries))
 	for _, ce := range e.ConfigEntries {
