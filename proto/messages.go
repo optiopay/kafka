@@ -1013,11 +1013,14 @@ func (r *ConsumerMetadataResp) Bytes(version int16) ([]byte, error) {
 }
 
 type OffsetCommitReq struct {
-	Version       int16
-	CorrelationID int32
-	ClientID      string
-	ConsumerGroup string
-	Topics        []OffsetCommitReqTopic
+	Version           int16
+	CorrelationID     int32
+	ClientID          string
+	ConsumerGroup     string
+	GroupGenerationID int32  // >= KafkaV1 only
+	MemberID          string // >= KafkaV1 only
+	RetentionTime     int64  // >= KafkaV2 only
+	Topics            []OffsetCommitReqTopic
 }
 
 type OffsetCommitReqTopic struct {
@@ -1028,7 +1031,7 @@ type OffsetCommitReqTopic struct {
 type OffsetCommitReqPartition struct {
 	ID        int32
 	Offset    int64
-	TimeStamp time.Time
+	TimeStamp time.Time // == KafkaV1 only
 	Metadata  string
 }
 
@@ -1044,6 +1047,15 @@ func ReadOffsetCommitReq(r io.Reader) (*OffsetCommitReq, error) {
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	req.ConsumerGroup = dec.DecodeString()
+
+	if req.Version >= KafkaV1 {
+		req.GroupGenerationID = dec.DecodeInt32()
+		req.MemberID = dec.DecodeString()
+	}
+
+	if req.Version >= KafkaV2 {
+		req.RetentionTime = dec.DecodeInt64()
+	}
 
 	len, err := dec.DecodeArrayLen()
 	if err != nil {
@@ -1065,7 +1077,11 @@ func ReadOffsetCommitReq(r io.Reader) (*OffsetCommitReq, error) {
 			var part = &topic.Partitions[pi]
 			part.ID = dec.DecodeInt32()
 			part.Offset = dec.DecodeInt64()
-			part.TimeStamp = time.Unix(0, dec.DecodeInt64()*int64(time.Millisecond))
+
+			if req.Version == KafkaV1 {
+				part.TimeStamp = time.Unix(0, dec.DecodeInt64()*int64(time.Millisecond))
+			}
+
 			part.Metadata = dec.DecodeString()
 		}
 	}
@@ -1089,6 +1105,15 @@ func (r *OffsetCommitReq) Bytes(version int16) ([]byte, error) {
 
 	enc.Encode(r.ConsumerGroup)
 
+	if version >= KafkaV1 {
+		enc.Encode(r.GroupGenerationID)
+		enc.Encode(r.MemberID)
+	}
+
+	if version >= KafkaV2 {
+		enc.Encode(r.RetentionTime)
+	}
+
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
 		enc.Encode(topic.Name)
@@ -1096,8 +1121,12 @@ func (r *OffsetCommitReq) Bytes(version int16) ([]byte, error) {
 		for _, part := range topic.Partitions {
 			enc.Encode(part.ID)
 			enc.Encode(part.Offset)
-			// TODO(husio) is this really in milliseconds?
-			enc.Encode(part.TimeStamp.UnixNano() / int64(time.Millisecond))
+
+			if version == KafkaV1 {
+				// TODO(husio) is this really in milliseconds?
+				enc.Encode(part.TimeStamp.UnixNano() / int64(time.Millisecond))
+			}
+
 			enc.Encode(part.Metadata)
 		}
 	}
@@ -1124,6 +1153,7 @@ func (r *OffsetCommitReq) WriteTo(w io.Writer, version int16) (int64, error) {
 
 type OffsetCommitResp struct {
 	CorrelationID int32
+	ThrottleTime  time.Duration // >= KafkaV3 only
 	Topics        []OffsetCommitRespTopic
 }
 
@@ -1181,6 +1211,11 @@ func (r *OffsetCommitResp) Bytes(version int16) ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(r.CorrelationID)
+
+	if version >= KafkaV3 {
+		enc.Encode(r.ThrottleTime)
+	}
+
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, t := range r.Topics {
 		enc.Encode(t.Name)
