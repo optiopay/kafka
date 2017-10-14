@@ -627,11 +627,14 @@ func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 }
 
 type FetchReq struct {
-	Version       int16
-	CorrelationID int32
-	ClientID      string
-	MaxWaitTime   time.Duration
-	MinBytes      int32
+	Version        int16
+	CorrelationID  int32
+	ClientID       string
+	ReplicaID      int32
+	MaxWaitTime    time.Duration
+	MinBytes       int32
+	MaxBytes       int32 // >= KafkaV3
+	IsolationLevel int8  // >= KafkaV4
 
 	Topics []FetchReqTopic
 }
@@ -642,9 +645,10 @@ type FetchReqTopic struct {
 }
 
 type FetchReqPartition struct {
-	ID          int32
-	FetchOffset int64
-	MaxBytes    int32
+	ID             int32
+	FetchOffset    int64
+	LogStartOffset int64 // >= KafkaV5
+	MaxBytes       int32
 }
 
 func ReadFetchReq(r io.Reader) (*FetchReq, error) {
@@ -658,10 +662,18 @@ func ReadFetchReq(r io.Reader) (*FetchReq, error) {
 	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
-	// replica id
-	_ = dec.DecodeInt32()
-	req.MaxWaitTime = time.Duration(dec.DecodeInt32()) * time.Millisecond
+
+	req.ReplicaID = dec.DecodeInt32()
+	req.MaxWaitTime = dec.DecodeDuration32()
 	req.MinBytes = dec.DecodeInt32()
+
+	if req.Version >= KafkaV3 {
+		req.MaxBytes = dec.DecodeInt32()
+	}
+
+	if req.Version >= KafkaV4 {
+		req.IsolationLevel = dec.DecodeInt8()
+	}
 
 	len, err := dec.DecodeArrayLen()
 	if err != nil {
@@ -683,6 +695,11 @@ func ReadFetchReq(r io.Reader) (*FetchReq, error) {
 			var part = &topic.Partitions[pi]
 			part.ID = dec.DecodeInt32()
 			part.FetchOffset = dec.DecodeInt64()
+
+			if req.Version >= KafkaV5 {
+				part.LogStartOffset = dec.DecodeInt64()
+			}
+
 			part.MaxBytes = dec.DecodeInt32()
 		}
 	}
@@ -704,10 +721,17 @@ func (r *FetchReq) Bytes(version int16) ([]byte, error) {
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
-	// replica id
-	enc.Encode(int32(-1))
-	enc.Encode(int32(r.MaxWaitTime / time.Millisecond))
+	enc.Encode(r.ReplicaID)
+	enc.Encode(r.MaxWaitTime)
 	enc.Encode(r.MinBytes)
+
+	if version >= KafkaV3 {
+		enc.Encode(r.MaxBytes)
+	}
+
+	if version >= KafkaV4 {
+		enc.Encode(r.IsolationLevel)
+	}
 
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
@@ -716,6 +740,11 @@ func (r *FetchReq) Bytes(version int16) ([]byte, error) {
 		for _, part := range topic.Partitions {
 			enc.Encode(part.ID)
 			enc.Encode(part.FetchOffset)
+
+			if version >= KafkaV5 {
+				enc.Encode(part.LogStartOffset)
+			}
+
 			enc.Encode(part.MaxBytes)
 		}
 	}
@@ -742,6 +771,7 @@ func (r *FetchReq) WriteTo(w io.Writer, version int16) (int64, error) {
 
 type FetchResp struct {
 	CorrelationID int32
+	ThrottleTime  time.Duration
 	Topics        []FetchRespTopic
 }
 
@@ -751,10 +781,18 @@ type FetchRespTopic struct {
 }
 
 type FetchRespPartition struct {
-	ID        int32
-	Err       error
-	TipOffset int64
-	Messages  []*Message
+	ID                  int32
+	Err                 error
+	TipOffset           int64
+	LastStableOffset    int64
+	LogStartOffset      int64
+	AbortedTransactions []FetchRespAbortedTransaction
+	Messages            []*Message
+}
+
+type FetchRespAbortedTransaction struct {
+	ProducerID  int64
+	FirstOffset int64
 }
 
 func (r *FetchResp) Bytes(version int16) ([]byte, error) {
@@ -764,6 +802,10 @@ func (r *FetchResp) Bytes(version int16) ([]byte, error) {
 	enc.Encode(int32(0)) // placeholder
 	enc.Encode(r.CorrelationID)
 
+	if version >= KafkaV1 {
+		enc.Encode(r.ThrottleTime)
+	}
+
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
 		enc.Encode(topic.Name)
@@ -772,6 +814,21 @@ func (r *FetchResp) Bytes(version int16) ([]byte, error) {
 			enc.Encode(part.ID)
 			enc.EncodeError(part.Err)
 			enc.Encode(part.TipOffset)
+
+			if version >= KafkaV4 {
+				enc.Encode(part.LastStableOffset)
+
+				if version >= KafkaV5 {
+					enc.Encode(part.LogStartOffset)
+				}
+
+				enc.EncodeArrayLen(len(part.AbortedTransactions))
+				for _, trans := range part.AbortedTransactions {
+					enc.Encode(trans.ProducerID)
+					enc.Encode(trans.FirstOffset)
+				}
+			}
+
 			i := len(buf)
 			enc.Encode(int32(0)) // placeholder
 			// NOTE(caleb): writing compressed fetch response isn't implemented

@@ -190,6 +190,7 @@ func TestFetchRequest(t *testing.T) {
 	req := &FetchReq{
 		CorrelationID: 241,
 		ClientID:      "test",
+		ReplicaID:     -1,
 		MaxWaitTime:   time.Second * 2,
 		MinBytes:      12454,
 		Topics: []FetchReqTopic{

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 )
 
 const (
@@ -110,6 +111,10 @@ func (d *decoder) DecodeInt64() int64 {
 		return 0
 	}
 	return int64(binary.BigEndian.Uint64(b))
+}
+
+func (d *decoder) DecodeDuration32() time.Duration {
+	return time.Duration(d.DecodeInt32()) * time.Millisecond
 }
 
 func (d *decoder) DecodeString() string {
@@ -254,6 +259,10 @@ func (e *encoder) Encode(value interface{}) {
 		for _, v := range val {
 			e.Encode(v)
 		}
+	case time.Duration:
+		intVal := uint32(val / time.Millisecond)
+		b = e.buf[:4]
+		binary.BigEndian.PutUint32(b, intVal)
 	default:
 		e.err = fmt.Errorf("cannot encode type %T", value)
 	}
