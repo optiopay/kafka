@@ -1326,13 +1326,14 @@ func (r *OffsetFetchResp) Bytes(version int16) ([]byte, error) {
 }
 
 type ProduceReq struct {
-	Version       int16
-	CorrelationID int32
-	ClientID      string
-	Compression   Compression // only used when sending ProduceReqs
-	RequiredAcks  int16
-	Timeout       time.Duration
-	Topics        []ProduceReqTopic
+	Version         int16
+	CorrelationID   int32
+	ClientID        string
+	Compression     Compression // only used when sending ProduceReqs
+	TransactionalID string
+	RequiredAcks    int16
+	Timeout         time.Duration
+	Topics          []ProduceReqTopic
 }
 
 type ProduceReqTopic struct {
@@ -1356,6 +1357,10 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
+
+	if req.Version >= KafkaV3 {
+		req.TransactionalID = dec.DecodeString()
+	}
 
 	req.RequiredAcks = dec.DecodeInt16()
 	req.Timeout = time.Duration(dec.DecodeInt32()) * time.Millisecond
@@ -1409,6 +1414,10 @@ func (r *ProduceReq) Bytes(version int16) ([]byte, error) {
 	enc.EncodeInt32(r.CorrelationID)
 	enc.EncodeString(r.ClientID)
 
+	if version >= KafkaV3 {
+		enc.EncodeString(r.TransactionalID)
+	}
+
 	enc.EncodeInt16(r.RequiredAcks)
 	enc.EncodeInt32(int32(r.Timeout / time.Millisecond))
 	enc.EncodeArrayLen(len(r.Topics))
@@ -1447,6 +1456,7 @@ func (r *ProduceReq) WriteTo(w io.Writer, version int16) (int64, error) {
 type ProduceResp struct {
 	CorrelationID int32
 	Topics        []ProduceRespTopic
+	ThrottleTime  time.Duration
 }
 
 type ProduceRespTopic struct {
@@ -1455,9 +1465,10 @@ type ProduceRespTopic struct {
 }
 
 type ProduceRespPartition struct {
-	ID     int32
-	Err    error
-	Offset int64
+	ID            int32
+	Err           error
+	Offset        int64
+	LogAppendTime int64
 }
 
 func (r *ProduceResp) Bytes(version int16) ([]byte, error) {
@@ -1475,7 +1486,15 @@ func (r *ProduceResp) Bytes(version int16) ([]byte, error) {
 			enc.Encode(part.ID)
 			enc.EncodeError(part.Err)
 			enc.Encode(part.Offset)
+
+			if version >= KafkaV2 {
+				enc.Encode(part.LogAppendTime)
+			}
 		}
+	}
+
+	if version >= KafkaV1 {
+		enc.Encode(r.ThrottleTime)
 	}
 
 	if enc.Err() != nil {
