@@ -58,6 +58,30 @@ const (
 	CompressionSnappy Compression = 2
 )
 
+// ParserConfig is optional configuration for the parser. It can be configured via
+// SetParserConfig
+type ParserConfig struct {
+	// SimplifiedMessageSetParsing enables a simplified version of the
+	// MessageSet parser which will not split MessageSet into slices of
+	// Message structures. Instead, the entire MessageSet will be read
+	// over. This mode improves parsing speed due to reduce memory read at
+	// the cost of not providing access to the message payload after
+	// parsing.
+	SimplifiedMessageSetParsing bool
+}
+
+var (
+	conf ParserConfig
+)
+
+// ConfigureParser configures the parser. It must be called prior to parsing
+// any messages as the structure is currently not prepared for concurrent
+// access.
+func ConfigureParser(c ParserConfig) error {
+	conf = c
+	return nil
+}
+
 // ReadReq returns request kind ID and byte representation of the whole message
 // in wire protocol format.
 func ReadReq(r io.Reader) (requestKind int16, b []byte, err error) {
@@ -272,6 +296,19 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 	}
 
 	rd := io.LimitReader(r, int64(size))
+
+	if conf.SimplifiedMessageSetParsing {
+		msgbuf, err := allocParseBuf(int(size))
+		if err != nil {
+			return nil, err
+		}
+
+		if _, err := io.ReadFull(rd, msgbuf); err != nil {
+			return nil, err
+		}
+		return make([]*Message, 0, 0), nil
+	}
+
 	dec := NewDecoder(rd)
 	set := make([]*Message, 0, 256)
 
