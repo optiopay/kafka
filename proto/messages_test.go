@@ -358,6 +358,26 @@ func TestReadIncompleteMessage(t *testing.T) {
 	}
 }
 
+func TestReadEmptyMessage(t *testing.T) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+	message := Message{}
+	enc.EncodeInt64(message.Offset)
+	enc.EncodeInt32(0)
+	if err := enc.Err(); err != nil {
+		t.Fatalf("encoding error: %s", err)
+	}
+
+	b := buf.Bytes()
+	messages, err := readMessageSet(bytes.NewBuffer(b), int32(len(b)))
+	if err != nil {
+		t.Fatalf("cannot deserialize messages: %s", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected 0 messages, got %d", len(messages))
+	}
+}
+
 func BenchmarkProduceRequestMarshal(b *testing.B) {
 	messages := make([]*Message, 100)
 	for i := range messages {

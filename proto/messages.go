@@ -237,7 +237,6 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 	dec := NewDecoder(rd)
 	set := make([]*Message, 0, 256)
 
-	var buf []byte
 	for {
 		offset := dec.DecodeInt64()
 		if err := dec.Err(); err != nil {
@@ -255,12 +254,12 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 			return nil, err
 		}
 
-		// read message to buffer to compute its content crc
-		if int(size) > len(buf) {
-			// allocate a bit more than needed
-			buf = make([]byte, size+10240)
+		// Skip over empty messages
+		if size <= int32(0) {
+			return set, nil
 		}
-		msgbuf := buf[:size]
+
+		msgbuf := make([]byte, size)
 
 		if _, err := io.ReadFull(rd, msgbuf); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -273,6 +272,12 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 		msg := &Message{
 			Offset: offset,
 			Crc:    msgdec.DecodeUint32(),
+		}
+
+		// MessageSet with no payload
+		if size <= int32(4) {
+			set = append(set, msg)
+			return set, nil
 		}
 
 		if msg.Crc != crc32.ChecksumIEEE(msgbuf[4:]) {
