@@ -376,6 +376,7 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 }
 
 type MetadataReq struct {
+	Version       int16
 	CorrelationID int32
 	ClientID      string
 	Topics        []string
@@ -387,8 +388,9 @@ func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
 
 	// total message size
 	_ = dec.DecodeInt32()
-	// api key + api version
-	_ = dec.DecodeInt32()
+	// api key
+	_ = dec.DecodeInt16()
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	len, err := dec.DecodeArrayLen()
@@ -414,7 +416,7 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(int16(MetadataReqKind))
-	enc.Encode(int16(0))
+	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
@@ -462,8 +464,8 @@ type MetadataRespTopic struct {
 }
 
 type MetadataRespPartition struct {
-	ID       int32
 	Err      error
+	ID       int32
 	Leader   int32
 	Replicas []int32
 	Isrs     []int32
@@ -579,6 +581,7 @@ func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 }
 
 type FetchReq struct {
+	Version       int16
 	CorrelationID int32
 	ClientID      string
 	MaxWaitTime   time.Duration
@@ -604,8 +607,9 @@ func ReadFetchReq(r io.Reader) (*FetchReq, error) {
 
 	// total message size
 	_ = dec.DecodeInt32()
-	// api key + api version
-	_ = dec.DecodeInt32()
+	// api key
+	_ = dec.DecodeInt16()
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	// replica id
@@ -650,7 +654,7 @@ func (r *FetchReq) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(int16(FetchReqKind))
-	enc.Encode(int16(0))
+	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
@@ -797,6 +801,7 @@ func ReadFetchResp(r io.Reader) (*FetchResp, error) {
 }
 
 type ConsumerMetadataReq struct {
+	Version       int16
 	CorrelationID int32
 	ClientID      string
 	ConsumerGroup string
@@ -808,8 +813,9 @@ func ReadConsumerMetadataReq(r io.Reader) (*ConsumerMetadataReq, error) {
 
 	// total message size
 	_ = dec.DecodeInt32()
-	// api key + api version
-	_ = dec.DecodeInt32()
+	// api key
+	_ = dec.DecodeInt16()
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	req.ConsumerGroup = dec.DecodeString()
@@ -827,7 +833,7 @@ func (r *ConsumerMetadataReq) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(int16(ConsumerMetadataReqKind))
-	enc.Encode(int16(0))
+	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
@@ -903,6 +909,7 @@ func (r *ConsumerMetadataResp) Bytes() ([]byte, error) {
 }
 
 type OffsetCommitReq struct {
+	Version       int16
 	CorrelationID int32
 	ClientID      string
 	ConsumerGroup string
@@ -927,8 +934,9 @@ func ReadOffsetCommitReq(r io.Reader) (*OffsetCommitReq, error) {
 
 	// total message size
 	_ = dec.DecodeInt32()
-	// api key + api version
-	_ = dec.DecodeInt32()
+	// api key
+	_ = dec.DecodeInt16()
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	req.ConsumerGroup = dec.DecodeString()
@@ -971,7 +979,7 @@ func (r *OffsetCommitReq) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(int16(OffsetCommitReqKind))
-	enc.Encode(int16(0))
+	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
@@ -1092,6 +1100,7 @@ func (r *OffsetCommitResp) Bytes() ([]byte, error) {
 }
 
 type OffsetFetchReq struct {
+	Version       int16
 	CorrelationID int32
 	ClientID      string
 	ConsumerGroup string
@@ -1109,8 +1118,9 @@ func ReadOffsetFetchReq(r io.Reader) (*OffsetFetchReq, error) {
 
 	// total message size
 	_ = dec.DecodeInt32()
-	// api key + api version
-	_ = dec.DecodeInt32()
+	// api key
+	_ = dec.DecodeInt16()
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	req.ConsumerGroup = dec.DecodeString()
@@ -1148,7 +1158,7 @@ func (r *OffsetFetchReq) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(int16(OffsetFetchReqKind))
-	enc.Encode(int16(0))
+	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
@@ -1269,6 +1279,7 @@ func (r *OffsetFetchResp) Bytes() ([]byte, error) {
 }
 
 type ProduceReq struct {
+	Version       int16
 	CorrelationID int32
 	ClientID      string
 	Compression   Compression // only used when sending ProduceReqs
@@ -1293,8 +1304,9 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 
 	// total message size
 	_ = dec.DecodeInt32()
-	// api key + api version
-	_ = dec.DecodeInt32()
+	// api key
+	_ = dec.DecodeInt16()
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 
@@ -1346,7 +1358,7 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 
 	enc.EncodeInt32(0) // placeholder
 	enc.EncodeInt16(ProduceReqKind)
-	enc.EncodeInt16(0)
+	enc.EncodeInt16(r.Version)
 	enc.EncodeInt32(r.CorrelationID)
 	enc.EncodeString(r.ClientID)
 
@@ -1468,6 +1480,7 @@ func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
 }
 
 type OffsetReq struct {
+	Version       int16
 	CorrelationID int32
 	ClientID      string
 	ReplicaID     int32
@@ -1491,8 +1504,9 @@ func ReadOffsetReq(r io.Reader) (*OffsetReq, error) {
 
 	// total message size
 	_ = dec.DecodeInt32()
-	// api key + api version
-	_ = dec.DecodeInt32()
+	// api key
+	_ = dec.DecodeInt16()
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	req.ReplicaID = dec.DecodeInt32()
@@ -1534,7 +1548,7 @@ func (r *OffsetReq) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(int16(OffsetReqKind))
-	enc.Encode(int16(0))
+	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
