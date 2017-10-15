@@ -22,6 +22,15 @@ https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#
 */
 
 const (
+	KafkaV0 int16 = iota
+	KafkaV1
+	KafkaV2
+	KafkaV3
+	KafkaV4
+	KafkaV5
+)
+
+const (
 	ProduceReqKind          = 0
 	FetchReqKind            = 1
 	OffsetReqKind           = 2
@@ -446,7 +455,7 @@ func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
 	return &req, nil
 }
 
-func (r *MetadataReq) Bytes() ([]byte, error) {
+func (r *MetadataReq) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -473,8 +482,8 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func (r *MetadataReq) WriteTo(w io.Writer) (int64, error) {
-	b, err := r.Bytes()
+func (r *MetadataReq) WriteTo(w io.Writer, version int16) (int64, error) {
+	b, err := r.Bytes(version)
 	if err != nil {
 		return 0, err
 	}
@@ -508,7 +517,7 @@ type MetadataRespPartition struct {
 	Isrs     []int32
 }
 
-func (r *MetadataResp) Bytes() ([]byte, error) {
+func (r *MetadataResp) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -684,7 +693,7 @@ func ReadFetchReq(r io.Reader) (*FetchReq, error) {
 	return &req, nil
 }
 
-func (r *FetchReq) Bytes() ([]byte, error) {
+func (r *FetchReq) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -722,8 +731,8 @@ func (r *FetchReq) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func (r *FetchReq) WriteTo(w io.Writer) (int64, error) {
-	b, err := r.Bytes()
+func (r *FetchReq) WriteTo(w io.Writer, version int16) (int64, error) {
+	b, err := r.Bytes(version)
 	if err != nil {
 		return 0, err
 	}
@@ -748,12 +757,13 @@ type FetchRespPartition struct {
 	Messages  []*Message
 }
 
-func (r *FetchResp) Bytes() ([]byte, error) {
+func (r *FetchResp) Bytes(version int16) ([]byte, error) {
 	var buf buffer
 	enc := NewEncoder(&buf)
 
 	enc.Encode(int32(0)) // placeholder
 	enc.Encode(r.CorrelationID)
+
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
 		enc.Encode(topic.Name)
@@ -863,7 +873,7 @@ func ReadConsumerMetadataReq(r io.Reader) (*ConsumerMetadataReq, error) {
 	return &req, nil
 }
 
-func (r *ConsumerMetadataReq) Bytes() ([]byte, error) {
+func (r *ConsumerMetadataReq) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -887,8 +897,8 @@ func (r *ConsumerMetadataReq) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func (r *ConsumerMetadataReq) WriteTo(w io.Writer) (int64, error) {
-	b, err := r.Bytes()
+func (r *ConsumerMetadataReq) WriteTo(w io.Writer, version int16) (int64, error) {
+	b, err := r.Bytes(version)
 	if err != nil {
 		return 0, err
 	}
@@ -922,7 +932,7 @@ func ReadConsumerMetadataResp(r io.Reader) (*ConsumerMetadataResp, error) {
 	return &resp, nil
 }
 
-func (r *ConsumerMetadataResp) Bytes() ([]byte, error) {
+func (r *ConsumerMetadataResp) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -1009,7 +1019,7 @@ func ReadOffsetCommitReq(r io.Reader) (*OffsetCommitReq, error) {
 	return &req, nil
 }
 
-func (r *OffsetCommitReq) Bytes() ([]byte, error) {
+func (r *OffsetCommitReq) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -1046,8 +1056,8 @@ func (r *OffsetCommitReq) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func (r *OffsetCommitReq) WriteTo(w io.Writer) (int64, error) {
-	b, err := r.Bytes()
+func (r *OffsetCommitReq) WriteTo(w io.Writer, version int16) (int64, error) {
+	b, err := r.Bytes(version)
 	if err != nil {
 		return 0, err
 	}
@@ -1107,7 +1117,7 @@ func ReadOffsetCommitResp(r io.Reader) (*OffsetCommitResp, error) {
 	return &resp, nil
 }
 
-func (r *OffsetCommitResp) Bytes() ([]byte, error) {
+func (r *OffsetCommitResp) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -1188,7 +1198,7 @@ func ReadOffsetFetchReq(r io.Reader) (*OffsetFetchReq, error) {
 	return &req, nil
 }
 
-func (r *OffsetFetchReq) Bytes() ([]byte, error) {
+func (r *OffsetFetchReq) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -1220,8 +1230,8 @@ func (r *OffsetFetchReq) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func (r *OffsetFetchReq) WriteTo(w io.Writer) (int64, error) {
-	b, err := r.Bytes()
+func (r *OffsetFetchReq) WriteTo(w io.Writer, version int16) (int64, error) {
+	b, err := r.Bytes(version)
 	if err != nil {
 		return 0, err
 	}
@@ -1285,7 +1295,7 @@ func ReadOffsetFetchResp(r io.Reader) (*OffsetFetchResp, error) {
 	return &resp, nil
 }
 
-func (r *OffsetFetchResp) Bytes() ([]byte, error) {
+func (r *OffsetFetchResp) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -1389,7 +1399,7 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 	return &req, nil
 }
 
-func (r *ProduceReq) Bytes() ([]byte, error) {
+func (r *ProduceReq) Bytes(version int16) ([]byte, error) {
 	var buf buffer
 	enc := NewEncoder(&buf)
 
@@ -1425,8 +1435,8 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 	return []byte(buf), nil
 }
 
-func (r *ProduceReq) WriteTo(w io.Writer) (int64, error) {
-	b, err := r.Bytes()
+func (r *ProduceReq) WriteTo(w io.Writer, version int16) (int64, error) {
+	b, err := r.Bytes(version)
 	if err != nil {
 		return 0, err
 	}
@@ -1450,7 +1460,7 @@ type ProduceRespPartition struct {
 	Offset int64
 }
 
-func (r *ProduceResp) Bytes() ([]byte, error) {
+func (r *ProduceResp) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -1578,7 +1588,7 @@ func ReadOffsetReq(r io.Reader) (*OffsetReq, error) {
 	return &req, nil
 }
 
-func (r *OffsetReq) Bytes() ([]byte, error) {
+func (r *OffsetReq) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
@@ -1612,8 +1622,8 @@ func (r *OffsetReq) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func (r *OffsetReq) WriteTo(w io.Writer) (int64, error) {
-	b, err := r.Bytes()
+func (r *OffsetReq) WriteTo(w io.Writer, version int16) (int64, error) {
+	b, err := r.Bytes(version)
 	if err != nil {
 		return 0, err
 	}
@@ -1683,7 +1693,7 @@ func ReadOffsetResp(r io.Reader) (*OffsetResp, error) {
 	return &resp, nil
 }
 
-func (r *OffsetResp) Bytes() ([]byte, error) {
+func (r *OffsetResp) Bytes(version int16) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
