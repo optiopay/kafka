@@ -949,11 +949,17 @@ func ReadFetchResp(r io.Reader) (*FetchResp, error) {
 	return &resp, nil
 }
 
+const (
+	CorrelationTypeGroup       int8 = 0
+	CorrelationTypeTransaction      = 1
+)
+
 type ConsumerMetadataReq struct {
-	Version       int16
-	CorrelationID int32
-	ClientID      string
-	ConsumerGroup string
+	Version         int16
+	CorrelationID   int32
+	ClientID        string
+	ConsumerGroup   string
+	CoordinatorType int8 // >= KafkaV1
 }
 
 func ReadConsumerMetadataReq(r io.Reader) (*ConsumerMetadataReq, error) {
@@ -968,6 +974,10 @@ func ReadConsumerMetadataReq(r io.Reader) (*ConsumerMetadataReq, error) {
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	req.ConsumerGroup = dec.DecodeString()
+
+	if req.Version >= KafkaV1 {
+		req.CoordinatorType = dec.DecodeInt8()
+	}
 
 	if dec.Err() != nil {
 		return nil, dec.Err()
@@ -1010,7 +1020,9 @@ func (r *ConsumerMetadataReq) WriteTo(w io.Writer, version int16) (int64, error)
 
 type ConsumerMetadataResp struct {
 	CorrelationID   int32
+	ThrottleTime    time.Duration // >= KafkaV1
 	Err             error
+	ErrMsg          string // >= KafkaV1
 	CoordinatorID   int32
 	CoordinatorHost string
 	CoordinatorPort int32
@@ -1041,7 +1053,17 @@ func (r *ConsumerMetadataResp) Bytes(version int16) ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(r.CorrelationID)
+
+	if version >= KafkaV1 {
+		enc.Encode(r.ThrottleTime)
+	}
+
 	enc.EncodeError(r.Err)
+
+	if version >= KafkaV1 {
+		enc.Encode(r.ErrMsg)
+	}
+
 	enc.Encode(r.CoordinatorID)
 	enc.Encode(r.CoordinatorHost)
 	enc.Encode(r.CoordinatorPort)
