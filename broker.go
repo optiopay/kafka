@@ -2,11 +2,13 @@ package kafka
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -129,6 +131,12 @@ type BrokerConf struct {
 	//
 	// Defaults to False.
 	AllowTopicCreation bool
+
+	// If set, a TLS connection is created.
+	DialTLS bool
+
+	// Configuration used for TLS connections
+	TLSConfig *tls.Config
 
 	// Any new connection dial timeout.
 	//
@@ -323,7 +331,7 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 		if _, ok := checkednodes[nodeID]; ok {
 			continue
 		}
-		conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+		conn, err := b.newConnection(addr)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect",
 				"address", addr,
@@ -349,7 +357,7 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 	}
 
 	for _, addr := range b.getInitialAddresses() {
-		conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+		conn, err := b.newConnection(addr)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect to seed node",
 				"address", addr,
@@ -429,6 +437,22 @@ func (b *Broker) PartitionCount(topic string) (int32, error) {
 	return 0, fmt.Errorf("topic %s not found in metadata", topic)
 }
 
+// newConnection creates a connection to the broker at the given address (host:port).
+func (b *Broker) newConnection(addr string) (*connection, error) {
+	if b.conf.DialTLS {
+		conn, err := newTLSConnection(addr, b.conf.TLSConfig, b.conf.DialTimeout, b.conf.ReadTimeout)
+		if err != nil {
+			return nil, err
+		}
+		return conn, err
+	}
+	conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+	if err != nil {
+		return nil, err
+	}
+	return conn, err
+}
+
 // muLeaderConnection returns connection to leader for given partition. If
 // connection does not exist, broker will try to connect first and add store
 // connection for any further use.
@@ -498,7 +522,7 @@ func (b *Broker) muLeaderConnection(ctx context.Context, topic string, partition
 				delete(b.metadata.endpoints, tp)
 				continue
 			}
-			conn, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err = b.newConnection(addr)
 			if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot connect to node",
 					"address", addr,
@@ -548,8 +572,8 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 				continue
 			}
 
-			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
-			conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			addr := net.JoinHostPort(resp.CoordinatorHost, strconv.Itoa(int(resp.CoordinatorPort)))
+			conn, err := b.newConnection(addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
@@ -575,7 +599,7 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 				// connection to node is cached so it was already checked
 				continue
 			}
-			conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err := b.newConnection(addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"nodeID", nodeID,
@@ -605,8 +629,8 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 				continue
 			}
 
-			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
-			conn, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			addr := net.JoinHostPort(resp.CoordinatorHost, strconv.Itoa(int(resp.CoordinatorPort)))
+			conn, err = b.newConnection(addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
@@ -666,7 +690,7 @@ func (b *Broker) muControllerConnection(ctx context.Context) (*connection, error
 				continue
 			}
 			var err error
-			conn, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err = b.newConnection(addr)
 			if err != nil {
 				b.conf.Logger.Info("cannot get controller connection: cannot connect to node",
 					"address", addr,

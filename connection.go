@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"math"
@@ -30,16 +31,42 @@ type connection struct {
 	readTimeout time.Duration
 }
 
-// newConnection returns new, initialized connection or error
+// newTCPConnection returns new, initialized connection using plain text or error
 func newTCPConnection(address string, timeout, readTimeout time.Duration) (*connection, error) {
 	dialer := net.Dialer{
 		Timeout:   timeout,
 		KeepAlive: 30 * time.Second,
 	}
-	conn, err := dialer.Dial("tcp", address)
+	tcpConn, err := dialer.Dial("tcp", address)
 	if err != nil {
 		return nil, err
 	}
+	c, err := prepareConnection(tcpConn, readTimeout)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// newTLSConnection returns new, initialized connection using TLS or error
+func newTLSConnection(address string, config *tls.Config, timeout, readTimeout time.Duration) (*connection, error) {
+	dialer := &net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 30 * time.Second,
+	}
+	tlsConn, err := tls.DialWithDialer(dialer, "tcp", address, config)
+	if err != nil {
+		return nil, err
+	}
+	c, err := prepareConnection(tlsConn, readTimeout)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// dialConnection returns new, initialized connection or error
+func prepareConnection(conn net.Conn, readTimeout time.Duration) (*connection, error) {
 	c := &connection{
 		stop:        make(chan struct{}),
 		nextID:      make(chan int32),
