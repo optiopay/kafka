@@ -91,6 +91,14 @@ func ConfigureParser(c ParserConfig) error {
 	return nil
 }
 
+func boolToInt8(val bool) int8 {
+	res := int8(0)
+	if val {
+		res = 1
+	}
+	return res
+}
+
 // ReadReq returns request kind ID and byte representation of the whole message
 // in wire protocol format.
 func ReadReq(r io.Reader) (requestKind int16, b []byte, err error) {
@@ -422,10 +430,11 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 }
 
 type MetadataReq struct {
-	Version       int16
-	CorrelationID int32
-	ClientID      string
-	Topics        []string
+	Version                int16
+	CorrelationID          int32
+	ClientID               string
+	Topics                 []string
+	AllowAutoTopicCreation bool // >= KafkaV4 only
 }
 
 func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
@@ -447,6 +456,10 @@ func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
 
 	for i := range req.Topics {
 		req.Topics[i] = dec.DecodeString()
+	}
+
+	if req.Version >= KafkaV4 {
+		req.AllowAutoTopicCreation = dec.DecodeInt8() != 0
 	}
 
 	if dec.Err() != nil {
@@ -471,6 +484,10 @@ func (r *MetadataReq) Bytes(version int16) ([]byte, error) {
 		enc.Encode(name)
 	}
 
+	if version >= KafkaV4 {
+		enc.Encode(boolToInt8(r.AllowAutoTopicCreation))
+	}
+
 	if enc.Err() != nil {
 		return nil, enc.Err()
 	}
@@ -493,7 +510,10 @@ func (r *MetadataReq) WriteTo(w io.Writer, version int16) (int64, error) {
 
 type MetadataResp struct {
 	CorrelationID int32
+	ThrottleTime  time.Duration // >= KafkaV3
 	Brokers       []MetadataRespBroker
+	ClusterID     string // >= KafkaV2
+	ControllerID  int32  // >= KafkaV1
 	Topics        []MetadataRespTopic
 }
 
@@ -501,11 +521,13 @@ type MetadataRespBroker struct {
 	NodeID int32
 	Host   string
 	Port   int32
+	Rack   string // >= KafkaV1
 }
 
 type MetadataRespTopic struct {
 	Name       string
 	Err        error
+	IsInternal bool // >= KafkaV1
 	Partitions []MetadataRespPartition
 }
 
@@ -524,16 +546,39 @@ func (r *MetadataResp) Bytes(version int16) ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(r.CorrelationID)
+
+	if version >= KafkaV3 {
+		enc.Encode(r.ThrottleTime)
+	}
+
 	enc.EncodeArrayLen(len(r.Brokers))
 	for _, broker := range r.Brokers {
 		enc.Encode(broker.NodeID)
 		enc.Encode(broker.Host)
 		enc.Encode(broker.Port)
+
+		if version >= KafkaV1 {
+			enc.Encode(broker.Rack)
+		}
 	}
+
+	if version >= KafkaV2 {
+		enc.Encode(r.ClusterID)
+	}
+
+	if version >= KafkaV1 {
+		enc.Encode(r.ControllerID)
+	}
+
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
 		enc.EncodeError(topic.Err)
 		enc.Encode(topic.Name)
+
+		if version >= KafkaV1 {
+			enc.Encode(boolToInt8(topic.IsInternal))
+		}
+
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
 			enc.EncodeError(part.Err)
