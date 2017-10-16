@@ -1378,7 +1378,9 @@ func (r *OffsetFetchReq) WriteTo(w io.Writer, version int16) (int64, error) {
 
 type OffsetFetchResp struct {
 	CorrelationID int32
+	ThrottleTime  time.Duration // >= KafkaV3
 	Topics        []OffsetFetchRespTopic
+	Err           error // >= KafkaV2
 }
 
 type OffsetFetchRespTopic struct {
@@ -1439,6 +1441,11 @@ func (r *OffsetFetchResp) Bytes(version int16) ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(r.CorrelationID)
+
+	if version >= KafkaV3 {
+		enc.Encode(r.ThrottleTime)
+	}
+
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
 		enc.Encode(topic.Name)
@@ -1449,6 +1456,10 @@ func (r *OffsetFetchResp) Bytes(version int16) ([]byte, error) {
 			enc.Encode(part.Metadata)
 			enc.EncodeError(part.Err)
 		}
+	}
+
+	if version >= KafkaV2 {
+		enc.EncodeError(r.Err)
 	}
 
 	if enc.Err() != nil {
