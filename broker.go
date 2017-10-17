@@ -240,10 +240,10 @@ func Dial(ctx context.Context, nodeAddresses []string, conf BrokerConf) (*Broker
 			time.Sleep(conf.DialRetryWait)
 		}
 
-		err := broker.refreshMetadata(ctx, proto.MetadataV0)
-
-		if err == nil {
+		if err := broker.refreshMetadata(ctx, proto.MetadataV0); err == nil {
 			return broker, nil
+		} else if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 	}
 	return nil, errors.New("cannot connect")
