@@ -237,7 +237,12 @@ func Dial(ctx context.Context, nodeAddresses []string, conf BrokerConf) (*Broker
 			conf.Logger.Debug("cannot fetch metadata from any connection",
 				"retry", i,
 				"sleep", conf.DialRetryWait)
-			time.Sleep(conf.DialRetryWait)
+			select {
+			case <-time.After(conf.DialRetryWait):
+				// continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 
 		if err := broker.refreshMetadata(ctx, proto.MetadataV0); err == nil {
@@ -500,7 +505,13 @@ func (b *Broker) muLeaderConnection(ctx context.Context, topic string, partition
 				"partition", partition,
 				"retry", retry,
 				"sleep", b.conf.LeaderRetryWait.String())
-			time.Sleep(b.conf.LeaderRetryWait)
+			select {
+			case <-time.After(b.conf.LeaderRetryWait):
+				// continue
+			case <-ctx.Done():
+				b.mu.Lock()
+				return nil, ctx.Err()
+			}
 			b.mu.Lock()
 		}
 
@@ -579,7 +590,13 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 
 		if retry != 0 {
 			b.mu.Unlock()
-			time.Sleep(b.conf.LeaderRetryWait)
+			select {
+			case <-time.After(b.conf.LeaderRetryWait):
+				// continue
+			case <-ctx.Done():
+				b.mu.Lock()
+				return nil, ctx.Err()
+			}
 			b.mu.Lock()
 		}
 
@@ -710,7 +727,13 @@ func (b *Broker) muControllerConnection(ctx context.Context) (*connection, error
 			b.conf.Logger.Debug("cannot get controller connection",
 				"retry", retry,
 				"sleep", b.conf.LeaderRetryWait.String())
-			time.Sleep(b.conf.LeaderRetryWait)
+			select {
+			case <-time.After(b.conf.LeaderRetryWait):
+				// continue
+			case <-ctx.Done():
+				b.mu.Lock()
+				return nil, ctx.Err()
+			}
 			b.mu.Lock()
 		}
 
@@ -792,7 +815,12 @@ func (b *Broker) offset(ctx context.Context, topic string, partition int32, time
 		}
 
 		if retry != 0 {
-			time.Sleep(b.conf.RetryErrWait)
+			select {
+			case <-time.After(b.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
 			err = b.muRefreshMetadata(ctx, proto.MetadataV0)
 			if err != nil {
 				continue
@@ -944,7 +972,12 @@ func (p *producer) Produce(ctx context.Context, topic string, partition int32, m
 		}
 
 		if retry != 0 {
-			time.Sleep(p.conf.RetryWait)
+			select {
+			case <-time.After(p.conf.RetryWait):
+				// continue
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
 		}
 
 		offset, err = p.produce(ctx, topic, partition, messages...)
@@ -1215,7 +1248,12 @@ func (c *consumer) consume(ctx context.Context) ([]*proto.Message, error) {
 		}
 		if len(msgbuf) == 0 {
 			if c.conf.RetryWait > 0 {
-				time.Sleep(c.conf.RetryWait)
+				select {
+				case <-time.After(c.conf.RetryWait):
+					// continue
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
 			}
 			retry++
 			if c.conf.RetryLimit != -1 && retry > c.conf.RetryLimit {
@@ -1289,7 +1327,12 @@ consumeRetryLoop:
 		}
 
 		if retry != 0 {
-			time.Sleep(c.conf.RetryErrWait)
+			select {
+			case <-time.After(c.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 
 		if c.conn == nil {
@@ -1449,7 +1492,13 @@ func (c *offsetCoordinator) commit(ctx context.Context, topic string, partition 
 
 		if retry != 0 {
 			c.mu.Unlock()
-			time.Sleep(c.conf.RetryErrWait)
+			select {
+			case <-time.After(c.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				c.mu.Lock()
+				return ctx.Err()
+			}
 			c.mu.Lock()
 		}
 
@@ -1532,7 +1581,13 @@ func (c *offsetCoordinator) Offset(ctx context.Context, topic string, partition 
 
 		if retry != 0 {
 			c.mu.Unlock()
-			time.Sleep(c.conf.RetryErrWait)
+			select {
+			case <-time.After(c.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				c.mu.Lock()
+				return 0, "", ctx.Err()
+			}
 			c.mu.Lock()
 		}
 
@@ -1659,7 +1714,13 @@ func (c *admin) DeleteTopics(ctx context.Context, topics []string, timeout int32
 
 		if retry != 0 {
 			c.mu.Unlock()
-			time.Sleep(c.conf.RetryErrWait)
+			select {
+			case <-time.After(c.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				c.mu.Lock()
+				return nil, ctx.Err()
+			}
 			c.mu.Lock()
 		}
 
@@ -1710,7 +1771,13 @@ func (c *admin) DescribeConfigs(ctx context.Context, configs ...proto.ConfigReso
 
 		if retry != 0 {
 			c.mu.Unlock()
-			time.Sleep(c.conf.RetryErrWait)
+			select {
+			case <-time.After(c.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				c.mu.Lock()
+				return nil, ctx.Err()
+			}
 			c.mu.Lock()
 		}
 
