@@ -328,10 +328,14 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 
 	// try all nodes that we know of that we're not connected to
 	for nodeID, addr := range b.metadata.nodes {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
 		if _, ok := checkednodes[nodeID]; ok {
 			continue
 		}
-		conn, err := b.newConnection(addr)
+		conn, err := b.newConnection(ctx, addr)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect",
 				"address", addr,
@@ -357,7 +361,11 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 	}
 
 	for _, addr := range b.getInitialAddresses() {
-		conn, err := b.newConnection(addr)
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+		conn, err := b.newConnection(ctx, addr)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect to seed node",
 				"address", addr,
@@ -438,15 +446,15 @@ func (b *Broker) PartitionCount(topic string) (int32, error) {
 }
 
 // newConnection creates a connection to the broker at the given address (host:port).
-func (b *Broker) newConnection(addr string) (*connection, error) {
+func (b *Broker) newConnection(ctx context.Context, addr string) (*connection, error) {
 	if b.conf.DialTLS {
-		conn, err := newTLSConnection(addr, b.conf.TLSConfig, b.conf.DialTimeout, b.conf.ReadTimeout)
+		conn, err := newTLSConnection(ctx, addr, b.conf.TLSConfig, b.conf.DialTimeout, b.conf.ReadTimeout)
 		if err != nil {
 			return nil, err
 		}
 		return conn, err
 	}
-	conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+	conn, err := newTCPConnection(ctx, addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -470,6 +478,11 @@ func (b *Broker) muLeaderConnection(ctx context.Context, topic string, partition
 	defer b.mu.Unlock()
 
 	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			b.mu.Unlock()
 			b.conf.Logger.Debug("cannot get leader connection",
@@ -522,7 +535,7 @@ func (b *Broker) muLeaderConnection(ctx context.Context, topic string, partition
 				delete(b.metadata.endpoints, tp)
 				continue
 			}
-			conn, err = b.newConnection(addr)
+			conn, err = b.newConnection(ctx, addr)
 			if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot connect to node",
 					"address", addr,
@@ -545,6 +558,11 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 	defer b.mu.Unlock()
 
 	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			b.mu.Unlock()
 			time.Sleep(b.conf.LeaderRetryWait)
@@ -573,7 +591,7 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 			}
 
 			addr := net.JoinHostPort(resp.CoordinatorHost, strconv.Itoa(int(resp.CoordinatorPort)))
-			conn, err := b.newConnection(addr)
+			conn, err := b.newConnection(ctx, addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
@@ -599,7 +617,7 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 				// connection to node is cached so it was already checked
 				continue
 			}
-			conn, err := b.newConnection(addr)
+			conn, err := b.newConnection(ctx, addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"nodeID", nodeID,
@@ -630,7 +648,7 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 			}
 
 			addr := net.JoinHostPort(resp.CoordinatorHost, strconv.Itoa(int(resp.CoordinatorPort)))
-			conn, err = b.newConnection(addr)
+			conn, err = b.newConnection(ctx, addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
@@ -656,6 +674,11 @@ func (b *Broker) muControllerConnection(ctx context.Context) (*connection, error
 	lastErr := fmt.Errorf("cannot get controller connection")
 
 	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			b.mu.Unlock()
 			b.conf.Logger.Debug("cannot get controller connection",
@@ -690,7 +713,7 @@ func (b *Broker) muControllerConnection(ctx context.Context) (*connection, error
 				continue
 			}
 			var err error
-			conn, err = b.newConnection(addr)
+			conn, err = b.newConnection(ctx, addr)
 			if err != nil {
 				b.conf.Logger.Info("cannot get controller connection: cannot connect to node",
 					"address", addr,
@@ -733,6 +756,11 @@ func (b *Broker) muCloseDeadConnection(ctx context.Context, conn *connection) {
 // which offset value should be returned.
 func (b *Broker) offset(ctx context.Context, topic string, partition int32, timems int64) (offset int64, err error) {
 	for retry := 0; retry < b.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return 0, err
+		}
+
 		if retry != 0 {
 			time.Sleep(b.conf.RetryErrWait)
 			err = b.muRefreshMetadata(ctx, proto.MetadataV0)
@@ -880,6 +908,11 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 func (p *producer) Produce(ctx context.Context, topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			p.conf.Logger.Debug("context canceled")
+			return 0, err
+		}
+
 		if retry != 0 {
 			time.Sleep(p.conf.RetryWait)
 		}
@@ -1135,6 +1168,11 @@ func (c *consumer) consume(ctx context.Context) ([]*proto.Message, error) {
 	var msgbuf []*proto.Message
 	var retry int
 	for len(msgbuf) == 0 {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		var err error
 		msgbuf, err = c.fetch(ctx)
 		if err != nil {
@@ -1210,6 +1248,11 @@ func (c *consumer) fetch(ctx context.Context) ([]*proto.Message, error) {
 	var resErr error
 consumeRetryLoop:
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			time.Sleep(c.conf.RetryErrWait)
 		}
@@ -1362,6 +1405,11 @@ func (c *offsetCoordinator) commit(ctx context.Context, topic string, partition 
 	defer c.mu.Unlock()
 
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return err
+		}
+
 		if retry != 0 {
 			c.mu.Unlock()
 			time.Sleep(c.conf.RetryErrWait)
@@ -1438,6 +1486,11 @@ func (c *offsetCoordinator) Offset(ctx context.Context, topic string, partition 
 	defer c.mu.Unlock()
 
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return 0, "", err
+		}
+
 		if retry != 0 {
 			c.mu.Unlock()
 			time.Sleep(c.conf.RetryErrWait)
@@ -1558,6 +1611,11 @@ func (c *admin) DeleteTopics(ctx context.Context, topics []string, timeout int32
 
 	lastErr := fmt.Errorf("DeleteTopics failed")
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			c.mu.Unlock()
 			time.Sleep(c.conf.RetryErrWait)
@@ -1602,6 +1660,11 @@ func (c *admin) DescribeConfigs(ctx context.Context, configs ...proto.ConfigReso
 
 	lastErr := fmt.Errorf("DescribeConfigs failed")
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			c.mu.Unlock()
 			time.Sleep(c.conf.RetryErrWait)
