@@ -786,6 +786,11 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 			for i, msg := range messages {
 				msg.Offset = int64(i) + offset
 			}
+			if retry != 0 {
+				p.conf.Logger.Debug("Produced message after retry",
+					"retry", retry,
+					"topic", topic)
+			}
 			return offset, err
 		case io.EOF, syscall.EPIPE:
 			// p.produce call is closing connection when this error shows up,
@@ -804,12 +809,9 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 			"topic", topic,
 			"error", err)
 	}
-	if retry != 0 {
-		p.conf.Logger.Debug("Produced message after retry",
-			"retry", retry,
-			"topic", topic,
-			"error", err)
-	}
+	p.conf.Logger.Debug("Abort to produce after retrying messages",
+		"retry", retry,
+		"topic", topic)
 	return 0, err
 
 }
