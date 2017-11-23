@@ -32,12 +32,12 @@ type connection struct {
 }
 
 // newTCPConnection returns new, initialized connection using plain text or error
-func newTCPConnection(address string, timeout, readTimeout time.Duration) (*connection, error) {
+func newTCPConnection(ctx context.Context, address string, timeout, readTimeout time.Duration) (*connection, error) {
 	dialer := net.Dialer{
 		Timeout:   timeout,
 		KeepAlive: 30 * time.Second,
 	}
-	tcpConn, err := dialer.Dial("tcp", address)
+	tcpConn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, err
 	}
@@ -49,15 +49,16 @@ func newTCPConnection(address string, timeout, readTimeout time.Duration) (*conn
 }
 
 // newTLSConnection returns new, initialized connection using TLS or error
-func newTLSConnection(address string, config *tls.Config, timeout, readTimeout time.Duration) (*connection, error) {
-	dialer := &net.Dialer{
+func newTLSConnection(ctx context.Context, address string, config *tls.Config, timeout, readTimeout time.Duration) (*connection, error) {
+	dialer := net.Dialer{
 		Timeout:   timeout,
 		KeepAlive: 30 * time.Second,
 	}
-	tlsConn, err := tls.DialWithDialer(dialer, "tcp", address, config)
+	tcpConn, err := dialer.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, err
 	}
+	tlsConn := tls.Client(tcpConn, config)
 	c, err := prepareConnection(tlsConn, readTimeout)
 	if err != nil {
 		return nil, err

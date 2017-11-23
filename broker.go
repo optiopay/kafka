@@ -237,13 +237,18 @@ func Dial(ctx context.Context, nodeAddresses []string, conf BrokerConf) (*Broker
 			conf.Logger.Debug("cannot fetch metadata from any connection",
 				"retry", i,
 				"sleep", conf.DialRetryWait)
-			time.Sleep(conf.DialRetryWait)
+			select {
+			case <-time.After(conf.DialRetryWait):
+				// continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 
-		err := broker.refreshMetadata(ctx, proto.MetadataV0)
-
-		if err == nil {
+		if err := broker.refreshMetadata(ctx, proto.MetadataV0); err == nil {
 			return broker, nil
+		} else if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 	}
 	return nil, errors.New("cannot connect")
@@ -317,7 +322,9 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
 		})
-		if err != nil {
+		if isCanceled(err) {
+			return nil, err
+		} else if err != nil {
 			b.conf.Logger.Debug("cannot fetch metadata from connected node",
 				"nodeID", nodeID,
 				"error", err)
@@ -328,11 +335,17 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 
 	// try all nodes that we know of that we're not connected to
 	for nodeID, addr := range b.metadata.nodes {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
 		if _, ok := checkednodes[nodeID]; ok {
 			continue
 		}
-		conn, err := b.newConnection(addr)
-		if err != nil {
+		conn, err := b.newConnection(ctx, addr)
+		if isCanceled(err) {
+			return nil, err
+		} else if err != nil {
 			b.conf.Logger.Debug("cannot connect",
 				"address", addr,
 				"error", err)
@@ -345,9 +358,11 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 		})
 
 		// we had no active connection to this node, so most likely we don't need it
-		_ = conn.Close()
+		conn.Close()
 
-		if err != nil {
+		if isCanceled(err) {
+			return nil, err
+		} else if err != nil {
 			b.conf.Logger.Debug("cannot fetch metadata from newly connected node",
 				"nodeID", nodeID,
 				"error", err)
@@ -357,8 +372,14 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 	}
 
 	for _, addr := range b.getInitialAddresses() {
-		conn, err := b.newConnection(addr)
-		if err != nil {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+		conn, err := b.newConnection(ctx, addr)
+		if isCanceled(err) {
+			return nil, err
+		} else if err != nil {
 			b.conf.Logger.Debug("cannot connect to seed node",
 				"address", addr,
 				"error", err)
@@ -369,8 +390,10 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
 		})
-		_ = conn.Close()
-		if err == nil {
+		conn.Close()
+		if isCanceled(err) {
+			return nil, err
+		} else if err == nil {
 			return resp, nil
 		}
 		b.conf.Logger.Debug("cannot fetch metadata",
@@ -408,7 +431,7 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 	}
 	var debugmsg []interface{}
 	for _, node := range resp.Brokers {
-		addr := fmt.Sprintf("%s:%d", node.Host, node.Port)
+		addr := net.JoinHostPort(node.Host, strconv.Itoa(int(node.Port)))
 		b.metadata.nodes[node.NodeID] = addr
 		debugmsg = append(debugmsg, node.NodeID, addr)
 	}
@@ -438,15 +461,15 @@ func (b *Broker) PartitionCount(topic string) (int32, error) {
 }
 
 // newConnection creates a connection to the broker at the given address (host:port).
-func (b *Broker) newConnection(addr string) (*connection, error) {
+func (b *Broker) newConnection(ctx context.Context, addr string) (*connection, error) {
 	if b.conf.DialTLS {
-		conn, err := newTLSConnection(addr, b.conf.TLSConfig, b.conf.DialTimeout, b.conf.ReadTimeout)
+		conn, err := newTLSConnection(ctx, addr, b.conf.TLSConfig, b.conf.DialTimeout, b.conf.ReadTimeout)
 		if err != nil {
 			return nil, err
 		}
 		return conn, err
 	}
-	conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+	conn, err := newTCPConnection(ctx, addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -470,6 +493,11 @@ func (b *Broker) muLeaderConnection(ctx context.Context, topic string, partition
 	defer b.mu.Unlock()
 
 	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			b.mu.Unlock()
 			b.conf.Logger.Debug("cannot get leader connection",
@@ -477,14 +505,22 @@ func (b *Broker) muLeaderConnection(ctx context.Context, topic string, partition
 				"partition", partition,
 				"retry", retry,
 				"sleep", b.conf.LeaderRetryWait.String())
-			time.Sleep(b.conf.LeaderRetryWait)
+			select {
+			case <-time.After(b.conf.LeaderRetryWait):
+				// continue
+			case <-ctx.Done():
+				b.mu.Lock()
+				return nil, ctx.Err()
+			}
 			b.mu.Lock()
 		}
 
 		nodeID, ok := b.metadata.endpoints[tp]
 		if !ok {
 			err = b.refreshMetadata(ctx, proto.MetadataV0)
-			if err != nil {
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot refresh metadata",
 					"error", err)
 				continue
@@ -522,8 +558,10 @@ func (b *Broker) muLeaderConnection(ctx context.Context, topic string, partition
 				delete(b.metadata.endpoints, tp)
 				continue
 			}
-			conn, err = b.newConnection(addr)
-			if err != nil {
+			conn, err = b.newConnection(ctx, addr)
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot connect to node",
 					"address", addr,
 					"error", err)
@@ -545,9 +583,20 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 	defer b.mu.Unlock()
 
 	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			b.mu.Unlock()
-			time.Sleep(b.conf.LeaderRetryWait)
+			select {
+			case <-time.After(b.conf.LeaderRetryWait):
+				// continue
+			case <-ctx.Done():
+				b.mu.Lock()
+				return nil, ctx.Err()
+			}
 			b.mu.Lock()
 		}
 
@@ -557,7 +606,9 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 				ClientID:      b.conf.ClientID,
 				ConsumerGroup: consumerGroup,
 			})
-			if err != nil {
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				b.conf.Logger.Debug("cannot fetch coordinator metadata",
 					"consumGrp", consumerGroup,
 					"error", err)
@@ -573,8 +624,10 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 			}
 
 			addr := net.JoinHostPort(resp.CoordinatorHost, strconv.Itoa(int(resp.CoordinatorPort)))
-			conn, err := b.newConnection(addr)
-			if err != nil {
+			conn, err := b.newConnection(ctx, addr)
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
 					"address", addr,
@@ -587,7 +640,9 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 		}
 
 		// if none of the connections worked out, try with fresh data
-		if err := b.refreshMetadata(ctx, proto.MetadataV0); err != nil {
+		if err := b.refreshMetadata(ctx, proto.MetadataV0); isCanceled(err) {
+			return nil, err
+		} else if err != nil {
 			b.conf.Logger.Debug("cannot refresh metadata",
 				"error", err)
 			resErr = err
@@ -599,8 +654,10 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 				// connection to node is cached so it was already checked
 				continue
 			}
-			conn, err := b.newConnection(addr)
-			if err != nil {
+			conn, err := b.newConnection(ctx, addr)
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"nodeID", nodeID,
 					"address", addr,
@@ -614,7 +671,9 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 				ClientID:      b.conf.ClientID,
 				ConsumerGroup: consumerGroup,
 			})
-			if err != nil {
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				b.conf.Logger.Debug("cannot fetch metadata",
 					"consumGrp", consumerGroup,
 					"error", err)
@@ -630,8 +689,10 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 			}
 
 			addr := net.JoinHostPort(resp.CoordinatorHost, strconv.Itoa(int(resp.CoordinatorPort)))
-			conn, err = b.newConnection(addr)
-			if err != nil {
+			conn, err = b.newConnection(ctx, addr)
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
 					"address", addr,
@@ -656,18 +717,31 @@ func (b *Broker) muControllerConnection(ctx context.Context) (*connection, error
 	lastErr := fmt.Errorf("cannot get controller connection")
 
 	for retry := 0; retry < b.conf.LeaderRetryLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			b.mu.Unlock()
 			b.conf.Logger.Debug("cannot get controller connection",
 				"retry", retry,
 				"sleep", b.conf.LeaderRetryWait.String())
-			time.Sleep(b.conf.LeaderRetryWait)
+			select {
+			case <-time.After(b.conf.LeaderRetryWait):
+				// continue
+			case <-ctx.Done():
+				b.mu.Lock()
+				return nil, ctx.Err()
+			}
 			b.mu.Lock()
 		}
 
 		controllerID := b.metadata.controllerID
 		if controllerID == nil {
-			if err := b.refreshMetadata(ctx, proto.MetadataV1); err != nil {
+			if err := b.refreshMetadata(ctx, proto.MetadataV1); isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				b.conf.Logger.Info("cannot get controller connection: cannot refresh metadata",
 					"error", err)
 				lastErr = err
@@ -690,8 +764,10 @@ func (b *Broker) muControllerConnection(ctx context.Context) (*connection, error
 				continue
 			}
 			var err error
-			conn, err = b.newConnection(addr)
-			if err != nil {
+			conn, err = b.newConnection(ctx, addr)
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				b.conf.Logger.Info("cannot get controller connection: cannot connect to node",
 					"address", addr,
 					"error", err)
@@ -710,7 +786,7 @@ func (b *Broker) muControllerConnection(ctx context.Context) (*connection, error
 // metadata is made
 //
 // muCloseDeadConnection call it protected with broker's lock.
-func (b *Broker) muCloseDeadConnection(ctx context.Context, conn *connection) {
+func (b *Broker) muCloseDeadConnection(conn *connection) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -720,7 +796,7 @@ func (b *Broker) muCloseDeadConnection(ctx context.Context, conn *connection) {
 				"nodeID", nid)
 			delete(b.conns, nid)
 			_ = c.Close()
-			if err := b.refreshMetadata(ctx, proto.MetadataV0); err != nil {
+			if err := b.refreshMetadata(context.Background(), proto.MetadataV0); err != nil {
 				b.conf.Logger.Debug("cannot refresh metadata",
 					"error", err)
 			}
@@ -733,8 +809,18 @@ func (b *Broker) muCloseDeadConnection(ctx context.Context, conn *connection) {
 // which offset value should be returned.
 func (b *Broker) offset(ctx context.Context, topic string, partition int32, timems int64) (offset int64, err error) {
 	for retry := 0; retry < b.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			b.conf.Logger.Debug("context canceled")
+			return 0, err
+		}
+
 		if retry != 0 {
-			time.Sleep(b.conf.RetryErrWait)
+			select {
+			case <-time.After(b.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
 			err = b.muRefreshMetadata(ctx, proto.MetadataV0)
 			if err != nil {
 				continue
@@ -771,7 +857,7 @@ func (b *Broker) offset(ctx context.Context, topic string, partition int32, time
 					"topic", topic,
 					"partition", partition,
 					"error", err)
-				b.muCloseDeadConnection(ctx, conn)
+				b.muCloseDeadConnection(conn)
 			}
 			continue
 		}
@@ -880,11 +966,24 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 func (p *producer) Produce(ctx context.Context, topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			p.conf.Logger.Debug("context canceled")
+			return 0, err
+		}
+
 		if retry != 0 {
-			time.Sleep(p.conf.RetryWait)
+			select {
+			case <-time.After(p.conf.RetryWait):
+				// continue
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			}
 		}
 
 		offset, err = p.produce(ctx, topic, partition, messages...)
+		if isCanceled(err) {
+			return 0, err
+		}
 
 		switch err {
 		case nil:
@@ -899,7 +998,9 @@ func (p *producer) Produce(ctx context.Context, topic string, partition int32, m
 			// we cannot handle this error here, because there is no direct
 			// access to connection
 		default:
-			if err := p.broker.muRefreshMetadata(ctx, proto.MetadataV0); err != nil {
+			if err := p.broker.muRefreshMetadata(ctx, proto.MetadataV0); isCanceled(err) {
+				return 0, err
+			} else if err != nil {
 				p.conf.Logger.Debug("cannot refresh metadata",
 					"error", err)
 			}
@@ -948,7 +1049,7 @@ func (p *producer) produce(ctx context.Context, topic string, partition int32, m
 				"topic", topic,
 				"partition", partition,
 				"error", err)
-			p.broker.muCloseDeadConnection(ctx, conn)
+			p.broker.muCloseDeadConnection(conn)
 		}
 		return 0, err
 	}
@@ -1135,6 +1236,11 @@ func (c *consumer) consume(ctx context.Context) ([]*proto.Message, error) {
 	var msgbuf []*proto.Message
 	var retry int
 	for len(msgbuf) == 0 {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		var err error
 		msgbuf, err = c.fetch(ctx)
 		if err != nil {
@@ -1142,7 +1248,12 @@ func (c *consumer) consume(ctx context.Context) ([]*proto.Message, error) {
 		}
 		if len(msgbuf) == 0 {
 			if c.conf.RetryWait > 0 {
-				time.Sleep(c.conf.RetryWait)
+				select {
+				case <-time.After(c.conf.RetryWait):
+					// continue
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
 			}
 			retry++
 			if c.conf.RetryLimit != -1 && retry > c.conf.RetryLimit {
@@ -1210,13 +1321,25 @@ func (c *consumer) fetch(ctx context.Context) ([]*proto.Message, error) {
 	var resErr error
 consumeRetryLoop:
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
-			time.Sleep(c.conf.RetryErrWait)
+			select {
+			case <-time.After(c.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 
 		if c.conn == nil {
 			conn, err := c.broker.muLeaderConnection(ctx, c.conf.Topic, c.conf.Partition)
-			if err != nil {
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				resErr = err
 				continue
 			}
@@ -1231,7 +1354,7 @@ consumeRetryLoop:
 				"topic", c.conf.Topic,
 				"partition", c.conf.Partition,
 				"error", err)
-			c.broker.muCloseDeadConnection(ctx, c.conn)
+			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
 			continue
 		}
@@ -1240,7 +1363,7 @@ consumeRetryLoop:
 			c.conf.Logger.Debug("cannot fetch messages: unknown error",
 				"retry", retry,
 				"error", err)
-			c.broker.muCloseDeadConnection(ctx, c.conn)
+			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
 			continue
 		}
@@ -1362,16 +1485,29 @@ func (c *offsetCoordinator) commit(ctx context.Context, topic string, partition 
 	defer c.mu.Unlock()
 
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return err
+		}
+
 		if retry != 0 {
 			c.mu.Unlock()
-			time.Sleep(c.conf.RetryErrWait)
+			select {
+			case <-time.After(c.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				c.mu.Lock()
+				return ctx.Err()
+			}
 			c.mu.Lock()
 		}
 
 		// connection can be set to nil if previously reference connection died
 		if c.conn == nil {
 			conn, err := c.broker.muCoordinatorConnection(ctx, c.conf.ConsumerGroup)
-			if err != nil {
+			if isCanceled(err) {
+				return err
+			} else if err != nil {
 				resErr = err
 				c.conf.Logger.Debug("cannot connect to coordinator",
 					"consumGrp", c.conf.ConsumerGroup,
@@ -1400,7 +1536,7 @@ func (c *offsetCoordinator) commit(ctx context.Context, topic string, partition 
 				"topic", topic,
 				"partition", partition,
 				"consumGrp", c.conf.ConsumerGroup)
-			c.broker.muCloseDeadConnection(ctx, c.conn)
+			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
 		} else if err == nil {
 			for _, t := range resp.Topics {
@@ -1438,16 +1574,29 @@ func (c *offsetCoordinator) Offset(ctx context.Context, topic string, partition 
 	defer c.mu.Unlock()
 
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return 0, "", err
+		}
+
 		if retry != 0 {
 			c.mu.Unlock()
-			time.Sleep(c.conf.RetryErrWait)
+			select {
+			case <-time.After(c.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				c.mu.Lock()
+				return 0, "", ctx.Err()
+			}
 			c.mu.Lock()
 		}
 
 		// connection can be set to nil if previously reference connection died
 		if c.conn == nil {
 			conn, err := c.broker.muCoordinatorConnection(ctx, c.conf.ConsumerGroup)
-			if err != nil {
+			if isCanceled(err) {
+				return 0, "", err
+			} else if err != nil {
 				c.conf.Logger.Debug("cannot connect to coordinator",
 					"consumGrp", c.conf.ConsumerGroup,
 					"error", err)
@@ -1473,7 +1622,7 @@ func (c *offsetCoordinator) Offset(ctx context.Context, topic string, partition 
 				"topic", topic,
 				"partition", partition,
 				"consumGrp", c.conf.ConsumerGroup)
-			c.broker.muCloseDeadConnection(ctx, c.conn)
+			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
 		case nil:
 			for _, t := range resp.Topics {
@@ -1558,16 +1707,29 @@ func (c *admin) DeleteTopics(ctx context.Context, topics []string, timeout int32
 
 	lastErr := fmt.Errorf("DeleteTopics failed")
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			c.mu.Unlock()
-			time.Sleep(c.conf.RetryErrWait)
+			select {
+			case <-time.After(c.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				c.mu.Lock()
+				return nil, ctx.Err()
+			}
 			c.mu.Lock()
 		}
 
 		// connection can be set to nil if previously reference connection died
 		if c.conn == nil {
 			conn, err := c.broker.muControllerConnection(ctx)
-			if err != nil {
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				c.conf.Logger.Debug("cannot connect to coordinator",
 					"error", err)
 				lastErr = err
@@ -1583,7 +1745,7 @@ func (c *admin) DeleteTopics(ctx context.Context, topics []string, timeout int32
 		switch err {
 		case io.EOF, syscall.EPIPE:
 			c.conf.Logger.Debug("connection died while deleting topics")
-			c.broker.muCloseDeadConnection(ctx, c.conn)
+			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
 			lastErr = err
 		case nil:
@@ -1602,16 +1764,29 @@ func (c *admin) DescribeConfigs(ctx context.Context, configs ...proto.ConfigReso
 
 	lastErr := fmt.Errorf("DescribeConfigs failed")
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
+		if err := ctx.Err(); err != nil {
+			c.conf.Logger.Debug("context canceled")
+			return nil, err
+		}
+
 		if retry != 0 {
 			c.mu.Unlock()
-			time.Sleep(c.conf.RetryErrWait)
+			select {
+			case <-time.After(c.conf.RetryErrWait):
+				// continue
+			case <-ctx.Done():
+				c.mu.Lock()
+				return nil, ctx.Err()
+			}
 			c.mu.Lock()
 		}
 
 		// connection can be set to nil if previously reference connection died
 		if c.conn == nil {
 			conn, err := c.broker.muControllerConnection(ctx)
-			if err != nil {
+			if isCanceled(err) {
+				return nil, err
+			} else if err != nil {
 				c.conf.Logger.Debug("cannot connect to coordinator",
 					"error", err)
 				lastErr = err
@@ -1626,7 +1801,7 @@ func (c *admin) DescribeConfigs(ctx context.Context, configs ...proto.ConfigReso
 		switch err {
 		case io.EOF, syscall.EPIPE:
 			c.conf.Logger.Debug("connection died while describing configs")
-			c.broker.muCloseDeadConnection(ctx, c.conn)
+			c.broker.muCloseDeadConnection(c.conn)
 			c.conn = nil
 			lastErr = err
 		case nil:
