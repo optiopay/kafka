@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"testing"
 )
 
@@ -15,6 +16,12 @@ type Logger interface {
 	Warn(msg string, args ...interface{})
 	Error(msg string, args ...interface{})
 }
+
+type loggerContextKey struct{}
+
+var (
+	loggerContextKeyValue = loggerContextKey{}
+)
 
 // nullLogger implements Logger interface, but discards all messages
 type nullLogger struct {
@@ -41,4 +48,25 @@ func (t testLogger) Warn(msg string, args ...interface{}) {
 }
 func (t testLogger) Error(msg string, args ...interface{}) {
 	t.T.Logf("ERROR "+msg+"\n", args...)
+}
+
+// WithLogger creates a context that uses the given logger.
+func WithLogger(ctx context.Context, logger Logger) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, loggerContextKeyValue, logger)
+}
+
+// getLogFromContext looks in the given context for a logger.
+// If found it returns that one, otherwise the given default is returned.
+func getLogFromContext(ctx context.Context, defaultLogger Logger) Logger {
+	if ctx != nil {
+		if raw := ctx.Value(loggerContextKeyValue); raw != nil {
+			if logger, ok := raw.(Logger); ok && logger != nil {
+				return logger
+			}
+		}
+	}
+	return defaultLogger
 }
