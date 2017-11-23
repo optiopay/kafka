@@ -606,11 +606,17 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 		}
 
 		// first try all already existing connections
-		for _, conn := range b.conns {
+		for nid, conn := range b.conns {
 			resp, err := conn.ConsumerMetadata(ctx, &proto.ConsumerMetadataReq{
 				ClientID:      b.conf.ClientID,
 				ConsumerGroup: consumerGroup,
 			})
+			if isCloseDeadConnectionNeeded(err) {
+				// Note: We're already locked
+				logger.Info("Closing dead connection",
+					"nodeID", nid)
+				b.closeDeadConnection(ctx, conn, false)
+			}
 			if isCanceled(err) {
 				return nil, err
 			} else if err != nil {
@@ -676,6 +682,12 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 				ClientID:      b.conf.ClientID,
 				ConsumerGroup: consumerGroup,
 			})
+			if isCloseDeadConnectionNeeded(err) {
+				// Note: We're already locked
+				logger.Info("Closing dead connection",
+					"nodeID", nodeID)
+				b.closeDeadConnection(ctx, conn, false)
+			}
 			if isCanceled(err) {
 				return nil, err
 			} else if err != nil {
@@ -791,11 +803,21 @@ func (b *Broker) muControllerConnection(ctx context.Context) (*connection, error
 // connection. Because we remove dead connection, additional request to refresh
 // metadata is made
 //
-// muCloseDeadConnection call it protected with broker's lock.
+// muCloseDeadConnection call is protected with broker's lock.
 func (b *Broker) muCloseDeadConnection(ctx context.Context, conn *connection) {
-	logger := getLogFromContext(ctx, b.conf.Logger)
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	b.closeDeadConnection(ctx, conn, true)
+}
+
+// closeDeadConnection is closing and removing any reference to given
+// connection. Because we remove dead connection, additional optional request to refresh
+// metadata is made
+//
+// Because it's modifying connection state it's not thread safe and using it require locking.
+func (b *Broker) closeDeadConnection(ctx context.Context, conn *connection, refreshMetadata bool) {
+	logger := getLogFromContext(ctx, b.conf.Logger)
 
 	for nid, c := range b.conns {
 		if c == conn {
@@ -803,9 +825,11 @@ func (b *Broker) muCloseDeadConnection(ctx context.Context, conn *connection) {
 				"nodeID", nid)
 			delete(b.conns, nid)
 			_ = c.Close()
-			if err := b.refreshMetadata(context.Background(), proto.MetadataV0); err != nil {
-				logger.Debug("cannot refresh metadata",
-					"error", err)
+			if refreshMetadata {
+				if err := b.refreshMetadata(context.Background(), proto.MetadataV0); err != nil {
+					logger.Debug("cannot refresh metadata",
+						"error", err)
+				}
 			}
 			return
 		}
@@ -857,7 +881,7 @@ func (b *Broker) offset(ctx context.Context, topic string, partition int32, time
 			},
 		})
 		if err != nil {
-			if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
+			if isCloseDeadConnectionNeeded(err) {
 				// Connection is broken, so should be closed, but the error is
 				// still valid and should be returned so that retry mechanism have
 				// chance to react.
@@ -1051,7 +1075,7 @@ func (p *producer) produce(ctx context.Context, topic string, partition int32, m
 
 	resp, err := conn.Produce(ctx, &req)
 	if err != nil {
-		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
+		if isCloseDeadConnectionNeeded(err) {
 			// Connection is broken, so should be closed, but the error is
 			// still valid and should be returned so that retry mechanism have
 			// chance to react.
@@ -1361,7 +1385,7 @@ consumeRetryLoop:
 		resp, err := c.conn.Fetch(ctx, &req)
 		resErr = err
 
-		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
+		if isCloseDeadConnectionNeeded(err) {
 			logger.Debug("connection died while fetching message",
 				"topic", c.conf.Topic,
 				"partition", c.conf.Partition,
@@ -1544,7 +1568,7 @@ func (c *offsetCoordinator) commit(ctx context.Context, topic string, partition 
 		})
 		resErr = err
 
-		if _, ok := err.(*net.OpError); ok || err == io.EOF || err == syscall.EPIPE {
+		if isCloseDeadConnectionNeeded(err) {
 			logger.Debug("connection died while commiting",
 				"topic", topic,
 				"partition", partition,
@@ -1630,15 +1654,14 @@ func (c *offsetCoordinator) Offset(ctx context.Context, topic string, partition 
 		})
 		resErr = err
 
-		switch err {
-		case io.EOF, syscall.EPIPE:
+		if isCloseDeadConnectionNeeded(err) {
 			logger.Debug("connection died while fetching offset",
 				"topic", topic,
 				"partition", partition,
 				"consumGrp", c.conf.ConsumerGroup)
 			c.broker.muCloseDeadConnection(ctx, c.conn)
 			c.conn = nil
-		case nil:
+		} else if err == nil {
 			for _, t := range resp.Topics {
 				if t.Name != topic {
 					logger.Debug("unexpected topic information received",
@@ -1757,15 +1780,14 @@ func (c *admin) DeleteTopics(ctx context.Context, topics []string, timeout int32
 			Timeout: timeout,
 		})
 
-		switch err {
-		case io.EOF, syscall.EPIPE:
+		if isCloseDeadConnectionNeeded(err) {
 			logger.Debug("connection died while deleting topics")
 			c.broker.muCloseDeadConnection(ctx, c.conn)
 			c.conn = nil
 			lastErr = err
-		case nil:
+		} else if err == nil {
 			return resp.TopicErrorCodes, nil
-		default:
+		} else {
 			lastErr = err
 		}
 	}
@@ -1814,18 +1836,24 @@ func (c *admin) DescribeConfigs(ctx context.Context, configs ...proto.ConfigReso
 			Resources: configs,
 		})
 
-		switch err {
-		case io.EOF, syscall.EPIPE:
+		if isCloseDeadConnectionNeeded(err) {
 			logger.Debug("connection died while describing configs")
 			c.broker.muCloseDeadConnection(ctx, c.conn)
 			c.conn = nil
 			lastErr = err
-		case nil:
+		} else if err == nil {
 			return resp.Resources, nil
-		default:
+		} else {
 			lastErr = err
 		}
 	}
 
 	return nil, lastErr
+}
+
+// isCloseDeadConnectionNeeded inspects the given error and returns true if
+// muCloseDeadConnection must be called.
+func isCloseDeadConnectionNeeded(err error) bool {
+	_, ok := err.(*net.OpError)
+	return ok || err == io.EOF || err == syscall.EPIPE || isCanceled(err)
 }
