@@ -324,6 +324,10 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
 		})
+		if isCloseDeadConnectionNeeded(err) {
+			// Note: Mutex is already locked
+			b.closeDeadConnection(ctx, conn, false)
+		}
 		if isCanceled(err) {
 			return nil, err
 		} else if err != nil {
