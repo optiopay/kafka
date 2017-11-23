@@ -41,10 +41,7 @@ func newTCPConnection(ctx context.Context, address string, timeout, readTimeout 
 	if err != nil {
 		return nil, err
 	}
-	c, err := prepareConnection(tcpConn, readTimeout)
-	if err != nil {
-		return nil, err
-	}
+	c := prepareConnection(tcpConn, readTimeout)
 	return c, nil
 }
 
@@ -59,15 +56,13 @@ func newTLSConnection(ctx context.Context, address string, config *tls.Config, t
 		return nil, err
 	}
 	tlsConn := tls.Client(tcpConn, config)
-	c, err := prepareConnection(tlsConn, readTimeout)
-	if err != nil {
-		return nil, err
-	}
+	c := prepareConnection(tlsConn, readTimeout)
 	return c, nil
 }
 
-// dialConnection returns new, initialized connection or error
-func prepareConnection(conn net.Conn, readTimeout time.Duration) (*connection, error) {
+// prepareConnection returns new, initialized connection and starts go routines
+// for reading and ID generation.
+func prepareConnection(conn net.Conn, readTimeout time.Duration) *connection {
 	c := &connection{
 		stop:        make(chan struct{}),
 		nextID:      make(chan int32),
@@ -78,7 +73,7 @@ func prepareConnection(conn net.Conn, readTimeout time.Duration) (*connection, e
 	}
 	go c.nextIDLoop()
 	go c.readRespLoop()
-	return c, nil
+	return c
 }
 
 // nextIDLoop generates correlation IDs, making sure they are always in order
