@@ -159,7 +159,7 @@ func TestConnectionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
-	resp, err := conn.Metadata(ctx, &proto.MetadataReq{
+	resp, err := conn.Metadata(ctx, time.Second*10, &proto.MetadataReq{
 		ClientID: "tester",
 		Topics:   []string{"first", "second"},
 	})
@@ -615,7 +615,7 @@ func TestNoServerResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
-	_, err = conn.Metadata(ctx, &proto.MetadataReq{
+	_, err = conn.Metadata(ctx, time.Second*10, &proto.MetadataReq{
 		ClientID: "tester",
 		Topics:   []string{"first", "second"},
 	})

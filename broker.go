@@ -173,6 +173,10 @@ type BrokerConf struct {
 	// Default is 500ms.
 	RetryErrWait time.Duration
 
+	// Maximum time a Metadata request is allowed to take.
+	// Default is 10sec
+	MetadataTimeout time.Duration
+
 	// DEPRECATED 2015-07-10 - use Logger instead
 	//
 	// TODO(husio) remove
@@ -202,6 +206,7 @@ func NewBrokerConf(clientID string) BrokerConf {
 		RetryErrLimit:      10,
 		RetryErrWait:       time.Millisecond * 500,
 		ReadTimeout:        30 * time.Second,
+		MetadataTimeout:    10 * time.Second,
 		Logger:             &nullLogger{},
 	}
 }
@@ -321,7 +326,7 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 	logger := getLogFromContext(ctx, b.conf.Logger)
 	for nodeID, conn := range b.conns {
 		checkednodes[nodeID] = true
-		resp, err := conn.Metadata(ctx, &proto.MetadataReq{
+		resp, err := conn.Metadata(ctx, b.conf.MetadataTimeout, &proto.MetadataReq{
 			Version:  metadataVersion,
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
@@ -359,7 +364,7 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 				"error", err)
 			continue
 		}
-		resp, err := conn.Metadata(ctx, &proto.MetadataReq{
+		resp, err := conn.Metadata(ctx, b.conf.MetadataTimeout, &proto.MetadataReq{
 			Version:  metadataVersion,
 			ClientID: b.conf.ClientID,
 			Topics:   topics,
@@ -379,37 +384,54 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 		return resp, nil
 	}
 
-	for _, addr := range b.getInitialAddresses() {
-		if err := ctx.Err(); err != nil {
-			logger.Debug("context canceled")
-			return nil, err
-		}
-		conn, err := b.newConnection(ctx, addr)
-		if isCanceled(err) {
-			return nil, err
-		} else if err != nil {
-			logger.Debug("cannot connect to seed node",
+	addresses := b.getInitialAddresses()
+	responses := make(chan *proto.MetadataResp, len(addresses))
+	wg := sync.WaitGroup{}
+	for _, addr := range addresses {
+		wg.Add(1)
+		go func(addr string) {
+			defer wg.Done()
+			conn, err := b.newConnection(ctx, addr)
+			if isCanceled(err) {
+				return
+			} else if err != nil {
+				logger.Debug("cannot connect to seed node",
+					"address", addr,
+					"error", err)
+				return
+			}
+			resp, err := conn.Metadata(ctx, b.conf.MetadataTimeout, &proto.MetadataReq{
+				Version:  metadataVersion,
+				ClientID: b.conf.ClientID,
+				Topics:   topics,
+			})
+			conn.Close()
+			if isCanceled(err) {
+				return
+			} else if err == nil {
+				responses <- resp
+			}
+			logger.Debug("cannot fetch metadata",
 				"address", addr,
 				"error", err)
-			continue
-		}
-		resp, err := conn.Metadata(ctx, &proto.MetadataReq{
-			Version:  metadataVersion,
-			ClientID: b.conf.ClientID,
-			Topics:   topics,
-		})
-		conn.Close()
-		if isCanceled(err) {
-			return nil, err
-		} else if err == nil {
-			return resp, nil
-		}
-		logger.Debug("cannot fetch metadata",
-			"address", addr,
-			"error", err)
+		}(addr)
 	}
 
-	return nil, errors.New("cannot fetch metadata. No topics created?")
+	// Wait for cleaining up channels in another goroutine
+	go func() {
+		wg.Wait()
+		close(responses)
+	}()
+
+	select {
+	case r, ok := <-responses:
+		if ok {
+			return r, nil
+		}
+		return nil, errors.New("cannot fetch metadata. No topics created?")
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // cacheMetadata creates new internal metadata representation using data from
@@ -905,7 +927,7 @@ func (b *Broker) offset(ctx context.Context, topic string, partition int32, time
 				// Connection is broken, so should be closed, but the error is
 				// still valid and should be returned so that retry mechanism have
 				// chance to react.
-				logger.Debug("connection died while sending message",
+				logger.Debug("connection died while fetching offsets",
 					"topic", topic,
 					"partition", partition,
 					"error", err)
@@ -1051,6 +1073,9 @@ func (p *producer) Produce(ctx context.Context, topic string, partition int32, m
 			// we cannot handle this error here, because there is no direct
 			// access to connection
 		default:
+			logger.Debug("Produce: calling muRefreshMetadata",
+				"retry", retry,
+				"error", err)
 			if err := p.broker.muRefreshMetadata(ctx, proto.MetadataV0); isCanceled(err) {
 				return 0, err
 			} else if err != nil {

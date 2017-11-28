@@ -202,7 +202,7 @@ func (c *connection) Close() error {
 // Metadata sends given metadata request to kafka node and returns related
 // metadata response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Metadata(ctx context.Context, req *proto.MetadataReq) (*proto.MetadataResp, error) {
+func (c *connection) Metadata(ctx context.Context, timeout time.Duration, req *proto.MetadataReq) (*proto.MetadataResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -225,6 +225,9 @@ func (c *connection) Metadata(ctx context.Context, req *proto.MetadataReq) (*pro
 			return nil, c.stopErr
 		}
 		return proto.ReadMetadataResp(bytes.NewReader(b), req.Version)
+	case <-time.After(timeout):
+		c.releaseWaiter(req.CorrelationID)
+		return nil, proto.ErrRequestTimeout
 	case <-ctx.Done():
 		c.releaseWaiter(req.CorrelationID)
 		return nil, ctx.Err()
