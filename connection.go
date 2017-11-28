@@ -100,12 +100,23 @@ func (c *connection) nextIDLoop() {
 func (c *connection) readRespLoop() {
 	defer func() {
 		c.mu.Lock()
+		defer c.mu.Unlock()
 		for _, cc := range c.respc {
 			close(cc)
 		}
 		c.respc = make(map[int32]chan []byte)
-		c.mu.Unlock()
 	}()
+
+	stop := func(closeStopChannel bool, err error) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.stopErr == nil {
+			c.stopErr = err
+			if closeStopChannel {
+				close(c.stop)
+			}
+		}
+	}
 
 	rd := bufio.NewReader(c.rw)
 	for {
@@ -118,12 +129,7 @@ func (c *connection) readRespLoop() {
 		}
 		correlationID, b, err := proto.ReadResp(rd)
 		if err != nil {
-			c.mu.Lock()
-			if c.stopErr == nil {
-				c.stopErr = err
-				close(c.stop)
-			}
-			c.mu.Unlock()
+			stop(true, err)
 			return
 		}
 
@@ -140,11 +146,7 @@ func (c *connection) readRespLoop() {
 
 		select {
 		case <-c.stop:
-			c.mu.Lock()
-			if c.stopErr == nil {
-				c.stopErr = ErrClosed
-			}
-			c.mu.Unlock()
+			stop(false, ErrClosed)
 		case rc <- b:
 		}
 		close(rc)

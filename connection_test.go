@@ -155,7 +155,7 @@ func TestConnectionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
+	conn, err := newTCPConnection(ctx, ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -214,7 +214,7 @@ func TestConnectionProduce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
+	conn, err := newTCPConnection(ctx, ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -331,7 +331,7 @@ func TestConnectionFetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
+	conn, err := newTCPConnection(ctx, ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -395,7 +395,7 @@ func TestConnectionOffset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
+	conn, err := newTCPConnection(ctx, ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -428,7 +428,7 @@ func TestConnectionProduceNoAck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
+	conn, err := newTCPConnection(ctx, ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -474,7 +474,7 @@ func TestClosedConnectionWriter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
+	conn, err := newTCPConnection(ctx, ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -522,7 +522,7 @@ func TestClosedConnectionReader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
+	conn, err := newTCPConnection(ctx, ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -570,7 +570,7 @@ func TestConnectionReaderAfterEOF(t *testing.T) {
 		_ = ln.Close()
 	}()
 
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
+	conn, err := newTCPConnection(ctx, ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
@@ -611,7 +611,7 @@ func TestNoServerResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
+	conn, err := newTCPConnection(ctx, ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}

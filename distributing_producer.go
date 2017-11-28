@@ -37,8 +37,8 @@ type saferand struct {
 
 func (sr *saferand) Intn(n int) int {
 	sr.mu.Lock()
+	defer sr.mu.Unlock()
 	res := sr.r.Intn(n)
-	sr.mu.Unlock()
 	return res
 }
 
