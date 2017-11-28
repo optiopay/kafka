@@ -1292,7 +1292,7 @@ type consumer struct {
 
 	mu_    sync.Mutex
 	offset int64 // offset of next NOT consumed message
-	conn   *connection
+	conn_  *connection
 	msgbuf []*proto.Message
 }
 
@@ -1335,12 +1335,35 @@ func (b *Broker) consumer(ctx context.Context, conf ConsumerConf) (*consumer, er
 	}
 	c := &consumer{
 		broker: b,
-		conn:   conn,
+		conn_:  conn,
 		conf:   conf,
 		msgbuf: make([]*proto.Message, 0),
 		offset: offset,
 	}
 	return c, nil
+}
+
+// leaderConnection returns the leader connection for the topic, creating one if needed.
+// Mutex must be owned when calling this function.
+func (c *consumer) leaderConnection(ctx context.Context) (*connection, error) {
+	if conn := c.conn_; conn != nil {
+		return conn, nil
+	}
+	conn, err := c.broker.muLeaderConnection(ctx, c.conf.Topic, c.conf.Partition)
+	if err != nil {
+		return nil, err
+	}
+	c.conn_ = conn
+	return conn, nil
+}
+
+// closeDeadConnection closes the connection, if it is still the current connection.
+// Mutex must be owned when calling this function.
+func (c *consumer) closeDeadConnection(ctx context.Context, conn *connection) {
+	if c.conn_ == conn {
+		c.conn_ = nil
+		c.broker.muCloseDeadConnection(ctx, conn)
+	}
 }
 
 // consume is returning a batch of messages from consumed partition.
@@ -1456,18 +1479,15 @@ consumeRetryLoop:
 			}
 		}
 
-		if c.conn == nil {
-			conn, err := c.broker.muLeaderConnection(ctx, c.conf.Topic, c.conf.Partition)
-			if isCanceled(err) {
-				return nil, err
-			} else if err != nil {
-				resErr = err
-				continue
-			}
-			c.conn = conn
+		conn, err := c.leaderConnection(ctx)
+		if isCanceled(err) {
+			return nil, err
+		} else if err != nil {
+			resErr = err
+			continue
 		}
 
-		resp, err := c.conn.Fetch(ctx, c.conf.FetchTimeout, &req)
+		resp, err := conn.Fetch(ctx, c.conf.FetchTimeout, &req)
 		resErr = err
 
 		if isCloseDeadConnectionNeeded(err) {
@@ -1475,8 +1495,7 @@ consumeRetryLoop:
 				"topic", c.conf.Topic,
 				"partition", c.conf.Partition,
 				"error", err)
-			c.broker.muCloseDeadConnection(ctx, c.conn)
-			c.conn = nil
+			c.closeDeadConnection(ctx, conn)
 			continue
 		}
 
@@ -1484,8 +1503,7 @@ consumeRetryLoop:
 			logger.Debug("cannot fetch messages: unknown error",
 				"retry", retry,
 				"error", err)
-			c.broker.muCloseDeadConnection(ctx, c.conn)
-			c.conn = nil
+			c.closeDeadConnection(ctx, conn)
 			continue
 		}
 
@@ -1521,7 +1539,7 @@ consumeRetryLoop:
 					// but we may very well need to talk to a different broker now.
 					// Set the conn to nil so that next time around the loop
 					// we'll check the metadata again to see who we're supposed to talk to.
-					c.conn = nil
+					c.conn_ = nil
 					continue consumeRetryLoop
 				}
 				return part.Messages, part.Err
