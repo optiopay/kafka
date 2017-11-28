@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"sync"
@@ -22,13 +23,14 @@ var ErrClosed = errors.New("closed")
 type connection struct {
 	rw     net.Conn
 	stop   chan struct{}
-	nextID chan int32
 	logger Logger
 
 	mu          sync.Mutex
 	respc       map[int32]chan []byte
 	stopErr     error
 	readTimeout time.Duration
+	lastID      int32
+	lastIDMutex sync.Mutex
 }
 
 // newTCPConnection returns new, initialized connection using plain text or error
@@ -65,33 +67,27 @@ func newTLSConnection(ctx context.Context, address string, config *tls.Config, t
 func prepareConnection(conn net.Conn, readTimeout time.Duration) *connection {
 	c := &connection{
 		stop:        make(chan struct{}),
-		nextID:      make(chan int32),
 		rw:          conn,
 		respc:       make(map[int32]chan []byte),
 		logger:      &nullLogger{},
 		readTimeout: readTimeout,
+		lastID:      0,
 	}
-	go c.nextIDLoop()
 	go c.readRespLoop()
 	return c
 }
 
-// nextIDLoop generates correlation IDs, making sure they are always in order
+// nextID generates correlation IDs, making sure they are always in order
 // and within the scope of request-response mapping array.
-func (c *connection) nextIDLoop() {
-	var id int32 = 1
-	for {
-		select {
-		case <-c.stop:
-			close(c.nextID)
-			return
-		case c.nextID <- id:
-			id++
-			if id == math.MaxInt32 {
-				id = 1
-			}
-		}
+func (c *connection) nextID() int32 {
+	c.lastIDMutex.Lock()
+	defer c.lastIDMutex.Unlock()
+
+	c.lastID++
+	if c.lastID == math.MaxInt32 {
+		c.lastID = 1
 	}
+	return c.lastID
 }
 
 // readRespLoop constantly reading response messages from the socket and after
@@ -199,14 +195,39 @@ func (c *connection) Close() error {
 	return c.rw.Close()
 }
 
+type request interface {
+	WriteTo(io.Writer) (int64, error)
+}
+
+func (c *connection) writeReq(req request, timeout time.Duration) error {
+	errors := make(chan error)
+	go func() {
+		defer close(errors)
+		if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			c.logger.Error("msg", "SetWriteDeadline failed",
+				"error", err)
+			errors <- err
+			return
+		}
+		if _, err := req.WriteTo(c.rw); err != nil {
+			c.logger.Error("msg", "cannot write", "error", err)
+			errors <- err
+			return
+		}
+	}()
+	select {
+	case err := <-errors:
+		return err
+	case <-time.After(timeout):
+		return proto.ErrRequestTimeout
+	}
+}
+
 // Metadata sends given metadata request to kafka node and returns related
 // metadata response.
 // Calling this method on closed connection will always return ErrClosed.
 func (c *connection) Metadata(ctx context.Context, timeout time.Duration, req *proto.MetadataReq) (*proto.MetadataResp, error) {
-	var ok bool
-	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
-	}
+	req.CorrelationID = c.nextID()
 
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
@@ -214,14 +235,9 @@ func (c *connection) Metadata(ctx context.Context, timeout time.Duration, req *p
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
-	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-		c.logger.Error("msg", "SetWriteDeadline failed",
+	if err := c.writeReq(req, timeout); err != nil {
+		c.logger.Error("msg", "writeReq failed",
 			"error", err)
-		c.releaseWaiter(req.CorrelationID)
-		return nil, err
-	}
-	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -245,10 +261,7 @@ func (c *connection) Metadata(ctx context.Context, timeout time.Duration, req *p
 // right after sending request, without waiting for response.
 // Calling this method on closed connection will always return ErrClosed.
 func (c *connection) Produce(ctx context.Context, timeout time.Duration, req *proto.ProduceReq) (*proto.ProduceResp, error) {
-	var ok bool
-	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
-	}
+	req.CorrelationID = c.nextID()
 
 	if req.RequiredAcks == proto.RequiredAcksNone {
 		if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
@@ -267,14 +280,9 @@ func (c *connection) Produce(ctx context.Context, timeout time.Duration, req *pr
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
-	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-		c.logger.Error("msg", "SetWriteDeadline failed",
+	if err := c.writeReq(req, timeout); err != nil {
+		c.logger.Error("msg", "writeReq failed",
 			"error", err)
-		c.releaseWaiter(req.CorrelationID)
-		return nil, err
-	}
-	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -296,10 +304,7 @@ func (c *connection) Produce(ctx context.Context, timeout time.Duration, req *pr
 // Fetch sends given fetch request to kafka node and returns related response.
 // Calling this method on closed connection will always return ErrClosed.
 func (c *connection) Fetch(ctx context.Context, timeout time.Duration, req *proto.FetchReq) (*proto.FetchResp, error) {
-	var ok bool
-	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
-	}
+	req.CorrelationID = c.nextID()
 
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
@@ -307,14 +312,9 @@ func (c *connection) Fetch(ctx context.Context, timeout time.Duration, req *prot
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
-	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-		c.logger.Error("msg", "SetWriteDeadline failed",
+	if err := c.writeReq(req, timeout); err != nil {
+		c.logger.Error("msg", "writeReq failed",
 			"error", err)
-		c.releaseWaiter(req.CorrelationID)
-		return nil, err
-	}
-	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -361,10 +361,7 @@ func (c *connection) Fetch(ctx context.Context, timeout time.Duration, req *prot
 // Offset sends given offset request to kafka node and returns related response.
 // Calling this method on closed connection will always return ErrClosed.
 func (c *connection) Offset(ctx context.Context, timeout time.Duration, req *proto.OffsetReq) (*proto.OffsetResp, error) {
-	var ok bool
-	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
-	}
+	req.CorrelationID = c.nextID()
 
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
@@ -375,14 +372,9 @@ func (c *connection) Offset(ctx context.Context, timeout time.Duration, req *pro
 	// TODO(husio) documentation is not mentioning this directly, but I assume
 	// -1 is for non node clients
 	req.ReplicaID = -1
-	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-		c.logger.Error("msg", "SetWriteDeadline failed",
+	if err := c.writeReq(req, timeout); err != nil {
+		c.logger.Error("msg", "writeReq failed",
 			"error", err)
-		c.releaseWaiter(req.CorrelationID)
-		return nil, err
-	}
-	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -402,23 +394,16 @@ func (c *connection) Offset(ctx context.Context, timeout time.Duration, req *pro
 }
 
 func (c *connection) ConsumerMetadata(ctx context.Context, timeout time.Duration, req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
-	var ok bool
-	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
-	}
+	req.CorrelationID = c.nextID()
+
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-		c.logger.Error("msg", "SetWriteDeadline failed",
+	if err := c.writeReq(req, timeout); err != nil {
+		c.logger.Error("msg", "writeReq failed",
 			"error", err)
-		c.releaseWaiter(req.CorrelationID)
-		return nil, err
-	}
-	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -438,23 +423,16 @@ func (c *connection) ConsumerMetadata(ctx context.Context, timeout time.Duration
 }
 
 func (c *connection) OffsetCommit(ctx context.Context, timeout time.Duration, req *proto.OffsetCommitReq) (*proto.OffsetCommitResp, error) {
-	var ok bool
-	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
-	}
+	req.CorrelationID = c.nextID()
+
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-		c.logger.Error("msg", "SetWriteDeadline failed",
+	if err := c.writeReq(req, timeout); err != nil {
+		c.logger.Error("msg", "writeReq failed",
 			"error", err)
-		c.releaseWaiter(req.CorrelationID)
-		return nil, err
-	}
-	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -474,23 +452,16 @@ func (c *connection) OffsetCommit(ctx context.Context, timeout time.Duration, re
 }
 
 func (c *connection) OffsetFetch(ctx context.Context, timeout time.Duration, req *proto.OffsetFetchReq) (*proto.OffsetFetchResp, error) {
-	var ok bool
-	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
-	}
+	req.CorrelationID = c.nextID()
+
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-		c.logger.Error("msg", "SetWriteDeadline failed",
+	if err := c.writeReq(req, timeout); err != nil {
+		c.logger.Error("msg", "writeReq failed",
 			"error", err)
-		c.releaseWaiter(req.CorrelationID)
-		return nil, err
-	}
-	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -510,23 +481,16 @@ func (c *connection) OffsetFetch(ctx context.Context, timeout time.Duration, req
 }
 
 func (c *connection) DeleteTopics(ctx context.Context, timeout time.Duration, req *proto.DeleteTopicsReq) (*proto.DeleteTopicsResp, error) {
-	var ok bool
-	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
-	}
+	req.CorrelationID = c.nextID()
+
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-		c.logger.Error("msg", "SetWriteDeadline failed",
+	if err := c.writeReq(req, timeout); err != nil {
+		c.logger.Error("msg", "writeReq failed",
 			"error", err)
-		c.releaseWaiter(req.CorrelationID)
-		return nil, err
-	}
-	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}
@@ -546,23 +510,16 @@ func (c *connection) DeleteTopics(ctx context.Context, timeout time.Duration, re
 }
 
 func (c *connection) DescribeConfigs(ctx context.Context, timeout time.Duration, req *proto.DescribeConfigsReq) (*proto.DescribeConfigsResp, error) {
-	var ok bool
-	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
-	}
+	req.CorrelationID = c.nextID()
+
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
-		c.logger.Error("msg", "SetWriteDeadline failed",
+	if err := c.writeReq(req, timeout); err != nil {
+		c.logger.Error("msg", "writeReq failed",
 			"error", err)
-		c.releaseWaiter(req.CorrelationID)
-		return nil, err
-	}
-	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
 	}

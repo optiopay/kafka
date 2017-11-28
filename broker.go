@@ -1550,10 +1550,12 @@ consumeRetryLoop:
 					c.conn_ = nil
 					continue consumeRetryLoop
 				}
-				logger.Debug("returning fetched messages",
-					"retry", retry,
-					"topic", c.conf.Topic,
-					"partition", c.conf.Partition)
+				if len(part.Messages) > 0 {
+					logger.Debug("returning fetched messages",
+						"retry", retry,
+						"topic", c.conf.Topic,
+						"partition", c.conf.Partition)
+				}
 				return part.Messages, part.Err
 			}
 		}
