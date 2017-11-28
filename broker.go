@@ -488,6 +488,8 @@ func (b *Broker) cacheMetadata(ctx context.Context, resp *proto.MetadataResp) {
 	if resp.HasControllerID() {
 		id := resp.ControllerID
 		b.metadata.controllerID = &id
+	} else {
+		b.metadata.controllerID = nil
 	}
 	if resp.HasClusterID() {
 		b.metadata.clusterID = resp.ClusterID
@@ -898,6 +900,9 @@ func (b *Broker) closeDeadConnection(ctx context.Context, conn *connection, refr
 			logger.Debug("closing dead connection",
 				"nodeID", nid)
 			delete(b.conns, nid)
+			if b.metadata.controllerID != nil && *b.metadata.controllerID == nid {
+				b.metadata.controllerID = nil
+			}
 			go c.Close()
 			if refreshMetadata {
 				if err := b.refreshMetadata(context.Background(), proto.MetadataV0); err != nil {
