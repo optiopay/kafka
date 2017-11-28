@@ -238,7 +238,7 @@ func (c *connection) Metadata(ctx context.Context, timeout time.Duration, req *p
 // response. Sending request with no ACKs flag will result with returning nil
 // right after sending request, without waiting for response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Produce(ctx context.Context, req *proto.ProduceReq) (*proto.ProduceResp, error) {
+func (c *connection) Produce(ctx context.Context, timeout time.Duration, req *proto.ProduceReq) (*proto.ProduceResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -266,6 +266,9 @@ func (c *connection) Produce(ctx context.Context, req *proto.ProduceReq) (*proto
 			return nil, c.stopErr
 		}
 		return proto.ReadProduceResp(bytes.NewReader(b))
+	case <-time.After(timeout):
+		c.releaseWaiter(req.CorrelationID)
+		return nil, proto.ErrRequestTimeout
 	case <-ctx.Done():
 		c.releaseWaiter(req.CorrelationID)
 		return nil, ctx.Err()
@@ -274,7 +277,7 @@ func (c *connection) Produce(ctx context.Context, req *proto.ProduceReq) (*proto
 
 // Fetch sends given fetch request to kafka node and returns related response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Fetch(ctx context.Context, req *proto.FetchReq) (*proto.FetchResp, error) {
+func (c *connection) Fetch(ctx context.Context, timeout time.Duration, req *proto.FetchReq) (*proto.FetchResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -322,6 +325,9 @@ func (c *connection) Fetch(ctx context.Context, req *proto.FetchReq) (*proto.Fet
 			}
 		}
 		return resp, nil
+	case <-time.After(timeout):
+		c.releaseWaiter(req.CorrelationID)
+		return nil, proto.ErrRequestTimeout
 	case <-ctx.Done():
 		c.releaseWaiter(req.CorrelationID)
 		return nil, ctx.Err()
@@ -330,7 +336,7 @@ func (c *connection) Fetch(ctx context.Context, req *proto.FetchReq) (*proto.Fet
 
 // Offset sends given offset request to kafka node and returns related response.
 // Calling this method on closed connection will always return ErrClosed.
-func (c *connection) Offset(ctx context.Context, req *proto.OffsetReq) (*proto.OffsetResp, error) {
+func (c *connection) Offset(ctx context.Context, timeout time.Duration, req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -356,13 +362,16 @@ func (c *connection) Offset(ctx context.Context, req *proto.OffsetReq) (*proto.O
 			return nil, c.stopErr
 		}
 		return proto.ReadOffsetResp(bytes.NewReader(b))
+	case <-time.After(timeout):
+		c.releaseWaiter(req.CorrelationID)
+		return nil, proto.ErrRequestTimeout
 	case <-ctx.Done():
 		c.releaseWaiter(req.CorrelationID)
 		return nil, ctx.Err()
 	}
 }
 
-func (c *connection) ConsumerMetadata(ctx context.Context, req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
+func (c *connection) ConsumerMetadata(ctx context.Context, timeout time.Duration, req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -383,6 +392,9 @@ func (c *connection) ConsumerMetadata(ctx context.Context, req *proto.ConsumerMe
 			return nil, c.stopErr
 		}
 		return proto.ReadConsumerMetadataResp(bytes.NewReader(b))
+	case <-time.After(timeout):
+		c.releaseWaiter(req.CorrelationID)
+		return nil, proto.ErrRequestTimeout
 	case <-ctx.Done():
 		c.releaseWaiter(req.CorrelationID)
 		return nil, ctx.Err()
@@ -419,7 +431,7 @@ func (c *connection) OffsetCommit(ctx context.Context, timeout time.Duration, re
 	}
 }
 
-func (c *connection) OffsetFetch(ctx context.Context, req *proto.OffsetFetchReq) (*proto.OffsetFetchResp, error) {
+func (c *connection) OffsetFetch(ctx context.Context, timeout time.Duration, req *proto.OffsetFetchReq) (*proto.OffsetFetchResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -440,13 +452,16 @@ func (c *connection) OffsetFetch(ctx context.Context, req *proto.OffsetFetchReq)
 			return nil, c.stopErr
 		}
 		return proto.ReadOffsetFetchResp(bytes.NewReader(b))
+	case <-time.After(timeout):
+		c.releaseWaiter(req.CorrelationID)
+		return nil, proto.ErrRequestTimeout
 	case <-ctx.Done():
 		c.releaseWaiter(req.CorrelationID)
 		return nil, ctx.Err()
 	}
 }
 
-func (c *connection) DeleteTopics(ctx context.Context, req *proto.DeleteTopicsReq) (*proto.DeleteTopicsResp, error) {
+func (c *connection) DeleteTopics(ctx context.Context, timeout time.Duration, req *proto.DeleteTopicsReq) (*proto.DeleteTopicsResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -467,13 +482,16 @@ func (c *connection) DeleteTopics(ctx context.Context, req *proto.DeleteTopicsRe
 			return nil, c.stopErr
 		}
 		return proto.ReadDeleteTopicsResp(bytes.NewReader(b))
+	case <-time.After(timeout):
+		c.releaseWaiter(req.CorrelationID)
+		return nil, proto.ErrRequestTimeout
 	case <-ctx.Done():
 		c.releaseWaiter(req.CorrelationID)
 		return nil, ctx.Err()
 	}
 }
 
-func (c *connection) DescribeConfigs(ctx context.Context, req *proto.DescribeConfigsReq) (*proto.DescribeConfigsResp, error) {
+func (c *connection) DescribeConfigs(ctx context.Context, timeout time.Duration, req *proto.DescribeConfigsReq) (*proto.DescribeConfigsResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -494,6 +512,9 @@ func (c *connection) DescribeConfigs(ctx context.Context, req *proto.DescribeCon
 			return nil, c.stopErr
 		}
 		return proto.ReadDescribeConfigsResp(bytes.NewReader(b))
+	case <-time.After(timeout):
+		c.releaseWaiter(req.CorrelationID)
+		return nil, proto.ErrRequestTimeout
 	case <-ctx.Done():
 		c.releaseWaiter(req.CorrelationID)
 		return nil, ctx.Err()

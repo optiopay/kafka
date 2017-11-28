@@ -177,6 +177,13 @@ type BrokerConf struct {
 	// Default is 10sec
 	MetadataTimeout time.Duration
 
+	// Maximum time a Offset request is allowed to take.
+	// Default is 10sec
+	OffsetTimeout time.Duration
+
+	// Maximum time a ConsumerMetadata request is allowed to take.
+	ConsumerMetadataTimeout time.Duration
+
 	// DEPRECATED 2015-07-10 - use Logger instead
 	//
 	// TODO(husio) remove
@@ -196,18 +203,20 @@ type BrokerConf struct {
 // NewBrokerConf returns the default broker configuration.
 func NewBrokerConf(clientID string) BrokerConf {
 	return BrokerConf{
-		ClientID:           clientID,
-		DialTimeout:        10 * time.Second,
-		DialRetryLimit:     10,
-		DialRetryWait:      500 * time.Millisecond,
-		AllowTopicCreation: false,
-		LeaderRetryLimit:   10,
-		LeaderRetryWait:    500 * time.Millisecond,
-		RetryErrLimit:      10,
-		RetryErrWait:       time.Millisecond * 500,
-		ReadTimeout:        30 * time.Second,
-		MetadataTimeout:    10 * time.Second,
-		Logger:             &nullLogger{},
+		ClientID:                clientID,
+		DialTimeout:             10 * time.Second,
+		DialRetryLimit:          10,
+		DialRetryWait:           500 * time.Millisecond,
+		AllowTopicCreation:      false,
+		LeaderRetryLimit:        10,
+		LeaderRetryWait:         500 * time.Millisecond,
+		RetryErrLimit:           10,
+		RetryErrWait:            time.Millisecond * 500,
+		ReadTimeout:             30 * time.Second,
+		MetadataTimeout:         10 * time.Second,
+		OffsetTimeout:           10 * time.Second,
+		ConsumerMetadataTimeout: 10 * time.Second,
+		Logger:                  &nullLogger{},
 	}
 }
 
@@ -668,7 +677,7 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 
 		// first try all already existing connections
 		for nid, conn := range b.conns {
-			resp, err := conn.ConsumerMetadata(ctx, &proto.ConsumerMetadataReq{
+			resp, err := conn.ConsumerMetadata(ctx, b.conf.ConsumerMetadataTimeout, &proto.ConsumerMetadataReq{
 				ClientID:      b.conf.ClientID,
 				ConsumerGroup: consumerGroup,
 			})
@@ -739,7 +748,7 @@ func (b *Broker) muCoordinatorConnection(ctx context.Context, consumerGroup stri
 			}
 			b.conns[nodeID] = conn
 
-			resp, err := conn.ConsumerMetadata(ctx, &proto.ConsumerMetadataReq{
+			resp, err := conn.ConsumerMetadata(ctx, b.conf.ConsumerMetadataTimeout, &proto.ConsumerMetadataReq{
 				ClientID:      b.conf.ClientID,
 				ConsumerGroup: consumerGroup,
 			})
@@ -929,7 +938,7 @@ func (b *Broker) offset(ctx context.Context, topic string, partition int32, time
 			return 0, err
 		}
 		var resp *proto.OffsetResp
-		resp, err = conn.Offset(ctx, &proto.OffsetReq{
+		resp, err = conn.Offset(ctx, b.conf.OffsetTimeout, &proto.OffsetReq{
 			ClientID:  b.conf.ClientID,
 			ReplicaID: -1, // any client
 			Topics: []proto.OffsetReqTopic{
@@ -1020,6 +1029,9 @@ type ProducerConf struct {
 	// default set to 200ms.
 	RetryWait time.Duration
 
+	// ProduceTimeout is the maximum time a Produce request is allowed to take.
+	ProduceTimeout time.Duration
+
 	// Logger used by producer. By default, reuse logger assigned to broker.
 	Logger Logger
 }
@@ -1032,6 +1044,7 @@ func NewProducerConf() ProducerConf {
 		RequestTimeout: 5 * time.Second,
 		RetryLimit:     10,
 		RetryWait:      200 * time.Millisecond,
+		ProduceTimeout: time.Second * 20,
 		Logger:         nil,
 	}
 }
@@ -1141,7 +1154,7 @@ func (p *producer) produce(ctx context.Context, topic string, partition int32, m
 		},
 	}
 
-	resp, err := conn.Produce(ctx, &req)
+	resp, err := conn.Produce(ctx, p.conf.ProduceTimeout, &req)
 	if err != nil {
 		if isCloseDeadConnectionNeeded(err) {
 			// Connection is broken, so should be closed, but the error is
@@ -1246,6 +1259,9 @@ type ConsumerConf struct {
 	// Default is StartOffsetOldest.
 	StartOffset int64
 
+	// FetchTimeout is the maximum time a Fetch request is allowed to take.
+	FetchTimeout time.Duration
+
 	// Logger used by consumer. By default, reuse logger assigned to broker.
 	Logger Logger
 }
@@ -1263,6 +1279,7 @@ func NewConsumerConf(topic string, partition int32) ConsumerConf {
 		MinFetchSize:   1,
 		MaxFetchSize:   2000000,
 		StartOffset:    StartOffsetOldest,
+		FetchTimeout:   time.Second * 10,
 		Logger:         nil,
 	}
 }
@@ -1450,7 +1467,7 @@ consumeRetryLoop:
 			c.conn = conn
 		}
 
-		resp, err := c.conn.Fetch(ctx, &req)
+		resp, err := c.conn.Fetch(ctx, c.conf.FetchTimeout, &req)
 		resErr = err
 
 		if isCloseDeadConnectionNeeded(err) {
@@ -1531,6 +1548,10 @@ type OffsetCoordinatorConf struct {
 	// By default 10s
 	CommitTimeout time.Duration
 
+	// OffsetFetchTimeout control the maximum duration of a OffsetFetch request.
+	// By default 10s
+	OffsetFetchTimeout time.Duration
+
 	// Logger used by consumer. By default, reuse logger assigned to broker.
 	Logger Logger
 }
@@ -1538,11 +1559,12 @@ type OffsetCoordinatorConf struct {
 // NewOffsetCoordinatorConf returns default OffsetCoordinator configuration.
 func NewOffsetCoordinatorConf(consumerGroup string) OffsetCoordinatorConf {
 	return OffsetCoordinatorConf{
-		ConsumerGroup: consumerGroup,
-		RetryErrLimit: 10,
-		RetryErrWait:  time.Millisecond * 500,
-		CommitTimeout: time.Second * 10,
-		Logger:        nil,
+		ConsumerGroup:      consumerGroup,
+		RetryErrLimit:      10,
+		RetryErrWait:       time.Millisecond * 500,
+		CommitTimeout:      time.Second * 10,
+		OffsetFetchTimeout: time.Second * 10,
+		Logger:             nil,
 	}
 }
 
@@ -1731,7 +1753,7 @@ func (c *offsetCoordinator) Offset(ctx context.Context, topic string, partition 
 			continue
 		}
 
-		resp, err := conn.OffsetFetch(ctx, &proto.OffsetFetchReq{
+		resp, err := conn.OffsetFetch(ctx, c.conf.OffsetFetchTimeout, &proto.OffsetFetchReq{
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetFetchReqTopic{
 				{
@@ -1786,6 +1808,12 @@ type AdminConf struct {
 	// request. By default 500ms.
 	RetryErrWait time.Duration
 
+	// DescribeConfigsTimeout is the maximum time a DescribeConfigs request can take.
+	DescribeConfigsTimeout time.Duration
+
+	// DeleteTopicsTimeout is the maximum time a DeleteTopics request can take.
+	DeleteTopicsTimeout time.Duration
+
 	// Logger used by consumer. By default, reuse logger assigned to broker.
 	Logger Logger
 }
@@ -1793,9 +1821,11 @@ type AdminConf struct {
 // NewAdminConf returns default AdminConf configuration.
 func NewAdminConf() AdminConf {
 	return AdminConf{
-		RetryErrLimit: 10,
-		RetryErrWait:  time.Millisecond * 500,
-		Logger:        nil,
+		RetryErrLimit:          10,
+		RetryErrWait:           time.Millisecond * 500,
+		DescribeConfigsTimeout: time.Second * 10,
+		DeleteTopicsTimeout:    time.Second * 30,
+		Logger:                 nil,
 	}
 }
 
@@ -1886,7 +1916,7 @@ func (c *admin) DeleteTopics(ctx context.Context, topics []string, timeout int32
 			continue
 		}
 
-		resp, err := conn.DeleteTopics(ctx, &proto.DeleteTopicsReq{
+		resp, err := conn.DeleteTopics(ctx, c.conf.DeleteTopicsTimeout, &proto.DeleteTopicsReq{
 			Topics:  topics,
 			Timeout: timeout,
 		})
@@ -1935,7 +1965,7 @@ func (c *admin) DescribeConfigs(ctx context.Context, configs ...proto.ConfigReso
 			continue
 		}
 
-		resp, err := conn.DescribeConfigs(ctx, &proto.DescribeConfigsReq{
+		resp, err := conn.DescribeConfigs(ctx, c.conf.DescribeConfigsTimeout, &proto.DescribeConfigsReq{
 			Resources: configs,
 		})
 
