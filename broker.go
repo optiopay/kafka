@@ -1527,6 +1527,10 @@ type OffsetCoordinatorConf struct {
 	// request. By default 500ms.
 	RetryErrWait time.Duration
 
+	// CommitTimeout control the maximum duration of a Commit request.
+	// By default 10s
+	CommitTimeout time.Duration
+
 	// Logger used by consumer. By default, reuse logger assigned to broker.
 	Logger Logger
 }
@@ -1537,6 +1541,7 @@ func NewOffsetCoordinatorConf(consumerGroup string) OffsetCoordinatorConf {
 		ConsumerGroup: consumerGroup,
 		RetryErrLimit: 10,
 		RetryErrWait:  time.Millisecond * 500,
+		CommitTimeout: time.Second * 10,
 		Logger:        nil,
 	}
 }
@@ -1545,8 +1550,8 @@ type offsetCoordinator struct {
 	conf   OffsetCoordinatorConf
 	broker *Broker
 
-	mu_   sync.Mutex
-	conn_ *connection
+	mu   sync.Mutex
+	conn *connection
 }
 
 // OffsetCoordinator returns offset management coordinator for single consumer
@@ -1562,7 +1567,7 @@ func (b *Broker) OffsetCoordinator(ctx context.Context, conf OffsetCoordinatorCo
 	c := &offsetCoordinator{
 		broker: b,
 		conf:   conf,
-		conn_:  conn,
+		conn:   conn,
 	}
 	return c, nil
 }
@@ -1570,17 +1575,17 @@ func (b *Broker) OffsetCoordinator(ctx context.Context, conf OffsetCoordinatorCo
 // muCoordinatorConnection returns the currently open coordinator connection,
 // or a new coordinator connection is no such connection is available.
 func (c *offsetCoordinator) muCoordinatorConnection(ctx context.Context) (*connection, error) {
-	c.mu_.Lock()
-	defer c.mu_.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	if c.conn_ != nil {
-		return c.conn_, nil
+	if c.conn != nil {
+		return c.conn, nil
 	}
 	conn, err := c.broker.muCoordinatorConnection(ctx, c.conf.ConsumerGroup)
 	if err != nil {
 		return nil, err
 	}
-	c.conn_ = conn
+	c.conn = conn
 	return conn, nil
 }
 
@@ -1588,11 +1593,11 @@ func (c *offsetCoordinator) muCoordinatorConnection(ctx context.Context) (*conne
 // is closed and removed from the broker.
 func (c *offsetCoordinator) muCloseDeadConnection(ctx context.Context, conn *connection) {
 	if conn != nil {
-		c.mu_.Lock()
-		defer c.mu_.Unlock()
+		c.mu.Lock()
+		defer c.mu.Unlock()
 
-		if c.conn_ == conn {
-			c.conn_ = nil
+		if c.conn == conn {
+			c.conn = nil
 			c.broker.muCloseDeadConnection(ctx, conn)
 		}
 	}
@@ -1645,7 +1650,7 @@ func (c *offsetCoordinator) commit(ctx context.Context, topic string, partition 
 			continue
 		}
 
-		resp, err := conn.OffsetCommit(ctx, &proto.OffsetCommitReq{
+		resp, err := conn.OffsetCommit(ctx, c.conf.CommitTimeout, &proto.OffsetCommitReq{
 			ClientID:      c.broker.conf.ClientID,
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetCommitReqTopic{

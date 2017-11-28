@@ -389,7 +389,7 @@ func (c *connection) ConsumerMetadata(ctx context.Context, req *proto.ConsumerMe
 	}
 }
 
-func (c *connection) OffsetCommit(ctx context.Context, req *proto.OffsetCommitReq) (*proto.OffsetCommitResp, error) {
+func (c *connection) OffsetCommit(ctx context.Context, timeout time.Duration, req *proto.OffsetCommitReq) (*proto.OffsetCommitResp, error) {
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -410,6 +410,9 @@ func (c *connection) OffsetCommit(ctx context.Context, req *proto.OffsetCommitRe
 			return nil, c.stopErr
 		}
 		return proto.ReadOffsetCommitResp(bytes.NewReader(b))
+	case <-time.After(timeout):
+		c.releaseWaiter(req.CorrelationID)
+		return nil, proto.ErrRequestTimeout
 	case <-ctx.Done():
 		c.releaseWaiter(req.CorrelationID)
 		return nil, ctx.Err()

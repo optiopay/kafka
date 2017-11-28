@@ -159,10 +159,11 @@ func TestDialRandomized(t *testing.T) {
 		}
 	}
 
-	if srv1.Processed == 30 {
-		t.Fatal("all traffic went to first broker")
+	if srv1.Processed == 30 && srv2.Processed == 0 && srv3.Processed == 0 {
+		// Since we now request all brokers at once, this can happen
+		t.Log("all traffic went to first broker")
 	}
-	if srv1.Processed+srv2.Processed+srv3.Processed != 30 {
+	if srv1.Processed+srv2.Processed+srv3.Processed < 30 {
 		t.Fatal("received unexpected number of requests")
 	}
 	if srv1.Processed == 0 || srv2.Processed == 0 || srv3.Processed == 0 {
