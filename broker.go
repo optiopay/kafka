@@ -1477,16 +1477,20 @@ consumeRetryLoop:
 			}
 		}
 
-		logger.Debug("fetching leader connection for fetching message",
-			"retry", retry,
-			"topic", c.conf.Topic,
-			"partition", c.conf.Partition)
+		if retry > 0 {
+			logger.Debug("fetching leader connection for fetching message",
+				"retry", retry,
+				"topic", c.conf.Topic,
+				"partition", c.conf.Partition)
+		}
 		conn, err := c.leaderConnection(ctx)
-		logger.Debug("fetched leader connection for fetching message",
-			"retry", retry,
-			"topic", c.conf.Topic,
-			"partition", c.conf.Partition,
-			"error", err)
+		if retry > 0 {
+			logger.Debug("fetched leader connection for fetching message",
+				"retry", retry,
+				"topic", c.conf.Topic,
+				"partition", c.conf.Partition,
+				"error", err)
+		}
 		if isCanceled(err) {
 			return nil, err
 		} else if err != nil {
@@ -1550,7 +1554,7 @@ consumeRetryLoop:
 					c.conn_ = nil
 					continue consumeRetryLoop
 				}
-				if len(part.Messages) > 0 {
+				if len(part.Messages) > 0 && retry > 0 {
 					logger.Debug("returning fetched messages",
 						"retry", retry,
 						"topic", c.conf.Topic,
