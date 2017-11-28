@@ -1164,7 +1164,7 @@ func (p *producer) produce(ctx context.Context, topic string, partition int32, m
 				"topic", topic,
 				"partition", partition,
 				"error", err)
-			p.broker.muCloseDeadConnection(ctx, conn)
+			go p.broker.muCloseDeadConnection(ctx, conn)
 		}
 		return 0, err
 	}
@@ -1360,10 +1360,8 @@ func (c *consumer) leaderConnection(ctx context.Context) (*connection, error) {
 // closeDeadConnection closes the connection, if it is still the current connection.
 // Mutex must be owned when calling this function.
 func (c *consumer) closeDeadConnection(ctx context.Context, conn *connection) {
-	if c.conn_ == conn {
-		c.conn_ = nil
-		c.broker.muCloseDeadConnection(ctx, conn)
-	}
+	c.conn_ = nil
+	go c.broker.muCloseDeadConnection(ctx, conn)
 }
 
 // consume is returning a batch of messages from consumed partition.
@@ -1479,7 +1477,16 @@ consumeRetryLoop:
 			}
 		}
 
+		logger.Debug("fetching leader connection for fetching message",
+			"retry", retry,
+			"topic", c.conf.Topic,
+			"partition", c.conf.Partition)
 		conn, err := c.leaderConnection(ctx)
+		logger.Debug("fetched leader connection for fetching message",
+			"retry", retry,
+			"topic", c.conf.Topic,
+			"partition", c.conf.Partition,
+			"error", err)
 		if isCanceled(err) {
 			return nil, err
 		} else if err != nil {
@@ -1492,6 +1499,7 @@ consumeRetryLoop:
 
 		if isCloseDeadConnectionNeeded(err) {
 			logger.Debug("connection died while fetching message",
+				"retry", retry,
 				"topic", c.conf.Topic,
 				"partition", c.conf.Partition,
 				"error", err)
@@ -1542,6 +1550,10 @@ consumeRetryLoop:
 					c.conn_ = nil
 					continue consumeRetryLoop
 				}
+				logger.Debug("returning fetched messages",
+					"retry", retry,
+					"topic", c.conf.Topic,
+					"partition", c.conf.Partition)
 				return part.Messages, part.Err
 			}
 		}
@@ -1638,7 +1650,7 @@ func (c *offsetCoordinator) muCloseDeadConnection(ctx context.Context, conn *con
 
 		if c.conn == conn {
 			c.conn = nil
-			c.broker.muCloseDeadConnection(ctx, conn)
+			go c.broker.muCloseDeadConnection(ctx, conn)
 		}
 	}
 }
@@ -1898,7 +1910,7 @@ func (c *admin) muCloseDeadConnection(ctx context.Context, conn *connection) {
 
 		if c.conn_ == conn {
 			c.conn_ = nil
-			c.broker.muCloseDeadConnection(ctx, conn)
+			go c.broker.muCloseDeadConnection(ctx, conn)
 		}
 	}
 }
@@ -2005,5 +2017,5 @@ func (c *admin) DescribeConfigs(ctx context.Context, configs ...proto.ConfigReso
 // muCloseDeadConnection must be called.
 func isCloseDeadConnectionNeeded(err error) bool {
 	_, ok := err.(*net.OpError)
-	return ok || err == io.EOF || err == syscall.EPIPE || isCanceled(err)
+	return ok || err == io.EOF || err == syscall.EPIPE || err == proto.ErrRequestTimeout || isCanceled(err)
 }

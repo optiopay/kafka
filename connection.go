@@ -214,6 +214,12 @@ func (c *connection) Metadata(ctx context.Context, timeout time.Duration, req *p
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
+	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		c.logger.Error("msg", "SetWriteDeadline failed",
+			"error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
@@ -245,6 +251,12 @@ func (c *connection) Produce(ctx context.Context, timeout time.Duration, req *pr
 	}
 
 	if req.RequiredAcks == proto.RequiredAcksNone {
+		if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			c.logger.Error("msg", "SetWriteDeadline failed",
+				"error", err)
+			c.releaseWaiter(req.CorrelationID)
+			return nil, err
+		}
 		_, err := req.WriteTo(c.rw)
 		return nil, err
 	}
@@ -255,6 +267,12 @@ func (c *connection) Produce(ctx context.Context, timeout time.Duration, req *pr
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
+	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		c.logger.Error("msg", "SetWriteDeadline failed",
+			"error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
@@ -289,6 +307,12 @@ func (c *connection) Fetch(ctx context.Context, timeout time.Duration, req *prot
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
+	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		c.logger.Error("msg", "SetWriteDeadline failed",
+			"error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
@@ -351,6 +375,12 @@ func (c *connection) Offset(ctx context.Context, timeout time.Duration, req *pro
 	// TODO(husio) documentation is not mentioning this directly, but I assume
 	// -1 is for non node clients
 	req.ReplicaID = -1
+	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		c.logger.Error("msg", "SetWriteDeadline failed",
+			"error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
@@ -380,6 +410,12 @@ func (c *connection) ConsumerMetadata(ctx context.Context, timeout time.Duration
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		c.logger.Error("msg", "SetWriteDeadline failed",
+			"error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
 	}
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
@@ -411,6 +447,12 @@ func (c *connection) OffsetCommit(ctx context.Context, timeout time.Duration, re
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
+	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		c.logger.Error("msg", "SetWriteDeadline failed",
+			"error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
@@ -440,6 +482,12 @@ func (c *connection) OffsetFetch(ctx context.Context, timeout time.Duration, req
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		c.logger.Error("msg", "SetWriteDeadline failed",
+			"error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
 	}
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
@@ -471,6 +519,12 @@ func (c *connection) DeleteTopics(ctx context.Context, timeout time.Duration, re
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
+	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		c.logger.Error("msg", "SetWriteDeadline failed",
+			"error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
+	}
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
@@ -500,6 +554,12 @@ func (c *connection) DescribeConfigs(ctx context.Context, timeout time.Duration,
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
+	}
+	if err := c.rw.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		c.logger.Error("msg", "SetWriteDeadline failed",
+			"error", err)
+		c.releaseWaiter(req.CorrelationID)
+		return nil, err
 	}
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
