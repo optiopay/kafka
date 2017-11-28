@@ -866,7 +866,7 @@ func (b *Broker) closeDeadConnection(ctx context.Context, conn *connection, refr
 			logger.Debug("closing dead connection",
 				"nodeID", nid)
 			delete(b.conns, nid)
-			_ = c.Close()
+			go c.Close()
 			if refreshMetadata {
 				if err := b.refreshMetadata(context.Background(), proto.MetadataV0); err != nil {
 					logger.Debug("cannot refresh metadata",
