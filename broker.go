@@ -347,90 +347,113 @@ func (b *Broker) fetchMetadata(ctx context.Context, metadataVersion int16, topic
 	}
 
 	// try all nodes that we know of that we're not connected to
-	for nodeID, addr := range b.metadata.nodes {
-		if err := ctx.Err(); err != nil {
-			logger.Debug("context canceled")
-			return nil, err
-		}
-		if _, ok := checkednodes[nodeID]; ok {
-			continue
-		}
-		conn, err := b.newConnection(ctx, addr)
-		if isCanceled(err) {
-			return nil, err
-		} else if err != nil {
-			logger.Debug("cannot connect",
-				"address", addr,
-				"error", err)
-			continue
-		}
-		resp, err := conn.Metadata(ctx, b.conf.MetadataTimeout, &proto.MetadataReq{
-			Version:  metadataVersion,
-			ClientID: b.conf.ClientID,
-			Topics:   topics,
-		})
+	{
+		responses := make(chan *proto.MetadataResp, len(b.metadata.nodes))
+		wg := sync.WaitGroup{}
+		for nodeID, addr := range b.metadata.nodes {
+			wg.Add(1)
+			go func(nodeID int32, addr string) {
+				defer wg.Done()
+				if _, ok := checkednodes[nodeID]; ok {
+					return
+				}
+				conn, err := b.newConnection(ctx, addr)
+				if isCanceled(err) {
+					return
+				} else if err != nil {
+					logger.Debug("cannot connect",
+						"address", addr,
+						"error", err)
+					return
+				}
+				resp, err := conn.Metadata(ctx, b.conf.MetadataTimeout, &proto.MetadataReq{
+					Version:  metadataVersion,
+					ClientID: b.conf.ClientID,
+					Topics:   topics,
+				})
 
-		// we had no active connection to this node, so most likely we don't need it
-		conn.Close()
+				// we had no active connection to this node, so most likely we don't need it
+				conn.Close()
 
-		if isCanceled(err) {
-			return nil, err
-		} else if err != nil {
-			logger.Debug("cannot fetch metadata from newly connected node",
-				"nodeID", nodeID,
-				"error", err)
-			continue
+				if isCanceled(err) {
+					return
+				} else if err != nil {
+					logger.Debug("cannot fetch metadata from newly connected node",
+						"nodeID", nodeID,
+						"error", err)
+					return
+				}
+				responses <- resp
+			}(nodeID, addr)
 		}
-		return resp, nil
+		// Wait for cleaining up channels in another goroutine
+		go func() {
+			wg.Wait()
+			close(responses)
+		}()
+
+		// Wait for first response
+		select {
+		case r, ok := <-responses:
+			if ok {
+				return r, nil
+			}
+			// Continue with initial addresses
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 
-	addresses := b.getInitialAddresses()
-	responses := make(chan *proto.MetadataResp, len(addresses))
-	wg := sync.WaitGroup{}
-	for _, addr := range addresses {
-		wg.Add(1)
-		go func(addr string) {
-			defer wg.Done()
-			conn, err := b.newConnection(ctx, addr)
-			if isCanceled(err) {
-				return
-			} else if err != nil {
-				logger.Debug("cannot connect to seed node",
+	{
+		addresses := b.getInitialAddresses()
+		responses := make(chan *proto.MetadataResp, len(addresses))
+		wg := sync.WaitGroup{}
+		for _, addr := range addresses {
+			wg.Add(1)
+			go func(addr string) {
+				defer wg.Done()
+				conn, err := b.newConnection(ctx, addr)
+				if isCanceled(err) {
+					return
+				} else if err != nil {
+					logger.Debug("cannot connect to seed node",
+						"address", addr,
+						"error", err)
+					return
+				}
+				resp, err := conn.Metadata(ctx, b.conf.MetadataTimeout, &proto.MetadataReq{
+					Version:  metadataVersion,
+					ClientID: b.conf.ClientID,
+					Topics:   topics,
+				})
+				conn.Close()
+				if isCanceled(err) {
+					return
+				} else if err == nil {
+					responses <- resp
+				}
+				logger.Debug("cannot fetch metadata",
 					"address", addr,
 					"error", err)
-				return
-			}
-			resp, err := conn.Metadata(ctx, b.conf.MetadataTimeout, &proto.MetadataReq{
-				Version:  metadataVersion,
-				ClientID: b.conf.ClientID,
-				Topics:   topics,
-			})
-			conn.Close()
-			if isCanceled(err) {
-				return
-			} else if err == nil {
-				responses <- resp
-			}
-			logger.Debug("cannot fetch metadata",
-				"address", addr,
-				"error", err)
-		}(addr)
-	}
-
-	// Wait for cleaining up channels in another goroutine
-	go func() {
-		wg.Wait()
-		close(responses)
-	}()
-
-	select {
-	case r, ok := <-responses:
-		if ok {
-			return r, nil
+			}(addr)
 		}
-		return nil, errors.New("cannot fetch metadata. No topics created?")
-	case <-ctx.Done():
-		return nil, ctx.Err()
+
+		// Wait for cleaining up channels in another goroutine
+		go func() {
+			wg.Wait()
+			close(responses)
+		}()
+
+		// Wait for first response
+		select {
+		case r, ok := <-responses:
+			if ok {
+				return r, nil
+			}
+			return nil, errors.New("cannot fetch metadata. No topics created?")
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
 }
 
