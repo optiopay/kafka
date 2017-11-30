@@ -29,6 +29,8 @@ const (
 	OffsetCommitReqKind     = 8
 	OffsetFetchReqKind      = 9
 	ConsumerMetadataReqKind = 10
+	DeleteTopicsReqKind     = 20
+	DescribeConfigsReqKind  = 32
 
 	// receive the latest offset (i.e. the offset of the next coming message)
 	OffsetReqTimeLatest = -1
@@ -56,6 +58,16 @@ const (
 	CompressionNone   Compression = 0
 	CompressionGzip   Compression = 1
 	CompressionSnappy Compression = 2
+)
+
+type ResourceType int8
+
+const (
+	ResourceTypeUnknown ResourceType = 0
+	ResourceTypeAny     ResourceType = 1
+	ResourceTypeTopic   ResourceType = 2
+	ResourceTypeGroup   ResourceType = 3
+	ResourceTypeBroker  ResourceType = 4
 )
 
 // ReadReq returns request kind ID and byte representation of the whole message
@@ -329,10 +341,18 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 	}
 }
 
+const (
+	MetadataV0 = int16(0)
+	MetadataV1 = int16(1)
+	MetadataV2 = int16(2)
+)
+
 type MetadataReq struct {
-	CorrelationID int32
-	ClientID      string
-	Topics        []string
+	Version                int16
+	CorrelationID          int32
+	ClientID               string
+	Topics                 []string
+	AllowAutoTopicCreation bool
 }
 
 func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
@@ -342,12 +362,29 @@ func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
 	// total message size
 	_ = dec.DecodeInt32()
 	// api key + api version
-	_ = dec.DecodeInt32()
+	_ = dec.DecodeInt16()
+	req.Version = dec.DecodeInt16()
 	req.CorrelationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
-	req.Topics = make([]string, dec.DecodeArrayLen())
-	for i := range req.Topics {
-		req.Topics[i] = dec.DecodeString()
+	switch req.Version {
+	case 0:
+		req.Topics = make([]string, dec.DecodeArrayLen())
+		for i := range req.Topics {
+			req.Topics[i] = dec.DecodeString()
+		}
+	case 1, 2, 3:
+		req.Topics = make([]string, dec.DecodeArrayLen())
+		for i := range req.Topics {
+			req.Topics[i] = dec.DecodeString()
+		}
+	case 4, 5:
+		req.Topics = make([]string, dec.DecodeArrayLen())
+		for i := range req.Topics {
+			req.Topics[i] = dec.DecodeString()
+		}
+		req.AllowAutoTopicCreation = dec.DecodeBool()
+	default:
+		return nil, fmt.Errorf("unsupported MetadataReq version %d", req.Version)
 	}
 
 	if dec.Err() != nil {
@@ -363,13 +400,29 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(int16(MetadataReqKind))
-	enc.Encode(int16(0))
+	enc.EncodeInt16(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
-	enc.EncodeArrayLen(len(r.Topics))
-	for _, name := range r.Topics {
-		enc.Encode(name)
+	switch r.Version {
+	case 0:
+		enc.EncodeArrayLen(len(r.Topics))
+		for _, name := range r.Topics {
+			enc.Encode(name)
+		}
+	case 1, 2, 3:
+		enc.EncodeArrayLen(len(r.Topics))
+		for _, name := range r.Topics {
+			enc.Encode(name)
+		}
+	case 4, 5:
+		enc.EncodeArrayLen(len(r.Topics))
+		for _, name := range r.Topics {
+			enc.Encode(name)
+		}
+		enc.EncodeBool(r.AllowAutoTopicCreation)
+	default:
+		return nil, fmt.Errorf("unsupported MetadataReq version %d", r.Version)
 	}
 
 	if enc.Err() != nil {
@@ -393,29 +446,149 @@ func (r *MetadataReq) WriteTo(w io.Writer) (int64, error) {
 }
 
 type MetadataResp struct {
+	Version       int16
 	CorrelationID int32
 	Brokers       []MetadataRespBroker
+	ClusterID     string
+	ControllerID  int32
 	Topics        []MetadataRespTopic
 }
+
+func (r MetadataResp) HasClusterID() bool    { return r.Version >= 2 }
+func (r MetadataResp) HasControllerID() bool { return r.Version >= 1 }
 
 type MetadataRespBroker struct {
 	NodeID int32
 	Host   string
 	Port   int32
+	Rack   string
+}
+
+func (mrb *MetadataRespBroker) read(dec *decoder, version int16) {
+	mrb.NodeID = dec.DecodeInt32()
+	mrb.Host = dec.DecodeString()
+	mrb.Port = dec.DecodeInt32()
+	switch version {
+	case 0:
+		// Do nothing more
+	case 1:
+		mrb.Rack = dec.DecodeString()
+	default:
+		dec.err = fmt.Errorf("unknown MetadataRespBroker version %d", version)
+	}
+}
+
+func (mrb MetadataRespBroker) write(enc *encoder, version int16) {
+	enc.EncodeInt32(mrb.NodeID)
+	enc.EncodeString(mrb.Host)
+	enc.EncodeInt32(mrb.Port)
+	switch version {
+	case 0:
+		// Do nothing more
+	case 1:
+		enc.EncodeString(mrb.Rack)
+	default:
+		enc.err = fmt.Errorf("unknown MetadataRespBroker version %d", version)
+	}
 }
 
 type MetadataRespTopic struct {
 	Name       string
 	Err        error
+	IsInternal bool
 	Partitions []MetadataRespPartition
 }
 
+func (mrt *MetadataRespTopic) read(dec *decoder, version int16) {
+	switch version {
+	case 0:
+		mrt.Err = errFromNo(dec.DecodeInt16())
+		mrt.Name = dec.DecodeString()
+		mrt.Partitions = make([]MetadataRespPartition, dec.DecodeArrayLen())
+		for pi := range mrt.Partitions {
+			mrt.Partitions[pi].read(dec, 0)
+		}
+	case 1, 2:
+		mrt.Err = errFromNo(dec.DecodeInt16())
+		mrt.Name = dec.DecodeString()
+		mrt.Partitions = make([]MetadataRespPartition, dec.DecodeArrayLen())
+		for pi := range mrt.Partitions {
+			mrt.Partitions[pi].read(dec, version)
+		}
+	default:
+		dec.err = fmt.Errorf("unknown MetadataRespTopic version %d", version)
+	}
+}
+
+func (mrt MetadataRespTopic) write(enc *encoder, version int16) {
+	switch version {
+	case 0:
+		enc.EncodeError(mrt.Err)
+		enc.Encode(mrt.Name)
+		enc.EncodeArrayLen(len(mrt.Partitions))
+		for _, part := range mrt.Partitions {
+			part.write(enc, 0)
+		}
+	case 1, 2:
+		enc.EncodeError(mrt.Err)
+		enc.Encode(mrt.Name)
+		enc.EncodeBool(mrt.IsInternal)
+		enc.EncodeArrayLen(len(mrt.Partitions))
+		for _, part := range mrt.Partitions {
+			part.write(enc, version)
+		}
+	default:
+		enc.err = fmt.Errorf("unknown MetadataRespTopic version %d", version)
+	}
+}
+
 type MetadataRespPartition struct {
-	ID       int32
-	Err      error
-	Leader   int32
-	Replicas []int32
-	Isrs     []int32
+	ID              int32
+	Err             error
+	Leader          int32
+	Replicas        []int32
+	Isrs            []int32
+	OfflineReplicas []int32
+}
+
+func (mrp *MetadataRespPartition) read(dec *decoder, version int16) {
+	switch version {
+	case 0, 1:
+		mrp.Err = errFromNo(dec.DecodeInt16())
+		mrp.ID = dec.DecodeInt32()
+		mrp.Leader = dec.DecodeInt32()
+		mrp.Replicas = dec.DecodeInt32Array()
+		mrp.Isrs = dec.DecodeInt32Array()
+	case 2:
+		mrp.Err = errFromNo(dec.DecodeInt16())
+		mrp.ID = dec.DecodeInt32()
+		mrp.Leader = dec.DecodeInt32()
+		mrp.Replicas = dec.DecodeInt32Array()
+		mrp.Isrs = dec.DecodeInt32Array()
+		mrp.OfflineReplicas = dec.DecodeInt32Array()
+	default:
+		dec.err = fmt.Errorf("unknown MetadataRespPartition version %d", version)
+	}
+}
+
+func (mrp MetadataRespPartition) write(enc *encoder, version int16) {
+	switch version {
+	case 0, 1:
+		enc.EncodeError(mrp.Err)
+		enc.Encode(mrp.ID)
+		enc.Encode(mrp.Leader)
+		enc.Encode(mrp.Replicas)
+		enc.Encode(mrp.Isrs)
+	case 2:
+		enc.EncodeError(mrp.Err)
+		enc.Encode(mrp.ID)
+		enc.Encode(mrp.Leader)
+		enc.Encode(mrp.Replicas)
+		enc.Encode(mrp.Isrs)
+		enc.Encode(mrp.OfflineReplicas)
+	default:
+		enc.err = fmt.Errorf("unknown MetadataRespPartition version %d", version)
+	}
 }
 
 func (r *MetadataResp) Bytes() ([]byte, error) {
@@ -425,24 +598,39 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
 	enc.Encode(r.CorrelationID)
-	enc.EncodeArrayLen(len(r.Brokers))
-	for _, broker := range r.Brokers {
-		enc.Encode(broker.NodeID)
-		enc.Encode(broker.Host)
-		enc.Encode(broker.Port)
-	}
-	enc.EncodeArrayLen(len(r.Topics))
-	for _, topic := range r.Topics {
-		enc.EncodeError(topic.Err)
-		enc.Encode(topic.Name)
-		enc.EncodeArrayLen(len(topic.Partitions))
-		for _, part := range topic.Partitions {
-			enc.EncodeError(part.Err)
-			enc.Encode(part.ID)
-			enc.Encode(part.Leader)
-			enc.Encode(part.Replicas)
-			enc.Encode(part.Isrs)
+	switch r.Version {
+	case 0:
+		enc.EncodeArrayLen(len(r.Brokers))
+		for _, broker := range r.Brokers {
+			broker.write(enc, 0)
 		}
+		enc.EncodeArrayLen(len(r.Topics))
+		for _, topic := range r.Topics {
+			topic.write(enc, 0)
+		}
+	case 1:
+		enc.EncodeArrayLen(len(r.Brokers))
+		for _, broker := range r.Brokers {
+			broker.write(enc, 1)
+		}
+		enc.EncodeInt32(r.ControllerID)
+		enc.EncodeArrayLen(len(r.Topics))
+		for _, topic := range r.Topics {
+			topic.write(enc, 1)
+		}
+	case 2:
+		enc.EncodeArrayLen(len(r.Brokers))
+		for _, broker := range r.Brokers {
+			broker.write(enc, 1)
+		}
+		enc.EncodeString(r.ClusterID)
+		enc.EncodeInt32(r.ControllerID)
+		enc.EncodeArrayLen(len(r.Topics))
+		for _, topic := range r.Topics {
+			topic.write(enc, 1)
+		}
+	default:
+		return nil, fmt.Errorf("unknown MetadataResp version %d", r.Version)
 	}
 
 	if enc.Err() != nil {
@@ -456,44 +644,49 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
-	var resp MetadataResp
+func ReadMetadataResp(r io.Reader, version int16) (*MetadataResp, error) {
+	resp := MetadataResp{
+		Version: version,
+	}
 	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
 	resp.CorrelationID = dec.DecodeInt32()
 
-	resp.Brokers = make([]MetadataRespBroker, dec.DecodeArrayLen())
-	for i := range resp.Brokers {
-		var b = &resp.Brokers[i]
-		b.NodeID = dec.DecodeInt32()
-		b.Host = dec.DecodeString()
-		b.Port = dec.DecodeInt32()
-	}
-
-	resp.Topics = make([]MetadataRespTopic, dec.DecodeArrayLen())
-	for ti := range resp.Topics {
-		var t = &resp.Topics[ti]
-		t.Err = errFromNo(dec.DecodeInt16())
-		t.Name = dec.DecodeString()
-		t.Partitions = make([]MetadataRespPartition, dec.DecodeArrayLen())
-		for pi := range t.Partitions {
-			var p = &t.Partitions[pi]
-			p.Err = errFromNo(dec.DecodeInt16())
-			p.ID = dec.DecodeInt32()
-			p.Leader = dec.DecodeInt32()
-
-			p.Replicas = make([]int32, dec.DecodeArrayLen())
-			for ri := range p.Replicas {
-				p.Replicas[ri] = dec.DecodeInt32()
-			}
-
-			p.Isrs = make([]int32, dec.DecodeArrayLen())
-			for ii := range p.Isrs {
-				p.Isrs[ii] = dec.DecodeInt32()
-			}
+	switch resp.Version {
+	case 0:
+		resp.Brokers = make([]MetadataRespBroker, dec.DecodeArrayLen())
+		for i := range resp.Brokers {
+			resp.Brokers[i].read(dec, 0)
 		}
+		resp.Topics = make([]MetadataRespTopic, dec.DecodeArrayLen())
+		for ti := range resp.Topics {
+			resp.Topics[ti].read(dec, 0)
+		}
+	case 1:
+		resp.Brokers = make([]MetadataRespBroker, dec.DecodeArrayLen())
+		for i := range resp.Brokers {
+			resp.Brokers[i].read(dec, 1)
+		}
+		resp.ControllerID = dec.DecodeInt32()
+		resp.Topics = make([]MetadataRespTopic, dec.DecodeArrayLen())
+		for ti := range resp.Topics {
+			resp.Topics[ti].read(dec, 1)
+		}
+	case 2:
+		resp.Brokers = make([]MetadataRespBroker, dec.DecodeArrayLen())
+		for i := range resp.Brokers {
+			resp.Brokers[i].read(dec, 1)
+		}
+		resp.ClusterID = dec.DecodeString()
+		resp.ControllerID = dec.DecodeInt32()
+		resp.Topics = make([]MetadataRespTopic, dec.DecodeArrayLen())
+		for ti := range resp.Topics {
+			resp.Topics[ti].read(dec, 1)
+		}
+	default:
+		return nil, fmt.Errorf("unknown MetadataResp version %d", resp.Version)
 	}
 
 	if dec.Err() != nil {
@@ -1452,6 +1645,323 @@ func (r *OffsetResp) Bytes() ([]byte, error) {
 				enc.Encode(off)
 			}
 		}
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+type DeleteTopicsReq struct {
+	CorrelationID int32
+	ClientID      string
+	Topics        []string
+	Timeout       int32
+}
+
+func ReadDeleteTopicsReq(r io.Reader) (*DeleteTopicsReq, error) {
+	var req DeleteTopicsReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	req.Topics = make([]string, dec.DecodeArrayLen())
+	for ti := range req.Topics {
+		req.Topics[ti] = dec.DecodeString()
+	}
+	req.Timeout = dec.DecodeInt32()
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
+func (r *DeleteTopicsReq) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(int16(DeleteTopicsReqKind))
+	enc.Encode(int16(0))
+	enc.Encode(r.CorrelationID)
+	enc.Encode(r.ClientID)
+
+	enc.EncodeArrayLen(len(r.Topics))
+	for _, topic := range r.Topics {
+		enc.EncodeString(topic)
+	}
+	enc.EncodeInt32(r.Timeout)
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+func (r *DeleteTopicsReq) WriteTo(w io.Writer) (int64, error) {
+	b, err := r.Bytes()
+	if err != nil {
+		return 0, err
+	}
+	n, err := w.Write(b)
+	return int64(n), err
+}
+
+type DeleteTopicsResp struct {
+	CorrelationID   int32
+	TopicErrorCodes []TopicErrorCode
+}
+
+type TopicErrorCode struct {
+	Topic string
+	Err   error
+}
+
+func (toc *TopicErrorCode) read(dec *decoder) {
+	toc.Topic = dec.DecodeString()
+	toc.Err = errFromNo(dec.DecodeInt16())
+}
+
+func (toc TopicErrorCode) write(enc *encoder) {
+	enc.EncodeString(toc.Topic)
+	enc.EncodeError(toc.Err)
+}
+
+func ReadDeleteTopicsResp(r io.Reader) (*DeleteTopicsResp, error) {
+	var resp DeleteTopicsResp
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	resp.CorrelationID = dec.DecodeInt32()
+	resp.TopicErrorCodes = make([]TopicErrorCode, dec.DecodeArrayLen())
+	for ti := range resp.TopicErrorCodes {
+		resp.TopicErrorCodes[ti].read(dec)
+	}
+
+	if err := dec.Err(); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (r *DeleteTopicsResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeArrayLen(len(r.TopicErrorCodes))
+	for _, toc := range r.TopicErrorCodes {
+		toc.write(enc)
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+type DescribeConfigsReq struct {
+	CorrelationID int32
+	ClientID      string
+	Resources     []ConfigResource
+}
+
+type ConfigResource struct {
+	ResourceType ResourceType
+	ResourceName string
+	ConfigNames  []string
+}
+
+func (r *ConfigResource) read(dec *decoder) {
+	r.ResourceType = ResourceType(dec.DecodeInt8())
+	r.ResourceName = dec.DecodeString()
+	r.ConfigNames = make([]string, dec.DecodeArrayLen())
+	for ti := range r.ConfigNames {
+		r.ConfigNames[ti] = dec.DecodeString()
+	}
+}
+
+func (r ConfigResource) write(enc *encoder) {
+	enc.EncodeInt8(int8(r.ResourceType))
+	enc.EncodeString(r.ResourceName)
+	enc.EncodeArrayLen(len(r.ConfigNames))
+	for _, name := range r.ConfigNames {
+		enc.EncodeString(name)
+	}
+}
+
+func ReadDescribeConfigsReq(r io.Reader) (*DescribeConfigsReq, error) {
+	var req DescribeConfigsReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+	req.Resources = make([]ConfigResource, dec.DecodeArrayLen())
+	for ti := range req.Resources {
+		req.Resources[ti].read(dec)
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
+func (r *DescribeConfigsReq) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(int16(DescribeConfigsReqKind))
+	enc.Encode(int16(0))
+	enc.Encode(r.CorrelationID)
+	enc.Encode(r.ClientID)
+
+	enc.EncodeArrayLen(len(r.Resources))
+	for _, r := range r.Resources {
+		r.write(enc)
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+func (r *DescribeConfigsReq) WriteTo(w io.Writer) (int64, error) {
+	b, err := r.Bytes()
+	if err != nil {
+		return 0, err
+	}
+	n, err := w.Write(b)
+	return int64(n), err
+}
+
+type DescribeConfigsResp struct {
+	CorrelationID int32
+	ThrottleTime  int32 // in ms
+	Resources     []ConfigResourceEntry
+}
+
+type ConfigResourceEntry struct {
+	ErrorCode     int16
+	ErrorMessage  string
+	ResourceType  ResourceType
+	ResourceName  string
+	ConfigEntries []ConfigEntry
+}
+
+func (e *ConfigResourceEntry) read(dec *decoder) {
+	e.ErrorCode = dec.DecodeInt16()
+	e.ErrorMessage = dec.DecodeString()
+	e.ResourceType = ResourceType(dec.DecodeInt8())
+	e.ResourceName = dec.DecodeString()
+	e.ConfigEntries = make([]ConfigEntry, dec.DecodeArrayLen())
+	for i, _ := range e.ConfigEntries {
+		e.ConfigEntries[i].read(dec)
+	}
+}
+
+func (e ConfigResourceEntry) write(enc *encoder) {
+	enc.EncodeInt16(e.ErrorCode)
+	enc.EncodeString(e.ErrorMessage)
+	enc.EncodeInt8(int8(e.ResourceType))
+	enc.EncodeString(e.ResourceName)
+	enc.EncodeArrayLen(len(e.ConfigEntries))
+	for _, ce := range e.ConfigEntries {
+		ce.write(enc)
+	}
+}
+
+type ConfigEntry struct {
+	ConfigName  string
+	ConfigValue string
+	ReadOnly    bool
+	IsDefault   bool
+	IsSensitive bool
+}
+
+func (e *ConfigEntry) read(dec *decoder) {
+	e.ConfigName = dec.DecodeString()
+	e.ConfigValue = dec.DecodeString()
+	e.ReadOnly = dec.DecodeBool()
+	e.IsDefault = dec.DecodeBool()
+	e.IsSensitive = dec.DecodeBool()
+}
+
+func (e ConfigEntry) write(enc *encoder) {
+	enc.EncodeString(e.ConfigName)
+	enc.EncodeString(e.ConfigValue)
+	enc.EncodeBool(e.ReadOnly)
+	enc.EncodeBool(e.IsDefault)
+	enc.EncodeBool(e.IsSensitive)
+}
+
+func ReadDescribeConfigsResp(r io.Reader) (*DescribeConfigsResp, error) {
+	var resp DescribeConfigsResp
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	resp.CorrelationID = dec.DecodeInt32()
+	resp.ThrottleTime = dec.DecodeInt32()
+	resp.Resources = make([]ConfigResourceEntry, dec.DecodeArrayLen())
+	for ti := range resp.Resources {
+		resp.Resources[ti].read(dec)
+	}
+
+	if err := dec.Err(); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (r *DescribeConfigsResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(r.ThrottleTime)
+	enc.EncodeArrayLen(len(r.Resources))
+	for _, toc := range r.Resources {
+		toc.write(enc)
 	}
 
 	if enc.Err() != nil {
