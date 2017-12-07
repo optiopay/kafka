@@ -347,7 +347,7 @@ func TestReadIncompleteMessage(t *testing.T) {
 	b := buf.Bytes()
 	// cut off the last bytes as kafka can do
 	b = b[:len(b)-4]
-	messages, err := readMessageSet(bytes.NewBuffer(b), int32(len(b)))
+	messages, err := readMessageSet(bytes.NewBuffer(b), int32(len(b)), 0)
 	if err != nil {
 		t.Fatalf("cannot deserialize messages: %s", err)
 	}
@@ -370,7 +370,7 @@ func TestReadEmptyMessage(t *testing.T) {
 	}
 
 	b := buf.Bytes()
-	messages, err := readMessageSet(bytes.NewBuffer(b), int32(len(b)))
+	messages, err := readMessageSet(bytes.NewBuffer(b), int32(len(b)), 0)
 	if err != nil {
 		t.Fatalf("cannot deserialize messages: %s", err)
 	}
