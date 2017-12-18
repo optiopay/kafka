@@ -5,9 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
+)
+
+const (
+	maxParseArrayLen = 256
 )
 
 var ErrNotEnoughData = errors.New("not enough data")
+var ErrInvalidArrayLen = errors.New("invalid array length")
 
 type decoder struct {
 	buf []byte
@@ -107,6 +113,10 @@ func (d *decoder) DecodeInt64() int64 {
 	return int64(binary.BigEndian.Uint64(b))
 }
 
+func (d *decoder) DecodeDuration32() time.Duration {
+	return time.Duration(d.DecodeInt32()) * time.Millisecond
+}
+
 func (d *decoder) DecodeString() string {
 	if d.err != nil {
 		return ""
@@ -121,7 +131,12 @@ func (d *decoder) DecodeString() string {
 
 	var b []byte
 	if int(slen) > len(d.buf) {
-		b = make([]byte, slen)
+		var err error
+		b, err = allocParseBuf(int(slen))
+		if err != nil {
+			d.err = err
+			return ""
+		}
 	} else {
 		b = d.buf[:int(slen)]
 	}
@@ -137,8 +152,14 @@ func (d *decoder) DecodeString() string {
 	return string(b)
 }
 
-func (d *decoder) DecodeArrayLen() int {
-	return int(d.DecodeInt32())
+func (d *decoder) DecodeArrayLen() (int, error) {
+	len := int(d.DecodeInt32())
+
+	if len < 0 || len > maxParseBufSize {
+		return 0, ErrInvalidArrayLen
+	}
+
+	return len, nil
 }
 
 func (d *decoder) DecodeBytes() []byte {
@@ -153,7 +174,11 @@ func (d *decoder) DecodeBytes() []byte {
 		return nil
 	}
 
-	b := make([]byte, slen)
+	b, err := allocParseBuf(int(slen))
+	if err != nil {
+		d.err = err
+		return nil
+	}
 	n, err := io.ReadFull(d.r, b)
 	if err != nil {
 		d.err = err
@@ -234,6 +259,10 @@ func (e *encoder) Encode(value interface{}) {
 		for _, v := range val {
 			e.Encode(v)
 		}
+	case time.Duration:
+		intVal := uint32(val / time.Millisecond)
+		b = e.buf[:4]
+		binary.BigEndian.PutUint32(b, intVal)
 	default:
 		e.err = fmt.Errorf("cannot encode type %T", value)
 	}

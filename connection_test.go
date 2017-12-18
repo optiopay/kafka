@@ -11,7 +11,7 @@ import (
 )
 
 type serializableMessage interface {
-	Bytes() ([]byte, error)
+	Bytes(int16) ([]byte, error)
 }
 
 func testServer(messages ...serializableMessage) (net.Listener, error) {
@@ -22,7 +22,7 @@ func testServer(messages ...serializableMessage) (net.Listener, error) {
 
 	responses := make([][]byte, len(messages))
 	for i, m := range messages {
-		b, err := m.Bytes()
+		b, err := m.Bytes(proto.KafkaV0)
 		if err != nil {
 			_ = ln.Close()
 			return nil, err
@@ -68,7 +68,7 @@ func testServer2() (net.Listener, chan serializableMessage, error) {
 				defer func() { _ = cli.Close() }()
 
 				for msg := range msgs {
-					b, err := msg.Bytes()
+					b, err := msg.Bytes(proto.KafkaV0)
 					if err != nil {
 						panic(err)
 					}

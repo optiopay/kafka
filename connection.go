@@ -188,7 +188,7 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
-	if _, err := req.WriteTo(c.rw); err != nil {
+	if _, err := req.WriteTo(c.rw, req.Version); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
@@ -211,7 +211,7 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 	}
 
 	if req.RequiredAcks == proto.RequiredAcksNone {
-		_, err := req.WriteTo(c.rw)
+		_, err := req.WriteTo(c.rw, req.Version)
 		return nil, err
 	}
 
@@ -221,7 +221,7 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
-	if _, err := req.WriteTo(c.rw); err != nil {
+	if _, err := req.WriteTo(c.rw, req.Version); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
@@ -247,7 +247,7 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
-	if _, err := req.WriteTo(c.rw); err != nil {
+	if _, err := req.WriteTo(c.rw, req.Version); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
@@ -301,7 +301,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	// TODO(husio) documentation is not mentioning this directly, but I assume
 	// -1 is for non node clients
 	req.ReplicaID = -1
-	if _, err := req.WriteTo(c.rw); err != nil {
+	if _, err := req.WriteTo(c.rw, req.Version); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
@@ -323,7 +323,7 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if _, err := req.WriteTo(c.rw); err != nil {
+	if _, err := req.WriteTo(c.rw, req.Version); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
@@ -345,7 +345,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if _, err := req.WriteTo(c.rw); err != nil {
+	if _, err := req.WriteTo(c.rw, req.Version); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err
@@ -367,7 +367,7 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 		c.logger.Error("msg", "failed waiting for response", "error", err)
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
-	if _, err := req.WriteTo(c.rw); err != nil {
+	if _, err := req.WriteTo(c.rw, req.Version); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
 		return nil, err

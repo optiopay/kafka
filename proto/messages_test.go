@@ -9,8 +9,8 @@ import (
 )
 
 type Request interface {
-	Bytes() ([]byte, error)
-	WriteTo(w io.Writer) (int64, error)
+	Bytes(version int16) ([]byte, error)
+	WriteTo(w io.Writer, version int16) (int64, error)
 }
 
 var _ Request = &MetadataReq{}
@@ -23,12 +23,12 @@ var _ Request = &OffsetFetchReq{}
 
 func testRequestSerialization(t *testing.T, r Request) {
 	var buf bytes.Buffer
-	if n, err := r.WriteTo(&buf); err != nil {
+	if n, err := r.WriteTo(&buf, KafkaV0); err != nil {
 		t.Fatalf("could not write request to buffer: %s", err)
 	} else if n != int64(buf.Len()) {
 		t.Fatalf("writer returned invalid number of bytes written %d != %d", n, buf.Len())
 	}
-	b, err := r.Bytes()
+	b, err := r.Bytes(KafkaV0)
 	if err != nil {
 		t.Fatalf("could not convert request to bytes: %s", err)
 	}
@@ -44,7 +44,7 @@ func TestMetadataRequest(t *testing.T) {
 		Topics:        nil,
 	}
 	testRequestSerialization(t, req1)
-	b, _ := req1.Bytes()
+	b, _ := req1.Bytes(KafkaV0)
 	expected := []byte{0x0, 0x0, 0x0, 0x15, 0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x7b, 0x0, 0x7, 0x74, 0x65, 0x73, 0x74, 0x63, 0x6c, 0x69, 0x0, 0x0, 0x0, 0x0}
 
 	if !bytes.Equal(b, expected) {
@@ -57,7 +57,7 @@ func TestMetadataRequest(t *testing.T) {
 		Topics:        []string{"foo", "bar"},
 	}
 	testRequestSerialization(t, req2)
-	b, _ = req2.Bytes()
+	b, _ = req2.Bytes(KafkaV0)
 	expected = []byte{0x0, 0x0, 0x0, 0x1f, 0x0, 0x3, 0x0, 0x0, 0x0, 0x0, 0x0, 0x7b, 0x0, 0x7, 0x74, 0x65, 0x73, 0x74, 0x63, 0x6c, 0x69, 0x0, 0x0, 0x0, 0x2, 0x0, 0x3, 0x66, 0x6f, 0x6f, 0x0, 0x3, 0x62, 0x61, 0x72}
 
 	if !bytes.Equal(b, expected) {
@@ -112,7 +112,7 @@ func TestMetadataResponse(t *testing.T) {
 		t.Fatalf("expected different message: %#v", resp)
 	}
 
-	if b, err := resp.Bytes(); err != nil {
+	if b, err := resp.Bytes(KafkaV0); err != nil {
 		t.Fatalf("cannot serialize response: %s", err)
 	} else {
 		if !bytes.Equal(b, msgb) {
@@ -146,7 +146,7 @@ func TestProduceResponse(t *testing.T) {
 		t.Fatalf("expected different message: %#v", resp1)
 	}
 
-	if b, err := resp1.Bytes(); err != nil {
+	if b, err := resp1.Bytes(KafkaV0); err != nil {
 		t.Fatalf("cannot serialize response: %s", err)
 	} else {
 		if !bytes.Equal(b, msgb1) {
@@ -177,7 +177,7 @@ func TestProduceResponse(t *testing.T) {
 	if !reflect.DeepEqual(resp2, expected2) {
 		t.Fatalf("expected different message: %#v", resp2)
 	}
-	if b, err := resp2.Bytes(); err != nil {
+	if b, err := resp2.Bytes(KafkaV0); err != nil {
 		t.Fatalf("cannot serialize response: %s", err)
 	} else {
 		if !bytes.Equal(b, msgb2) {
@@ -190,6 +190,7 @@ func TestFetchRequest(t *testing.T) {
 	req := &FetchReq{
 		CorrelationID: 241,
 		ClientID:      "test",
+		ReplicaID:     -1,
 		MaxWaitTime:   time.Second * 2,
 		MinBytes:      12454,
 		Topics: []FetchReqTopic{
@@ -203,7 +204,7 @@ func TestFetchRequest(t *testing.T) {
 		},
 	}
 	testRequestSerialization(t, req)
-	b, _ := req.Bytes()
+	b, _ := req.Bytes(KafkaV0)
 	expected := []byte{0x0, 0x0, 0x0, 0x47, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xf1, 0x0, 0x4, 0x74, 0x65, 0x73, 0x74, 0xff, 0xff, 0xff, 0xff, 0x0, 0x0, 0x7, 0xd0, 0x0, 0x0, 0x30, 0xa6, 0x0, 0x0, 0x0, 0x1, 0x0, 0x3, 0x66, 0x6f, 0x6f, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0x1, 0xa5, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, 0x11, 0x0, 0x0, 0x13, 0x39, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xb, 0x0, 0x0, 0x0, 0x5c}
 
 	if !bytes.Equal(b, expected) {
@@ -306,7 +307,7 @@ func TestFetchResponse(t *testing.T) {
 			t.Fatalf("expected different message: %#v", resp)
 		}
 		if tt.RoundTrip {
-			b, err := resp.Bytes()
+			b, err := resp.Bytes(KafkaV0)
 			if err != nil {
 				t.Fatalf("cannot serialize response: %s", err)
 			}
@@ -346,7 +347,7 @@ func TestReadIncompleteMessage(t *testing.T) {
 	b := buf.Bytes()
 	// cut off the last bytes as kafka can do
 	b = b[:len(b)-4]
-	messages, err := readMessageSet(bytes.NewBuffer(b), int32(len(b)))
+	messages, err := readMessageSet(bytes.NewBuffer(b), int32(len(b)), 0)
 	if err != nil {
 		t.Fatalf("cannot deserialize messages: %s", err)
 	}
@@ -355,6 +356,26 @@ func TestReadIncompleteMessage(t *testing.T) {
 	}
 	if messages[0].Value[0] != '1' || messages[1].Value[0] != '2' {
 		t.Fatal("expected different messages content")
+	}
+}
+
+func TestReadEmptyMessage(t *testing.T) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+	message := Message{}
+	enc.EncodeInt64(message.Offset)
+	enc.EncodeInt32(0)
+	if err := enc.Err(); err != nil {
+		t.Fatalf("encoding error: %s", err)
+	}
+
+	b := buf.Bytes()
+	messages, err := readMessageSet(bytes.NewBuffer(b), int32(len(b)), 0)
+	if err != nil {
+		t.Fatalf("cannot deserialize messages: %s", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected 0 messages, got %d", len(messages))
 	}
 }
 
@@ -390,7 +411,7 @@ func BenchmarkProduceRequestMarshal(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if _, err := req.Bytes(); err != nil {
+		if _, err := req.Bytes(KafkaV0); err != nil {
 			b.Fatalf("could not serialize messages: %s", err)
 		}
 	}
@@ -412,7 +433,7 @@ func BenchmarkProduceResponseUnmarshal(b *testing.B) {
 			},
 		},
 	}
-	raw, err := resp.Bytes()
+	raw, err := resp.Bytes(KafkaV0)
 	if err != nil {
 		b.Fatalf("cannot serialize response: %s", err)
 	}
@@ -444,7 +465,7 @@ func BenchmarkFetchRequestMarshal(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if _, err := req.Bytes(); err != nil {
+		if _, err := req.Bytes(KafkaV0); err != nil {
 			b.Fatalf("could not serialize messages: %s", err)
 		}
 	}
@@ -481,7 +502,7 @@ func BenchmarkFetchResponseUnmarshal(b *testing.B) {
 			},
 		},
 	}
-	raw, err := resp.Bytes()
+	raw, err := resp.Bytes(KafkaV0)
 	if err != nil {
 		b.Fatalf("cannot serialize response: %s", err)
 	}

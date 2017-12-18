@@ -57,7 +57,7 @@ func TestProduceRequest(t *testing.T) {
 	for _, tt := range tests {
 		req.Compression = tt.Compression
 		testRequestSerialization(t, req)
-		b, _ := req.Bytes()
+		b, _ := req.Bytes(KafkaV0)
 
 		if !bytes.Equal(b, tt.Expected) {
 			fmt.Printf("%#v\n", tt.Expected)
