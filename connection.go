@@ -3,8 +3,12 @@ package kafka
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"io/ioutil"
+	"log"
 	"math"
 	"net"
 	"sync"
@@ -27,6 +31,48 @@ type connection struct {
 	respc       map[int32]chan []byte
 	stopErr     error
 	readTimeout time.Duration
+}
+
+func newTLSConnection(address string, caFile, certFile, keyFile string, timeout, readTimeout time.Duration) (*connection, error) {
+	ca, err := ioutil.ReadFile(caFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	ok := roots.AppendCertsFromPEM(ca)
+	if !ok {
+		panic("failed to parse root certificate")
+	}
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		log.Fatalf("server: loadkeys: %s", err)
+	}
+
+	conf := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      roots,
+	}
+
+	dialer := net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 30 * time.Second,
+	}
+	conn, err := tls.DialWithDialer(&dialer, "tcp", address, conf)
+	//conn, err := dialer.Dial("tcp", address)
+	if err != nil {
+		return nil, err
+	}
+	c := &connection{
+		stop:        make(chan struct{}),
+		nextID:      make(chan int32),
+		rw:          conn,
+		respc:       make(map[int32]chan []byte),
+		logger:      &nullLogger{},
+		readTimeout: readTimeout,
+	}
+	go c.nextIDLoop()
+	go c.readRespLoop()
+	return c, nil
 }
 
 // newConnection returns new, initialized connection or error

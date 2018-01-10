@@ -168,6 +168,15 @@ type BrokerConf struct {
 	// logging frameworks. Used to notify and as replacement for stdlib `log`
 	// package.
 	Logger Logger
+
+	//Settings for TLS encryption
+
+	//Peth to file with TLS CA pem
+	TLSCa string
+	//Path to file with TLS certificate
+	TLSCert string
+	//Path to file with TLS key
+	TLSKey string
 }
 
 // NewBrokerConf returns the default broker configuration.
@@ -311,7 +320,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 		if _, ok := checkednodes[nodeID]; ok {
 			continue
 		}
-		conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+		conn, err := b.getConnection(addr)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect",
 				"address", addr,
@@ -336,7 +345,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 	}
 
 	for _, addr := range b.getInitialAddresses() {
-		conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+		conn, err := b.getConnection(addr)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect to seed node",
 				"address", addr,
@@ -475,7 +484,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 				delete(b.metadata.endpoints, tp)
 				continue
 			}
-			conn, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err = b.getConnection(addr)
 			if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot connect to node",
 					"address", addr,
@@ -488,6 +497,13 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 		return conn, nil
 	}
 	return nil, err
+}
+
+func (b *Broker) getConnection(addr string) (*connection, error) {
+	if b.conf.TLSCa != "" && b.conf.TLSKey != "" && b.conf.TLSCert != "" {
+		return newTLSConnection(addr, b.conf.TLSCa, b.conf.TLSCert, b.conf.TLSKey, b.conf.DialTimeout, b.conf.ReadTimeout)
+	}
+	return newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 }
 
 // coordinatorConnection returns connection to offset coordinator for given group.
@@ -526,7 +542,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			}
 
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
-			conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err := b.getConnection(addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
@@ -552,7 +568,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 				// connection to node is cached so it was already checked
 				continue
 			}
-			conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err := b.getConnection(addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"nodeID", nodeID,
@@ -583,7 +599,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			}
 
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
-			conn, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err = b.getConnection(addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
