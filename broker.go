@@ -169,14 +169,15 @@ type BrokerConf struct {
 	// package.
 	Logger Logger
 
-	//Settings for TLS encryption
+	//Settings for TLS encryption.
+	//You need to set all these parameters to enable TLS
 
-	//Peth to file with TLS CA pem
-	TLSCa string
-	//Path to file with TLS certificate
-	TLSCert string
-	//Path to file with TLS key
-	TLSKey string
+	//TLS CA pem
+	TLSCa []byte
+	//TLS certificate
+	TLSCert []byte
+	//TLS key
+	TLSKey []byte
 }
 
 // NewBrokerConf returns the default broker configuration.
@@ -500,7 +501,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 }
 
 func (b *Broker) getConnection(addr string) (*connection, error) {
-	if b.conf.TLSCa != "" && b.conf.TLSKey != "" && b.conf.TLSCert != "" {
+	if b.conf.TLSCa != nil && b.conf.TLSKey != nil && b.conf.TLSCert != nil {
 		return newTLSConnection(addr, b.conf.TLSCa, b.conf.TLSCert, b.conf.TLSKey, b.conf.DialTimeout, b.conf.ReadTimeout)
 	}
 	return newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)

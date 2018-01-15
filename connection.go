@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math"
 	"net"
@@ -33,23 +32,20 @@ type connection struct {
 	readTimeout time.Duration
 }
 
-func newTLSConnection(address string, caFile, certFile, keyFile string, timeout, readTimeout time.Duration) (*connection, error) {
-	ca, err := ioutil.ReadFile(caFile)
-	if err != nil {
-		log.Fatal(err)
-	}
+func newTLSConnection(address string, ca, cert, key []byte, timeout, readTimeout time.Duration) (*connection, error) {
 	roots := x509.NewCertPool()
 	ok := roots.AppendCertsFromPEM(ca)
 	if !ok {
 		panic("failed to parse root certificate")
 	}
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+
+	certificate, err := tls.X509KeyPair(cert, key)
 	if err != nil {
-		log.Fatalf("server: loadkeys: %s", err)
+		log.Panic("Failed to parse key/cert for TLS: %s", err)
 	}
 
 	conf := &tls.Config{
-		Certificates: []tls.Certificate{cert},
+		Certificates: []tls.Certificate{certificate},
 		RootCAs:      roots,
 	}
 
