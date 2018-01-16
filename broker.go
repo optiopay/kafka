@@ -773,7 +773,6 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 //
 // Upon a successful call, the message's Offset field is updated.
 func (p *producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
-
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(p.conf.RetryWait)
@@ -785,6 +784,11 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 		case nil:
 			for i, msg := range messages {
 				msg.Offset = int64(i) + offset
+			}
+			if retry != 0 {
+				p.conf.Logger.Debug("Produced message after retry",
+					"retry", retry,
+					"topic", topic)
 			}
 			return offset, err
 		case io.EOF, syscall.EPIPE:
@@ -799,11 +803,14 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 					"error", err)
 			}
 		}
-		p.conf.Logger.Debug("cannot produce messages",
+		p.conf.Logger.Debug("Cannot produce messages",
 			"retry", retry,
+			"topic", topic,
 			"error", err)
 	}
-
+	p.conf.Logger.Debug("Abort to produce after retrying messages",
+		"retry", p.conf.RetryLimit,
+		"topic", topic)
 	return 0, err
 
 }
