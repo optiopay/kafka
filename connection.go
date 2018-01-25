@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"net"
 	"sync"
@@ -36,12 +35,12 @@ func newTLSConnection(address string, ca, cert, key []byte, timeout, readTimeout
 	roots := x509.NewCertPool()
 	ok := roots.AppendCertsFromPEM(ca)
 	if !ok {
-		panic("failed to parse root certificate")
+		return nil, fmt.Errorf("Cannot parse root certificate")
 	}
 
 	certificate, err := tls.X509KeyPair(cert, key)
 	if err != nil {
-		log.Panic("Failed to parse key/cert for TLS: %s", err)
+		return nil, fmt.Errorf("Failed to parse key/cert for TLS: %s", err)
 	}
 
 	conf := &tls.Config{
@@ -54,7 +53,6 @@ func newTLSConnection(address string, ca, cert, key []byte, timeout, readTimeout
 		KeepAlive: 30 * time.Second,
 	}
 	conn, err := tls.DialWithDialer(&dialer, "tcp", address, conf)
-	//conn, err := dialer.Dial("tcp", address)
 	if err != nil {
 		return nil, err
 	}
