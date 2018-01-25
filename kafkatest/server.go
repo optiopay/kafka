@@ -337,6 +337,7 @@ func (s *Server) handleProduceRequest(nodeID int32, conn net.Conn, req *proto.Pr
 	defer s.mu.Unlock()
 
 	resp := &proto.ProduceResp{
+		Version:       req.Version,
 		CorrelationID: req.CorrelationID,
 		Topics:        make([]proto.ProduceRespTopic, len(req.Topics)),
 	}
@@ -380,6 +381,7 @@ func (s *Server) fetchRequest(req *proto.FetchReq) (response, int) {
 	var messagesNum int
 
 	resp := &proto.FetchResp{
+		Version:       req.Version,
 		CorrelationID: req.CorrelationID,
 		Topics:        make([]proto.FetchRespTopic, len(req.Topics)),
 	}
@@ -430,6 +432,7 @@ func (s *Server) handleOffsetRequest(nodeID int32, conn net.Conn, req *proto.Off
 	defer s.mu.RUnlock()
 
 	resp := &proto.OffsetResp{
+		Version:       req.Version,
 		CorrelationID: req.CorrelationID,
 		Topics:        make([]proto.OffsetRespTopic, len(req.Topics)),
 	}
@@ -462,6 +465,7 @@ func (s *Server) handleConsumerMetadataRequest(nodeID int32, conn net.Conn, req 
 	port, _ := strconv.Atoi(addrps[1])
 
 	return &proto.ConsumerMetadataResp{
+		Version:         req.Version,
 		CorrelationID:   req.CorrelationID,
 		CoordinatorID:   0,
 		CoordinatorHost: addrps[0],
@@ -496,6 +500,7 @@ func (s *Server) handleOffsetFetchRequest(nodeID int32, conn net.Conn, req *prot
 	defer s.mu.RUnlock()
 
 	resp := &proto.OffsetFetchResp{
+		Version:       req.Version,
 		CorrelationID: req.CorrelationID,
 		Topics:        make([]proto.OffsetFetchRespTopic, len(req.Topics)),
 	}
@@ -518,6 +523,7 @@ func (s *Server) handleOffsetCommitRequest(nodeID int32, conn net.Conn, req *pro
 	defer s.mu.Unlock()
 
 	resp := &proto.OffsetCommitResp{
+		Version:       req.Version,
 		CorrelationID: req.CorrelationID,
 		Topics:        make([]proto.OffsetCommitRespTopic, len(req.Topics)),
 	}

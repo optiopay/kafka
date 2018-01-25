@@ -23,7 +23,7 @@ const (
 )
 
 type Serializable interface {
-	Bytes(int16) ([]byte, error)
+	Bytes() ([]byte, error)
 }
 
 type RequestHandler func(request Serializable) (response Serializable)
@@ -161,7 +161,7 @@ func (srv *Server) handleClient(c net.Conn) {
 
 		response := fn(request)
 		if response != nil {
-			b, err := response.Bytes(proto.KafkaV0)
+			b, err := response.Bytes()
 			if err != nil {
 				panic(fmt.Sprintf("cannot serialize %T: %s", response, err))
 			}
