@@ -1,6 +1,12 @@
 package kafka
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
 	"net"
 	"reflect"
 	"strings"
@@ -10,8 +16,118 @@ import (
 	"github.com/optiopay/kafka/proto"
 )
 
+const TLSCaFile = "./testkeys/ca.crt"
+const TLSCertFile = "./testkeys/oats.crt"
+const TLSKeyFile = "./testkeys/oats.key"
+
 type serializableMessage interface {
 	Bytes() ([]byte, error)
+}
+
+type TLSConf struct {
+	ca   []byte
+	cert []byte
+	key  []byte
+}
+
+func getTLSConf() (*TLSConf, error) {
+	ca, err := ioutil.ReadFile(TLSCaFile)
+	if err != nil {
+		return nil, fmt.Errorf("Cannot read %s", TLSCaFile)
+	}
+	cert, err := ioutil.ReadFile(TLSCertFile)
+	if err != nil {
+		return nil, fmt.Errorf("Cannot read %s", TLSCertFile)
+	}
+
+	key, err := ioutil.ReadFile(TLSKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("Cannot read %s", TLSKeyFile)
+	}
+
+	return &TLSConf{ca: ca, cert: cert, key: key}, nil
+
+}
+
+//just read request before start to response
+func readRequest(r io.Reader) error {
+	dec := proto.NewDecoder(r)
+	size := dec.DecodeInt32()
+	var read int32 = 0
+	buf := make([]byte, size)
+
+	for read < size {
+		n, err := r.Read(buf)
+		if err != nil {
+			return err
+		}
+		read += int32(n)
+	}
+	return nil
+}
+
+func testTLSServer(messages ...serializableMessage) (net.Listener, error) {
+	tlsConf, err := getTLSConf()
+	if err != nil {
+		return nil, err
+	}
+
+	roots := x509.NewCertPool()
+	ok := roots.AppendCertsFromPEM(tlsConf.ca)
+	if !ok {
+		return nil, fmt.Errorf("Cannot parse root certificate")
+	}
+
+	certificate, err := tls.X509KeyPair(tlsConf.cert, tlsConf.key)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to parse key/cert for TLS: %s", err)
+	}
+
+	conf := &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		RootCAs:      roots,
+	}
+
+	_ = conf
+
+	ln, err := tls.Listen("tcp4", "localhost:22222", conf)
+	if err != nil {
+		return nil, err
+	}
+
+	responses := make([][]byte, len(messages))
+	for i, m := range messages {
+		b, err := m.Bytes()
+		if err != nil {
+			_ = ln.Close()
+			return nil, err
+		}
+		responses[i] = b
+	}
+
+	go func() {
+		for {
+			cli, err := ln.Accept()
+
+			if err != nil {
+				return
+			}
+
+			go func(conn net.Conn) {
+				err := readRequest(conn)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				time.Sleep(time.Millisecond * 50)
+				for _, resp := range responses {
+					_, _ = cli.Write(resp)
+				}
+				err = cli.Close()
+			}(cli)
+		}
+	}()
+	return ln, nil
 }
 
 func testServer(messages ...serializableMessage) (net.Listener, error) {
@@ -613,6 +729,62 @@ func TestNoServerResponse(t *testing.T) {
 		t.Fatalf("expected timeout error, did not happen")
 	}
 
+	if err := conn.Close(); err != nil {
+		t.Fatalf("could not close kafka connection: %s", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("could not close test server: %s", err)
+	}
+}
+
+func TestTLSConnection(t *testing.T) {
+	resp1 := &proto.MetadataResp{
+		CorrelationID: 1,
+		Brokers: []proto.MetadataRespBroker{
+			{
+				NodeID: 666,
+				Host:   "example.com",
+				Port:   999,
+			},
+		},
+		Topics: []proto.MetadataRespTopic{
+			{
+				Name: "foo",
+				Partitions: []proto.MetadataRespPartition{
+					{
+						ID:       7,
+						Leader:   7,
+						Replicas: []int32{7},
+						Isrs:     []int32{7},
+					},
+				},
+			},
+		},
+	}
+	ln, err := testTLSServer(resp1)
+	if err != nil {
+		t.Fatalf("test server error: %s", err)
+	}
+	tlsConf, err := getTLSConf()
+	if err != nil {
+		t.Fatalf("cannot get tls parametes: %s", err)
+	}
+	_ = tlsConf
+	conn, err := newTLSConnection(ln.Addr().String(), tlsConf.ca, tlsConf.cert, tlsConf.key, time.Second, time.Second)
+
+	if err != nil {
+		t.Fatalf("could not conect to test server: %s", err)
+	}
+	resp, err := conn.Metadata(&proto.MetadataReq{
+		ClientID: "tester",
+		Topics:   []string{"first", "second"},
+	})
+	if err != nil {
+		t.Fatalf("could not fetch response: %s", err)
+	}
+	if !reflect.DeepEqual(resp, resp1) {
+		t.Fatalf("expected different response %#v", resp)
+	}
 	if err := conn.Close(); err != nil {
 		t.Fatalf("could not close kafka connection: %s", err)
 	}
