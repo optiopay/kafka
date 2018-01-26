@@ -168,6 +168,16 @@ type BrokerConf struct {
 	// logging frameworks. Used to notify and as replacement for stdlib `log`
 	// package.
 	Logger Logger
+
+	//Settings for TLS encryption.
+	//You need to set all these parameters to enable TLS
+
+	//TLS CA pem
+	TLSCa []byte
+	//TLS certificate
+	TLSCert []byte
+	//TLS key
+	TLSKey []byte
 }
 
 // NewBrokerConf returns the default broker configuration.
@@ -311,7 +321,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 		if _, ok := checkednodes[nodeID]; ok {
 			continue
 		}
-		conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+		conn, err := b.getConnection(addr)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect",
 				"address", addr,
@@ -336,7 +346,7 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 	}
 
 	for _, addr := range b.getInitialAddresses() {
-		conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+		conn, err := b.getConnection(addr)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect to seed node",
 				"address", addr,
@@ -475,7 +485,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 				delete(b.metadata.endpoints, tp)
 				continue
 			}
-			conn, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err = b.getConnection(addr)
 			if err != nil {
 				b.conf.Logger.Info("cannot get leader connection: cannot connect to node",
 					"address", addr,
@@ -488,6 +498,13 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 		return conn, nil
 	}
 	return nil, err
+}
+
+func (b *Broker) getConnection(addr string) (*connection, error) {
+	if b.conf.TLSCa != nil && b.conf.TLSKey != nil && b.conf.TLSCert != nil {
+		return newTLSConnection(addr, b.conf.TLSCa, b.conf.TLSCert, b.conf.TLSKey, b.conf.DialTimeout, b.conf.ReadTimeout)
+	}
+	return newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 }
 
 // coordinatorConnection returns connection to offset coordinator for given group.
@@ -526,7 +543,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			}
 
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
-			conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err := b.getConnection(addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
@@ -552,7 +569,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 				// connection to node is cached so it was already checked
 				continue
 			}
-			conn, err := newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err := b.getConnection(addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"nodeID", nodeID,
@@ -583,7 +600,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			}
 
 			addr := fmt.Sprintf("%s:%d", resp.CoordinatorHost, resp.CoordinatorPort)
-			conn, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+			conn, err = b.getConnection(addr)
 			if err != nil {
 				b.conf.Logger.Debug("cannot connect to node",
 					"coordinatorID", resp.CoordinatorID,
@@ -773,7 +790,6 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 //
 // Upon a successful call, the message's Offset field is updated.
 func (p *producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
-
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(p.conf.RetryWait)
@@ -785,6 +801,11 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 		case nil:
 			for i, msg := range messages {
 				msg.Offset = int64(i) + offset
+			}
+			if retry != 0 {
+				p.conf.Logger.Debug("Produced message after retry",
+					"retry", retry,
+					"topic", topic)
 			}
 			return offset, err
 		case io.EOF, syscall.EPIPE:
@@ -799,11 +820,14 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 					"error", err)
 			}
 		}
-		p.conf.Logger.Debug("cannot produce messages",
+		p.conf.Logger.Debug("Cannot produce messages",
 			"retry", retry,
+			"topic", topic,
 			"error", err)
 	}
-
+	p.conf.Logger.Debug("Abort to produce after retrying messages",
+		"retry", p.conf.RetryLimit,
+		"topic", topic)
 	return 0, err
 
 }
