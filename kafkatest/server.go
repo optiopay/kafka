@@ -416,6 +416,8 @@ func (s *Server) fetchRequest(req *proto.FetchReq) (response, int) {
 }
 
 func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.FetchReq) response {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	resp, n := s.fetchRequest(req)
 	if n == 0 {
 		select {
