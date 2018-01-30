@@ -54,7 +54,7 @@ func NewServer(middlewares ...Middleware) *Server {
 		topics:      make(map[string]map[int32][]*proto.Message),
 		offsets:     make(map[string]map[int32]map[string]*topicOffset),
 		middlewares: middlewares,
-		events:      make(chan struct{}),
+		events:      make(chan struct{}, 1000),
 	}
 	return s
 }
@@ -370,8 +370,7 @@ func (s *Server) handleProduceRequest(nodeID int32, conn net.Conn, req *proto.Pr
 			respParts[pi].Offset = int64(len(t[part.ID])) - 1
 		}
 	}
-	close(s.events)
-	s.events = make(chan struct{})
+	s.events <- struct{}{}
 	return resp
 }
 
@@ -416,8 +415,6 @@ func (s *Server) fetchRequest(req *proto.FetchReq) (response, int) {
 }
 
 func (s *Server) handleFetchRequest(nodeID int32, conn net.Conn, req *proto.FetchReq) response {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	resp, n := s.fetchRequest(req)
 	if n == 0 {
 		select {
