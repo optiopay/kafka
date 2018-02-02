@@ -3,6 +3,8 @@ package kafka
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"math"
@@ -27,6 +29,44 @@ type connection struct {
 	respc       map[int32]chan []byte
 	stopErr     error
 	readTimeout time.Duration
+}
+
+func newTLSConnection(address string, ca, cert, key []byte, timeout, readTimeout time.Duration) (*connection, error) {
+	roots := x509.NewCertPool()
+	ok := roots.AppendCertsFromPEM(ca)
+	if !ok {
+		return nil, fmt.Errorf("Cannot parse root certificate")
+	}
+
+	certificate, err := tls.X509KeyPair(cert, key)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to parse key/cert for TLS: %s", err)
+	}
+
+	conf := &tls.Config{
+		Certificates: []tls.Certificate{certificate},
+		RootCAs:      roots,
+	}
+
+	dialer := net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 30 * time.Second,
+	}
+	conn, err := tls.DialWithDialer(&dialer, "tcp", address, conf)
+	if err != nil {
+		return nil, err
+	}
+	c := &connection{
+		stop:        make(chan struct{}),
+		nextID:      make(chan int32),
+		rw:          conn,
+		respc:       make(map[int32]chan []byte),
+		logger:      &nullLogger{},
+		readTimeout: readTimeout,
+	}
+	go c.nextIDLoop()
+	go c.readRespLoop()
+	return c, nil
 }
 
 // newConnection returns new, initialized connection or error

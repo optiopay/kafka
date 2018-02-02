@@ -773,7 +773,9 @@ func (r *FetchReq) Bytes() ([]byte, error) {
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
-	enc.Encode(r.ReplicaID)
+	//enc.Encode(r.ReplicaID)
+	enc.Encode(int32(-1))
+
 	enc.Encode(r.MaxWaitTime)
 	enc.Encode(r.MinBytes)
 
@@ -1808,7 +1810,8 @@ func (r *OffsetReq) Bytes() ([]byte, error) {
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
-	enc.Encode(r.ReplicaID)
+	//enc.Encode(r.ReplicaID)
+	enc.Encode(int32(-1))
 
 	if r.Version >= KafkaV2 {
 		enc.Encode(r.IsolationLevel)
