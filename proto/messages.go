@@ -38,6 +38,7 @@ const (
 	OffsetFetchReqKind      = 9
 	ConsumerMetadataReqKind = 10
 	APIVersionsReqKind      = 18
+	CreateTopicsReqKind     = 19
 )
 
 const (
@@ -2016,6 +2017,217 @@ func (r *OffsetResp) Bytes() ([]byte, error) {
 	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
 
 	return b, nil
+}
+
+type ReplicaAssignment struct {
+	Partition int32
+	Replicas  []int32
+}
+type ConfigEntry struct {
+	ConfigName  string
+	ConfigValue string
+}
+
+type TopicInfo struct {
+	Topic              string
+	NumPartitions      int32
+	ReplicationFactor  int16
+	ReplicaAssignments []ReplicaAssignment
+	ConfigEntries      []ConfigEntry
+}
+
+type CreateTopicsReq struct {
+	Version              int16
+	CorrelationID        int32
+	ClientID             string
+	CreateTopicsRequests []TopicInfo
+	Timeout              time.Duration
+	ValidateOnly         bool
+}
+
+func ReadCreateTopicsReq(r io.Reader) (*CreateTopicsReq, error) {
+	var req CreateTopicsReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key
+	_ = dec.DecodeInt16()
+	req.Version = dec.DecodeInt16()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+
+	len, err := dec.DecodeArrayLen()
+	if err != nil {
+		return nil, err
+	}
+	req.CreateTopicsRequests = make([]TopicInfo, len)
+
+	for i := range req.CreateTopicsRequests {
+		ti := TopicInfo{}
+		ti.Topic = dec.DecodeString()
+		ti.NumPartitions = dec.DecodeInt32()
+		ti.ReplicationFactor = dec.DecodeInt16()
+		len, err := dec.DecodeArrayLen()
+		if err != nil {
+			return nil, err
+		}
+
+		ti.ReplicaAssignments = make([]ReplicaAssignment, len)
+		for j := range ti.ReplicaAssignments {
+			ra := ReplicaAssignment{}
+			ra.Partition = dec.DecodeInt32()
+			len, err = dec.DecodeArrayLen()
+			ra.Replicas = make([]int32, len)
+			for k := range ra.Replicas {
+				ra.Replicas[k] = dec.DecodeInt32()
+			}
+
+			ti.ReplicaAssignments[j] = ra
+		}
+		len, err = dec.DecodeArrayLen()
+		ti.ConfigEntries = make([]ConfigEntry, len)
+		for l := range ti.ConfigEntries {
+			ce := ConfigEntry{}
+			ce.ConfigName = dec.DecodeString()
+			ce.ConfigValue = dec.DecodeString()
+			ti.ConfigEntries[l] = ce
+		}
+
+		req.CreateTopicsRequests[i] = ti
+	}
+
+	req.Timeout = dec.DecodeDuration32()
+
+	if req.Version >= KafkaV1 {
+		req.ValidateOnly = dec.DecodeInt8() != 0
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
+func (r *CreateTopicsReq) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(int16(CreateTopicsReqKind))
+	enc.Encode(r.Version)
+	enc.Encode(r.CorrelationID)
+	enc.Encode(r.ClientID)
+
+	enc.EncodeArrayLen(len(r.CreateTopicsRequests))
+	for _, topicInfo := range r.CreateTopicsRequests {
+		enc.Encode(topicInfo.Topic)
+		enc.Encode(topicInfo.NumPartitions)
+		enc.Encode(topicInfo.ReplicationFactor)
+		enc.EncodeArrayLen(len(topicInfo.ReplicaAssignments))
+		for _, replicaAssignment := range topicInfo.ReplicaAssignments {
+			enc.Encode(replicaAssignment.Partition)
+			enc.EncodeArrayLen(len(replicaAssignment.Replicas))
+			for _, replica := range replicaAssignment.Replicas {
+				enc.Encode(replica)
+			}
+
+		}
+
+		enc.EncodeArrayLen(len(topicInfo.ConfigEntries))
+		for _, ce := range topicInfo.ConfigEntries {
+			enc.Encode(ce.ConfigName)
+			enc.Encode(ce.ConfigValue)
+		}
+	}
+
+	enc.Encode(r.Timeout)
+
+	if r.Version >= KafkaV4 {
+		enc.Encode(boolToInt8(r.ValidateOnly))
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+func (r *CreateTopicsReq) WriteTo(w io.Writer) (int64, error) {
+	b, err := r.Bytes()
+	if err != nil {
+		return 0, err
+	}
+	n, err := w.Write(b)
+	return int64(n), err
+}
+
+type TopicError struct {
+	Topic     string
+	ErrorCode int16
+}
+
+type CreateTopicsResp struct {
+	Version       int16
+	CorrelationID int32
+	TopicErrors   []TopicError
+}
+
+func (r *CreateTopicsResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(r.CorrelationID)
+
+	enc.EncodeArrayLen(len(r.TopicErrors))
+	for _, te := range r.TopicErrors {
+		enc.Encode(te.Topic)
+		enc.Encode(te.ErrorCode)
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+func ReadCreateTopicsResp(r io.Reader) (*CreateTopicsResp, error) {
+	var resp CreateTopicsResp
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	resp.CorrelationID = dec.DecodeInt32()
+
+	len, err := dec.DecodeArrayLen()
+	if err != nil {
+		return nil, err
+	}
+	resp.TopicErrors = make([]TopicError, len)
+
+	for i := range resp.TopicErrors {
+		var te = &resp.TopicErrors[i]
+		te.Topic = dec.DecodeString()
+		te.ErrorCode = dec.DecodeInt16()
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &resp, nil
 }
 
 type buffer []byte
