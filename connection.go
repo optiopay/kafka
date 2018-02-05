@@ -99,7 +99,7 @@ func newTCPConnection(address string, timeout, readTimeout time.Duration) (*conn
 func (c *connection) getBestVersion(apiKey int16) int16 {
 	if requested, ok := c.apiVersions[apiKey]; ok {
 		supported := proto.SupportedByDriver[apiKey]
-		if min(supported.MaxVersion, requested.MaxVersion) > max(supported.MaxVersion, requested.MaxVersion) {
+		if min(supported.MaxVersion, requested.MaxVersion) >= max(supported.MinVersion, requested.MinVersion) {
 			return min(supported.MaxVersion, requested.MaxVersion)
 		}
 		return 0
@@ -285,6 +285,8 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
+	req.Version = c.getBestVersion(proto.MetadataReqKind)
+
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
 		c.releaseWaiter(req.CorrelationID)
@@ -294,7 +296,7 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadMetadataResp(bytes.NewReader(b))
+	return proto.ReadMetadataResp(bytes.NewReader(b), req.Version)
 }
 
 // Produce sends given produce request to kafka node and returns related

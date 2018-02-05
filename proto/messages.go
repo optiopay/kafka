@@ -500,7 +500,15 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
-	enc.EncodeArrayLen(len(r.Topics))
+	if len(r.Topics) == 0 {
+		if r.Version >= 1 {
+			enc.EncodeArrayLen(-1)
+		} else {
+			enc.EncodeArrayLen(0)
+		}
+	} else {
+		enc.EncodeArrayLen(len(r.Topics))
+	}
 	for _, name := range r.Topics {
 		enc.Encode(name)
 	}
@@ -554,11 +562,12 @@ type MetadataRespTopic struct {
 }
 
 type MetadataRespPartition struct {
-	Err      error
-	ID       int32
-	Leader   int32
-	Replicas []int32
-	Isrs     []int32
+	Err             error
+	ID              int32
+	Leader          int32
+	Replicas        []int32
+	Isrs            []int32
+	OfflineReplicas []int32
 }
 
 func (r *MetadataResp) Bytes() ([]byte, error) {
@@ -608,6 +617,9 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 			enc.Encode(part.Leader)
 			enc.Encode(part.Replicas)
 			enc.Encode(part.Isrs)
+			if r.Version >= KafkaV5 {
+				enc.Encode(part.OfflineReplicas)
+			}
 		}
 	}
 
@@ -622,13 +634,18 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
+func ReadMetadataResp(r io.Reader, version int16) (*MetadataResp, error) {
 	var resp MetadataResp
+	resp.Version = version
 	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
 	resp.CorrelationID = dec.DecodeInt32()
+
+	if resp.Version >= KafkaV3 {
+		resp.ThrottleTime = dec.DecodeDuration32()
+	}
 
 	len, err := dec.DecodeArrayLen()
 	if err != nil {
@@ -641,6 +658,17 @@ func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 		b.NodeID = dec.DecodeInt32()
 		b.Host = dec.DecodeString()
 		b.Port = dec.DecodeInt32()
+		if resp.Version >= KafkaV1 {
+			b.Rack = dec.DecodeString()
+		}
+	}
+
+	if resp.Version >= KafkaV2 {
+		resp.ClusterID = dec.DecodeString()
+	}
+
+	if resp.Version >= KafkaV1 {
+		resp.ControllerID = dec.DecodeInt32()
 	}
 
 	len, err = dec.DecodeArrayLen()
@@ -653,6 +681,11 @@ func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 		var t = &resp.Topics[ti]
 		t.Err = errFromNo(dec.DecodeInt16())
 		t.Name = dec.DecodeString()
+
+		if resp.Version >= KafkaV1 {
+			t.IsInternal = (dec.DecodeInt8() == 1)
+		}
+
 		len, err = dec.DecodeArrayLen()
 		if err != nil {
 			return nil, err
@@ -683,6 +716,18 @@ func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 
 			for ii := range p.Isrs {
 				p.Isrs[ii] = dec.DecodeInt32()
+			}
+
+			if resp.Version >= KafkaV5 {
+				len, err = dec.DecodeArrayLen()
+				if err != nil {
+					return nil, err
+				}
+				p.OfflineReplicas = make([]int32, len)
+
+				for ii := range p.OfflineReplicas {
+					p.OfflineReplicas[ii] = dec.DecodeInt32()
+				}
 			}
 		}
 	}
