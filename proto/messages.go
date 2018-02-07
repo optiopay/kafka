@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"io/ioutil"
@@ -15,8 +16,7 @@ import (
 
 /*
 
-Kafka wire protocol implemented as described in
-https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-Messagesets
+Kafka wire protocol implemented as described in http://kafka.apache.org/protocol.html
 
 */
 
@@ -37,6 +37,10 @@ const (
 	OffsetCommitReqKind     = 8
 	OffsetFetchReqKind      = 9
 	ConsumerMetadataReqKind = 10
+	APIVersionsReqKind      = 18
+)
+
+const (
 
 	// receive the latest offset (i.e. the offset of the next coming message)
 	OffsetReqTimeLatest = -1
@@ -57,6 +61,17 @@ const (
 	// response.
 	RequiredAcksLocal = 1
 )
+
+var SupportedByDriver = map[int16]SupportedVersion{
+	ProduceReqKind:          SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	FetchReqKind:            SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	OffsetReqKind:           SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	MetadataReqKind:         SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV5},
+	OffsetCommitReqKind:     SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	OffsetFetchReqKind:      SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	ConsumerMetadataReqKind: SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	APIVersionsReqKind:      SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+}
 
 type Compression int8
 
@@ -485,7 +500,15 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
 
-	enc.EncodeArrayLen(len(r.Topics))
+	if len(r.Topics) == 0 {
+		if r.Version >= 1 {
+			enc.EncodeArrayLen(-1)
+		} else {
+			enc.EncodeArrayLen(0)
+		}
+	} else {
+		enc.EncodeArrayLen(len(r.Topics))
+	}
 	for _, name := range r.Topics {
 		enc.Encode(name)
 	}
@@ -539,11 +562,12 @@ type MetadataRespTopic struct {
 }
 
 type MetadataRespPartition struct {
-	Err      error
-	ID       int32
-	Leader   int32
-	Replicas []int32
-	Isrs     []int32
+	Err             error
+	ID              int32
+	Leader          int32
+	Replicas        []int32
+	Isrs            []int32
+	OfflineReplicas []int32
 }
 
 func (r *MetadataResp) Bytes() ([]byte, error) {
@@ -593,6 +617,9 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 			enc.Encode(part.Leader)
 			enc.Encode(part.Replicas)
 			enc.Encode(part.Isrs)
+			if r.Version >= KafkaV5 {
+				enc.Encode(part.OfflineReplicas)
+			}
 		}
 	}
 
@@ -607,13 +634,18 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
+func ReadMetadataResp(r io.Reader, version int16) (*MetadataResp, error) {
 	var resp MetadataResp
+	resp.Version = version
 	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
 	resp.CorrelationID = dec.DecodeInt32()
+
+	if resp.Version >= KafkaV3 {
+		resp.ThrottleTime = dec.DecodeDuration32()
+	}
 
 	len, err := dec.DecodeArrayLen()
 	if err != nil {
@@ -626,6 +658,17 @@ func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 		b.NodeID = dec.DecodeInt32()
 		b.Host = dec.DecodeString()
 		b.Port = dec.DecodeInt32()
+		if resp.Version >= KafkaV1 {
+			b.Rack = dec.DecodeString()
+		}
+	}
+
+	if resp.Version >= KafkaV2 {
+		resp.ClusterID = dec.DecodeString()
+	}
+
+	if resp.Version >= KafkaV1 {
+		resp.ControllerID = dec.DecodeInt32()
 	}
 
 	len, err = dec.DecodeArrayLen()
@@ -638,6 +681,11 @@ func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 		var t = &resp.Topics[ti]
 		t.Err = errFromNo(dec.DecodeInt16())
 		t.Name = dec.DecodeString()
+
+		if resp.Version >= KafkaV1 {
+			t.IsInternal = (dec.DecodeInt8() == 1)
+		}
+
 		len, err = dec.DecodeArrayLen()
 		if err != nil {
 			return nil, err
@@ -668,6 +716,18 @@ func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
 
 			for ii := range p.Isrs {
 				p.Isrs[ii] = dec.DecodeInt32()
+			}
+
+			if resp.Version >= KafkaV5 {
+				len, err = dec.DecodeArrayLen()
+				if err != nil {
+					return nil, err
+				}
+				p.OfflineReplicas = make([]int32, len)
+
+				for ii := range p.OfflineReplicas {
+					p.OfflineReplicas[ii] = dec.DecodeInt32()
+				}
 			}
 		}
 	}
@@ -1963,4 +2023,126 @@ type buffer []byte
 func (b *buffer) Write(p []byte) (int, error) {
 	*b = append(*b, p...)
 	return len(p), nil
+}
+
+type APIVersionsReq struct {
+	CorrelationID int32
+	ClientID      string
+}
+
+func ReadAPIVersionsReq(r io.Reader) (*APIVersionsReq, error) {
+	var req APIVersionsReq
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	// api key + api version
+	_ = dec.DecodeInt32()
+	req.CorrelationID = dec.DecodeInt32()
+	req.ClientID = dec.DecodeString()
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &req, nil
+}
+
+func (r *APIVersionsReq) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(int16(APIVersionsReqKind))
+	// Currently only supports version 0
+	enc.Encode(int16(0))
+	enc.Encode(r.CorrelationID)
+	enc.Encode(r.ClientID)
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+func (r *APIVersionsReq) WriteTo(w io.Writer) (int64, error) {
+	b, err := r.Bytes()
+	if err != nil {
+		return 0, err
+	}
+	n, err := w.Write(b)
+	return int64(n), err
+}
+
+type APIVersionsResp struct {
+	CorrelationID int32
+	APIVersions   []SupportedVersion
+}
+
+type SupportedVersion struct {
+	APIKey     int16
+	MinVersion int16
+	MaxVersion int16
+}
+
+func (a *APIVersionsResp) Bytes() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+
+	// message size - for now just placeholder
+	enc.Encode(int32(0))
+	enc.Encode(a.CorrelationID)
+	//error code
+	enc.Encode(int16(0))
+	enc.EncodeArrayLen(len(a.APIVersions))
+	for _, api := range a.APIVersions {
+		enc.Encode(api.APIKey)
+		enc.Encode(api.MinVersion)
+		enc.Encode(api.MaxVersion)
+	}
+
+	if enc.Err() != nil {
+		return nil, enc.Err()
+	}
+
+	// update the message size information
+	b := buf.Bytes()
+	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
+
+	return b, nil
+}
+
+func ReadAPIVersionsResp(r io.Reader) (*APIVersionsResp, error) {
+	var resp APIVersionsResp
+	dec := NewDecoder(r)
+
+	// total message size
+	_ = dec.DecodeInt32()
+	resp.CorrelationID = dec.DecodeInt32()
+	errcode := dec.DecodeInt16()
+	if errcode != 0 {
+		//TODO fill app error
+		return nil, fmt.Errorf("versioning error: %d", errcode)
+	}
+	len, err := dec.DecodeArrayLen()
+	if err != nil {
+		return nil, err
+	}
+
+	resp.APIVersions = make([]SupportedVersion, len)
+	for i := range resp.APIVersions {
+		api := &resp.APIVersions[i]
+		api.APIKey = dec.DecodeInt16()
+		api.MinVersion = dec.DecodeInt16()
+		api.MaxVersion = dec.DecodeInt16()
+	}
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+	return &resp, nil
 }

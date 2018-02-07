@@ -236,6 +236,8 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 		if err == nil {
 			return broker, nil
 		}
+
+		conf.Logger.Error("Got an error trying to fetch metadata", "error", err)
 	}
 	return nil, errors.New("cannot connect")
 }
@@ -501,10 +503,28 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 }
 
 func (b *Broker) getConnection(addr string) (*connection, error) {
+	var c *connection
+	var err error
 	if b.conf.TLSCa != nil && b.conf.TLSKey != nil && b.conf.TLSCert != nil {
-		return newTLSConnection(addr, b.conf.TLSCa, b.conf.TLSCert, b.conf.TLSKey, b.conf.DialTimeout, b.conf.ReadTimeout)
+		c, err = newTLSConnection(addr, b.conf.TLSCa, b.conf.TLSCert, b.conf.TLSKey, b.conf.DialTimeout, b.conf.ReadTimeout)
+	} else {
+		c, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 	}
-	return newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
+
+	if err != nil {
+		return nil, err
+	}
+
+	apiVersions, err := c.APIVersions(&proto.APIVersionsReq{})
+	if err != nil {
+		c.logger.Debug("cannot fetch apiversions",
+			"error", err)
+	} else {
+		for _, api := range apiVersions.APIVersions {
+			c.apiVersions[api.APIKey] = api
+		}
+	}
+	return c, nil
 }
 
 // coordinatorConnection returns connection to offset coordinator for given group.
