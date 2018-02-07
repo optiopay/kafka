@@ -237,7 +237,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 			return broker, nil
 		}
 
-		conf.Logger.Error("Got an error trying to fetch metadata", err, err)
+		conf.Logger.Error("Got an error trying to fetch metadata", "error", err)
 	}
 	return nil, errors.New("cannot connect")
 }

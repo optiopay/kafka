@@ -110,17 +110,15 @@ func (c *connection) getBestVersion(apiKey int16) int16 {
 func min(a int16, b int16) int16 {
 	if a < b {
 		return a
-	} else {
-		return b
 	}
+	return b
 }
 
 func max(a int16, b int16) int16 {
 	if a > b {
 		return a
-	} else {
-		return b
 	}
+	return b
 }
 
 // nextIDLoop generates correlation IDs, making sure they are always in order
