@@ -102,7 +102,6 @@ func (c *connection) getBestVersion(apiKey int16) int16 {
 		if min(supported.MaxVersion, requested.MaxVersion) >= max(supported.MinVersion, requested.MinVersion) {
 			return min(supported.MaxVersion, requested.MaxVersion)
 		}
-		return 0
 	}
 	return 0
 }
