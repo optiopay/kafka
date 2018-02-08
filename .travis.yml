@@ -14,7 +14,7 @@ before_install:
 script:
 - go vet github.com/optiopay/kafka/...
 - errcheck github.com/optiopay/kafka/...
-- go test -v -race -parallel=1 -timeout=5m $(go list github.com/optiopay/kafka/... | grep -v integration)
+- go test -v -race -timeout=5m $(go list github.com/optiopay/kafka/... | grep -v integration)
 
 env:
 - WITH_INTEGRATION=false GOMAXPROCS=4
