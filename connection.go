@@ -320,6 +320,8 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 		return nil, c.stopErr
 	}
 
+	req.Version = c.getBestVersion(proto.MetadataReqKind)
+
 	if req.RequiredAcks == proto.RequiredAcksNone {
 		_, err := req.WriteTo(c.rw)
 		return nil, err
@@ -340,7 +342,7 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadProduceResp(bytes.NewReader(b))
+	return proto.ReadProduceResp(bytes.NewReader(b), req.Version)
 }
 
 // Fetch sends given fetch request to kafka node and returns related response.
