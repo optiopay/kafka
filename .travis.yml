@@ -12,10 +12,9 @@ before_install:
 - go get github.com/kisielk/errcheck
 
 script:
-- go test -v -race -parallel=1 -timeout=5m $(go list github.com/optiopay/kafka/... | grep -v integration)
-- go test -bench '.*' -benchmem -run none $(go list github.com/optiopay/kafka/... | grep -v integration)
 - go vet github.com/optiopay/kafka/...
 - errcheck github.com/optiopay/kafka/...
+- go test -v -race -parallel=1 -timeout=5m $(go list github.com/optiopay/kafka/... | grep -v integration)
 
 env:
 - WITH_INTEGRATION=true GOMAXPROCS=4
