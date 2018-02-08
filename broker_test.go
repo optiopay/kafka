@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -1849,14 +1850,16 @@ func TestLatestOffset(t *testing.T) {
 
 	var wg sync.WaitGroup
 	ch := make(chan struct{})
+	ech := make(chan error, 2)
 
 	getLatest := func() {
 		_ = <-ch
 		defer wg.Done()
 		for i := 0; i < 100; i++ {
-			_, err = broker.OffsetLatest("test", 0)
+			_, err := broker.OffsetLatest("test", 0)
 			if err != nil {
-				t.Fatalf("Failed to fetch the latest offset")
+				ech <- errors.New("Failed to fetch the latest offset")
+				return
 			}
 		}
 	}
@@ -1869,6 +1872,13 @@ func TestLatestOffset(t *testing.T) {
 
 	close(ch)
 	wg.Wait()
+
+	select {
+	case e := <-ech:
+		t.Fatal(e)
+	default:
+		return
+	}
 }
 
 func TestConsumerBrokenPipe(t *testing.T) {
