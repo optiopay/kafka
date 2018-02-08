@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/optiopay/kafka.svg?branch=master)](https://travis-ci.org/optiopay/kafka)
+[![CircleCI](https://circleci.com/gh/optiopay/kafka.svg?style=svg)](https://circleci.com/gh/optiopay/kafka)
 [![GoDoc](https://godoc.org/github.com/optiopay/kafka?status.png)](https://godoc.org/github.com/optiopay/kafka)
 
 # Kafka

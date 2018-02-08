@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -1828,7 +1829,7 @@ func TestLatestOffset(t *testing.T) {
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.OffsetRespTopic{
 				{
-					Name: "test1",
+					Name: "test",
 					Partitions: []proto.OffsetRespPartition{
 						{
 							ID:      0,
@@ -1845,16 +1846,21 @@ func TestLatestOffset(t *testing.T) {
 	broker, err := Dial([]string{srv.Address()}, conf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
+		return
 	}
 
 	var wg sync.WaitGroup
 	ch := make(chan struct{})
+	ech := make(chan error, 2)
 
 	getLatest := func() {
 		_ = <-ch
 		defer wg.Done()
 		for i := 0; i < 100; i++ {
-			broker.OffsetLatest("test", 0)
+			_, err := broker.OffsetLatest("test", 0)
+			if err != nil {
+				ech <- errors.New("Failed to fetch the latest offset")
+			}
 		}
 	}
 
@@ -1866,6 +1872,13 @@ func TestLatestOffset(t *testing.T) {
 
 	close(ch)
 	wg.Wait()
+
+	select {
+	case e := <-ech:
+		t.Fatal(e)
+	default:
+		return
+	}
 }
 
 func TestConsumerBrokenPipe(t *testing.T) {
@@ -2125,11 +2138,10 @@ func TestOffsetCoordinatorNoCoordinatorError(t *testing.T) {
 	}
 }
 
-func BenchmarkConsumer_10Msgs(b *testing.B)    { benchmarkConsumer(b, 10) }
-func BenchmarkConsumer_100Msgs(b *testing.B)   { benchmarkConsumer(b, 100) }
-func BenchmarkConsumer_500Msgs(b *testing.B)   { benchmarkConsumer(b, 500) }
-func BenchmarkConsumer_2000Msgs(b *testing.B)  { benchmarkConsumer(b, 2000) }
-func BenchmarkConsumer_10000Msgs(b *testing.B) { benchmarkConsumer(b, 10000) }
+func BenchmarkConsumer_10Msgs(b *testing.B)   { benchmarkConsumer(b, 10) }
+func BenchmarkConsumer_100Msgs(b *testing.B)  { benchmarkConsumer(b, 100) }
+func BenchmarkConsumer_500Msgs(b *testing.B)  { benchmarkConsumer(b, 500) }
+func BenchmarkConsumer_1000Msgs(b *testing.B) { benchmarkConsumer(b, 1000) }
 
 // this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
