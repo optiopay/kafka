@@ -4,7 +4,7 @@ go:
 - tip
 
 sudo: required
-dist: xenial
+dist: trusty
 
 services:
 - docker
@@ -27,5 +27,3 @@ script:
 
 env:
 - WITH_INTEGRATION=true GOMAXPROCS=4
-
-sudo: false
