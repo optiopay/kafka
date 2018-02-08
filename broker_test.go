@@ -2138,11 +2138,10 @@ func TestOffsetCoordinatorNoCoordinatorError(t *testing.T) {
 	}
 }
 
-func BenchmarkConsumer_10Msgs(b *testing.B)    { benchmarkConsumer(b, 10) }
-func BenchmarkConsumer_100Msgs(b *testing.B)   { benchmarkConsumer(b, 100) }
-func BenchmarkConsumer_500Msgs(b *testing.B)   { benchmarkConsumer(b, 500) }
-func BenchmarkConsumer_2000Msgs(b *testing.B)  { benchmarkConsumer(b, 2000) }
-func BenchmarkConsumer_10000Msgs(b *testing.B) { benchmarkConsumer(b, 10000) }
+func BenchmarkConsumer_10Msgs(b *testing.B)   { benchmarkConsumer(b, 10) }
+func BenchmarkConsumer_100Msgs(b *testing.B)  { benchmarkConsumer(b, 100) }
+func BenchmarkConsumer_500Msgs(b *testing.B)  { benchmarkConsumer(b, 500) }
+func BenchmarkConsumer_1000Msgs(b *testing.B) { benchmarkConsumer(b, 1000) }
 
 // this is not the best benchmark, because Server implementation is
 // not made for performance, but it should be good enough to help tuning code.
