@@ -114,13 +114,13 @@ func testTLSServer(messages ...serializableMessage) (net.Listener, error) {
 			}
 
 			go func(conn net.Conn) {
-				err := readRequest(conn)
-				if err != nil {
-					log.Panic(err)
-				}
 
 				time.Sleep(time.Millisecond * 50)
 				for _, resp := range responses {
+					err := readRequest(conn)
+					if err != nil {
+						log.Panic(err)
+					}
 					_, _ = cli.Write(resp)
 				}
 				err = cli.Close()
@@ -172,7 +172,7 @@ func testServer2() (net.Listener, chan serializableMessage, error) {
 		return nil, nil, err
 	}
 
-	msgs := make(chan serializableMessage)
+	msgs := make(chan serializableMessage, 10)
 
 	go func() {
 		for {
@@ -185,6 +185,10 @@ func testServer2() (net.Listener, chan serializableMessage, error) {
 				defer func() { _ = cli.Close() }()
 
 				for msg := range msgs {
+					err := readRequest(conn)
+					if err != nil {
+						log.Panic(err)
+					}
 					b, err := msg.Bytes()
 					if err != nil {
 						panic(err)
@@ -273,19 +277,13 @@ func TestConnectionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		ch <- versionResp
-	}()
 
+	ch <- versionResp
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
 		t.Fatalf("could not conect to test server: %s", err)
 	}
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		ch <- resp1
-	}()
+	ch <- resp1
 	resp, err := conn.Metadata(&proto.MetadataReq{
 		ClientID: "tester",
 		Topics:   []string{"first", "second"},
@@ -798,8 +796,11 @@ func TestNoServerResponse(t *testing.T) {
 }
 
 func TestTLSConnection(t *testing.T) {
-	resp1 := &proto.MetadataResp{
+	versionResp := &proto.APIVersionsResp{
 		CorrelationID: 1,
+	}
+	resp1 := &proto.MetadataResp{
+		CorrelationID: 2,
 		Brokers: []proto.MetadataRespBroker{
 			{
 				NodeID: 666,
@@ -821,7 +822,7 @@ func TestTLSConnection(t *testing.T) {
 			},
 		},
 	}
-	ln, err := testTLSServer(resp1)
+	ln, err := testTLSServer(versionResp, resp1)
 	if err != nil {
 		t.Fatalf("test server error: %s", err)
 	}

@@ -515,15 +515,6 @@ func (b *Broker) getConnection(addr string) (*connection, error) {
 		return nil, err
 	}
 
-	apiVersions, err := c.APIVersions(&proto.APIVersionsReq{})
-	if err != nil {
-		c.logger.Debug("cannot fetch apiversions",
-			"error", err)
-	} else {
-		for _, api := range apiVersions.APIVersions {
-			c.apiVersions[api.APIKey] = api
-		}
-	}
 	return c, nil
 }
 

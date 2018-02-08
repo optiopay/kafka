@@ -68,6 +68,7 @@ func newTLSConnection(address string, ca, cert, key []byte, timeout, readTimeout
 	}
 	go c.nextIDLoop()
 	go c.readRespLoop()
+	c.cacheApiVersions()
 	return c, nil
 }
 
@@ -92,7 +93,20 @@ func newTCPConnection(address string, timeout, readTimeout time.Duration) (*conn
 	}
 	go c.nextIDLoop()
 	go c.readRespLoop()
+	c.cacheApiVersions()
 	return c, nil
+}
+
+func (c *connection) cacheApiVersions() {
+	apiVersions, err := c.APIVersions(&proto.APIVersionsReq{})
+	if err != nil {
+		c.logger.Debug("cannot fetch apiversions",
+			"error", err)
+	} else {
+		for _, api := range apiVersions.APIVersions {
+			c.apiVersions[api.APIKey] = api
+		}
+	}
 }
 
 //getBestVersion returns version for passed apiKey which best fit server and client requirements
