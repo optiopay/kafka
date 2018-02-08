@@ -1854,7 +1854,10 @@ func TestLatestOffset(t *testing.T) {
 		_ = <-ch
 		defer wg.Done()
 		for i := 0; i < 100; i++ {
-			broker.OffsetLatest("test", 0)
+			_, err = broker.OffsetLatest("test", 0)
+			if err != nil {
+				t.Fatalf("Failed to fetch the latest offset")
+			}
 		}
 	}
 
