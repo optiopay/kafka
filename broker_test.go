@@ -1829,7 +1829,7 @@ func TestLatestOffset(t *testing.T) {
 			CorrelationID: req.CorrelationID,
 			Topics: []proto.OffsetRespTopic{
 				{
-					Name: "test1",
+					Name: "test",
 					Partitions: []proto.OffsetRespPartition{
 						{
 							ID:      0,
@@ -1846,6 +1846,7 @@ func TestLatestOffset(t *testing.T) {
 	broker, err := Dial([]string{srv.Address()}, conf)
 	if err != nil {
 		t.Fatalf("cannot create broker: %s", err)
+		return
 	}
 
 	var wg sync.WaitGroup
@@ -1859,7 +1860,6 @@ func TestLatestOffset(t *testing.T) {
 			_, err := broker.OffsetLatest("test", 0)
 			if err != nil {
 				ech <- errors.New("Failed to fetch the latest offset")
-				return
 			}
 		}
 	}
