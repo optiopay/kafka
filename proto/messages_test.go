@@ -80,7 +80,7 @@ func TestMetadataRequest(t *testing.T) {
 	}
 	testRequestSerialization(t, req3)
 	b3, _ := req3.Bytes()
-	expected3 := []byte{0x0, 0x0, 0x0, 0x16, 0x0, 0x3, 0x0, 0x4, 0x0, 0x0, 0x0, 0x7b, 0x0, 0x7, 0x74, 0x65, 0x73, 0x74, 0x63, 0x6c, 0x69, 0x0, 0x0, 0x0, 0x0, 0x1}
+	expected3 := []byte{0x0, 0x0, 0x0, 0x16, 0x0, 0x3, 0x0, 0x4, 0x0, 0x0, 0x0, 0x7b, 0x0, 0x7, 0x74, 0x65, 0x73, 0x74, 0x63, 0x6c, 0x69, 0xFF, 0xFF, 0xFF, 0xFF, 0x1}
 
 	if !bytes.Equal(b3, expected3) {
 		t.Fatalf("expected different bytes representation: %v ( expected %v)", b3, expected3)
@@ -250,7 +250,7 @@ func TestMetadataResponseVersions(t *testing.T) {
 
 func TestProduceResponse(t *testing.T) {
 	msgb1 := []byte{0x0, 0x0, 0x0, 0x22, 0x0, 0x0, 0x0, 0xf1, 0x0, 0x0, 0x0, 0x1, 0x0, 0x6, 0x66, 0x72, 0x75, 0x69, 0x74, 0x73, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x5d, 0x0, 0x3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-	resp1, err := ReadProduceResp(bytes.NewBuffer(msgb1))
+	resp1, err := ReadProduceResp(bytes.NewBuffer(msgb1), KafkaV0)
 	if err != nil {
 		t.Fatalf("could not read metadata response: %s", err)
 	}
@@ -282,7 +282,7 @@ func TestProduceResponse(t *testing.T) {
 	}
 
 	msgb2 := []byte{0x0, 0x0, 0x0, 0x1f, 0x0, 0x0, 0x0, 0xf1, 0x0, 0x0, 0x0, 0x1, 0x0, 0x3, 0x66, 0x6f, 0x6f, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}
-	resp2, err := ReadProduceResp(bytes.NewBuffer(msgb2))
+	resp2, err := ReadProduceResp(bytes.NewBuffer(msgb2), KafkaV0)
 	if err != nil {
 		t.Fatalf("could not read metadata response: %s", err)
 	}
@@ -311,6 +311,58 @@ func TestProduceResponse(t *testing.T) {
 			t.Fatalf("serialized representation different from expected: %#v", b)
 		}
 	}
+}
+
+func TestProduceResponseWithVersions(t *testing.T) {
+	produceRespV1 := ProduceResp{
+		Version:       1,
+		CorrelationID: 0,
+		Topics: []ProduceRespTopic{
+			ProduceRespTopic{
+				Name: "",
+				Partitions: []ProduceRespPartition{
+					ProduceRespPartition{
+						ID:            0,
+						Err:           nil,
+						Offset:        0,
+						LogAppendTime: 0,
+					},
+				},
+			},
+		},
+		ThrottleTime: time.Second,
+	}
+
+	b, err := produceRespV1.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := ReadProduceResp(bytes.NewBuffer(b), produceRespV1.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	//assert.Equal(t, produceRespV1, *resp, "Not equal")
+	if !reflect.DeepEqual(produceRespV1, *resp) {
+		t.Errorf("Not equal")
+	}
+	produceRespV2 := produceRespV1
+	produceRespV2.Version = KafkaV2
+	produceRespV2.Topics[0].Partitions[0].LogAppendTime = 5
+
+	b, err = produceRespV2.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err = ReadProduceResp(bytes.NewBuffer(b), produceRespV2.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(produceRespV2, *resp) {
+		t.Errorf("Not equal")
+	}
+
 }
 
 func TestFetchRequest(t *testing.T) {
@@ -567,7 +619,7 @@ func BenchmarkProduceResponseUnmarshal(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if _, err := ReadProduceResp(bytes.NewBuffer(raw)); err != nil {
+		if _, err := ReadProduceResp(bytes.NewBuffer(raw), resp.Version); err != nil {
 			b.Fatalf("could not deserialize messages: %s", err)
 		}
 	}
@@ -641,6 +693,3 @@ func BenchmarkFetchResponseUnmarshal(b *testing.B) {
 		}
 	}
 }
-
-// vim has problem with coloring byte arrays in this file
-// vim: set syntax=off:

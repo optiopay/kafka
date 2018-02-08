@@ -1752,9 +1752,10 @@ func (r *ProduceResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
+func ReadProduceResp(r io.Reader, version int16) (*ProduceResp, error) {
 	var resp ProduceResp
 	dec := NewDecoder(r)
+	resp.Version = version
 
 	// total message size
 	_ = dec.DecodeInt32()
@@ -1780,7 +1781,14 @@ func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
 			p.ID = dec.DecodeInt32()
 			p.Err = errFromNo(dec.DecodeInt16())
 			p.Offset = dec.DecodeInt64()
+			if resp.Version >= KafkaV2 {
+				p.LogAppendTime = dec.DecodeInt64()
+			}
 		}
+	}
+
+	if resp.Version >= KafkaV1 {
+		resp.ThrottleTime = dec.DecodeDuration32()
 	}
 
 	if err := dec.Err(); err != nil {
