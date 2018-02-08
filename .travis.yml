@@ -17,4 +17,4 @@ script:
 - go test -v -race -parallel=1 -timeout=5m $(go list github.com/optiopay/kafka/... | grep -v integration)
 
 env:
-- WITH_INTEGRATION=true GOMAXPROCS=4
+- WITH_INTEGRATION=false GOMAXPROCS=4
