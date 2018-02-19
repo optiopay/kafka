@@ -1,8 +1,11 @@
 package integration
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/fsouza/go-dockerclient"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -72,9 +75,10 @@ func (cluster *KafkaCluster) Start() error {
 	}
 
 	args := []string{"up", "-d", "--scale", fmt.Sprintf("kafka=%d", cluster.size)}
-	upCmd := cluster.cmd("docker-compose", args...)
-	if err := upCmd.Run(); err != nil {
-		return fmt.Errorf("docker-compose error: %s", err)
+	upCmd, _, stderr := cluster.cmd("docker-compose", args...)
+	err := upCmd.Run()
+	if err != nil {
+		return fmt.Errorf("docker-compose error: %s, %s", err, stderr)
 	}
 
 	containers, err := cluster.Containers()
@@ -89,25 +93,35 @@ func (cluster *KafkaCluster) Start() error {
 // Containers inspect all containers running within cluster and return
 // information about them.
 func (cluster *KafkaCluster) Containers() ([]*Container, error) {
-	psCmd := cluster.cmd("docker-compose", "ps", "-q")
-	out, err := psCmd.Output()
+	psCmd, stdout, stderr := cluster.cmd("pwd")
+	err := psCmd.Run()
+	log.Fatalf("Dir content is: %s", stderr.String())
+
+	psCmd, stdout, stderr = cluster.cmd("docker-compose", "ps", "-q")
+	err = psCmd.Run()
 	if err != nil {
-		return nil, fmt.Errorf("cannot list processes: %s", err)
+		return nil, fmt.Errorf("Cannot list processes: %s, %s", err, stderr.String())
 	}
-	dockerIDs := string(out)
-	fmt.Println(dockerIDs)
-	endpoint := "unix:///var/run/docker.sock"
-	client, err := docker.NewClient(endpoint)
-	if err != nil {
-		return nil, err
-	}
+	log.Fatalf("%s, %s, %s", psCmd.Dir, stderr.String(), stdout.String())
+	dockerIDs := stdout.String()
+
 	var containers []*Container
-	for _, dockerID := range strings.Split(dockerIDs, "\n") {
-		dockerContainer, err := client.InspectContainer(dockerID)
-		if err != nil {
-			fmt.Println("Failure to parse")
-			return nil, err
+	var inspectedContainers []*docker.Container
+	for _, dockerID := range strings.Split(strings.TrimSpace(dockerIDs), "\n") {
+		if dockerID == "" {
+			continue
 		}
+		inspectCmd, output, stderr := cluster.cmd("docker", "inspect", dockerID)
+		inspectCmd.Run()
+		if err != nil {
+			return nil, fmt.Errorf("Cannot inspect %s: %s, %s", dockerID, err, stderr.String())
+		}
+		return nil, fmt.Errorf("%s, %s, %s", stdout.String(), stderr.String(), dockerID)
+		err = json.Unmarshal(output.Bytes(), &inspectedContainers)
+		if err != nil {
+			return nil, fmt.Errorf("Cannot Unmarshal inspect for %s: %s, ", dockerID, err, output.String())
+		}
+		dockerContainer := inspectedContainers[0]
 		container := &Container{cluster, dockerContainer}
 		containers = append(containers, container)
 
@@ -119,9 +133,9 @@ func (cluster *KafkaCluster) Containers() ([]*Container, error) {
 // Stop stop all services running for the cluster by sending SIGINT to
 // docker-compose process.
 func (cluster *KafkaCluster) Stop() error {
-	cmd := cluster.cmd("docker-compose", "stop", "-t", "0")
+	cmd, _, stderr := cluster.cmd("docker-compose", "stop", "-t", "0")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker-compose stop failed: %s", err)
+		return fmt.Errorf("docker-compose stop failed: %s, %s", err, stderr)
 	}
 	_ = cluster.removeStoppedContainers()
 	return nil
@@ -132,70 +146,79 @@ func (cluster *KafkaCluster) Stop() error {
 func (cluster *KafkaCluster) KafkaAddrs() ([]string, error) {
 	containers, err := cluster.Containers()
 	if err != nil {
-		return nil, fmt.Errorf("cannot get containers info: %s", err)
+		return nil, fmt.Errorf("Cannot get containers info: %s", err)
 	}
 	addrs := make([]string, 0)
 	for _, container := range containers {
+		fmt.Println(container)
 		ports, ok := container.NetworkSettings.Ports["9092/tcp"]
 		if !ok || len(ports) == 0 {
 			continue
 		}
 		ip := ports[0].HostIP
 		if ip == "0.0.0.0" {
-			// find the first ip of the container
-			//fmt.Printf("%s\n", container.NetworkSettings)
-			if container.NetworkSettings.IPAddress != "" {
-				ip = container.NetworkSettings.IPAddress
-			} else {
-				for _, v := range container.NetworkSettings.Networks {
-					ip = v.IPAddress
-					break
-				}
-				if ip == "" {
-					return nil, fmt.Errorf("Coulnd't find an ip for container %s", container.ID)
+			for _, network := range container.NetworkSettings.Networks {
+				if network.IPAddress != "" {
+					ip = network.IPAddress
+					continue
 				}
 			}
-
 		}
 		addrs = append(addrs, fmt.Sprintf("%s:%s", ip, ports[0].HostPort))
 	}
 	return addrs, nil
 }
-
+func (cluster *KafkaCluster) ContainerNetworkIP(container Container, network string) (string, error) {
+	inspectCmd, stdout, stderr := cluster.cmd("docker", "inspect", ".NetworkSettings.Networks."+network+".IPAddress", container.ID)
+	err := inspectCmd.Run()
+	if err != nil {
+		return "", fmt.Errorf("Cannot inspect %s: %s, %s", err, stderr)
+	}
+	cleanIP := strings.TrimSpace(stdout.String())
+	return cleanIP, nil
+}
 func (cluster *KafkaCluster) ContainerStop(containerID string) error {
-	stopCmd := cluster.cmd("docker", "stop", containerID)
-	if err := stopCmd.Run(); err != nil {
-		return fmt.Errorf("cannot stop %q container: %s", containerID, err)
+	stopCmd, _, stderr := cluster.cmd("docker", "stop", containerID)
+	err := stopCmd.Run()
+	if err != nil {
+		return fmt.Errorf("cannot stop %q container: %s, %s", containerID, err, stderr)
 	}
 	return nil
 }
 
 func (cluster *KafkaCluster) ContainerKill(containerID string) error {
-	killCmd := cluster.cmd("docker", "kill", containerID)
-	if err := killCmd.Run(); err != nil {
-		return fmt.Errorf("cannot kill %q container: %s", containerID, err)
+	killCmd, _, stderr := cluster.cmd("docker", "kill", containerID)
+	err := killCmd.Run()
+	if err != nil {
+		return fmt.Errorf("cannot kill %q container: %s, %s", containerID, err, stderr)
 	}
 	return nil
 }
 
 func (cluster *KafkaCluster) ContainerStart(containerID string) error {
-	startCmd := cluster.cmd("docker", "start", containerID)
-	if err := startCmd.Run(); err != nil {
-		return fmt.Errorf("cannot start %q container: %s", containerID, err)
+	startCmd, _, stderr := cluster.cmd("docker", "start", containerID)
+	err := startCmd.Run()
+	if err != nil {
+		return fmt.Errorf("cannot start %q container: %s, %s", containerID, err, stderr)
 	}
 	return nil
 }
 
-func (cluster *KafkaCluster) cmd(name string, args ...string) *exec.Cmd {
-	c := exec.Command(name, args...)
-	c.Dir = cluster.kafkaDockerDir
-	return c
+func (cluster *KafkaCluster) cmd(name string, args ...string) (*exec.Cmd, bytes.Buffer, bytes.Buffer) {
+	cmd := exec.Command(name, args...)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	cmd.Dir = cluster.kafkaDockerDir
+	return cmd, stdout, stderr
 }
 
 func (cluster *KafkaCluster) removeStoppedContainers() error {
-	rmCmd := cluster.cmd("docker-compose", "rm", "-f")
-	if err := rmCmd.Run(); err != nil {
-		return fmt.Errorf("docker-compose rm error: %s", err)
+	rmCmd, _, stderr := cluster.cmd("docker-compose", "rm", "-f")
+	err := rmCmd.Run()
+	if err != nil {
+		return fmt.Errorf("docker-compose rm error: %s, %s", err, stderr)
 	}
 	return nil
 }
