@@ -63,7 +63,7 @@ const (
 )
 
 var SupportedByDriver = map[int16]SupportedVersion{
-	ProduceReqKind:          SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	ProduceReqKind:          SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV2},
 	FetchReqKind:            SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV5},
 	OffsetReqKind:           SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
 	MetadataReqKind:         SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV5},
