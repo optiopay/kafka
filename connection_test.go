@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -582,6 +583,77 @@ func TestConnectionOffset(t *testing.T) {
 	if !reflect.DeepEqual(resp, resp1) {
 		t.Fatalf("expected different response %#v", resp)
 	}
+}
+
+func TestOffsetResponseWithVersions(t *testing.T) {
+
+	resp0 := proto.OffsetResp{
+		CorrelationID: 2,
+		Topics: []proto.OffsetRespTopic{
+			{
+				Name: "test",
+				Partitions: []proto.OffsetRespPartition{
+					{
+						ID:      0,
+						Offsets: []int64{92, 0},
+					},
+				},
+			},
+		},
+	}
+
+	b, err := resp0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r0, err := proto.ReadOffsetResp(bytes.NewReader(b), resp0.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(resp0, *r0) {
+		t.Fatalf("expected different response \n %#v  expected \n %#v", resp0, r0)
+	}
+
+	resp1 := resp0
+	resp1.Version = proto.KafkaV1
+
+	ts := time.Unix(0, (time.Now().UnixNano()/int64(time.Millisecond))*int64(time.Millisecond))
+	resp1.Topics[0].Partitions[0].TimeStamp = ts
+
+	b1, err := resp1.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r1, err := proto.ReadOffsetResp(bytes.NewReader(b1), resp1.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(resp1, *r1) {
+		t.Fatalf("expected different response \n %#v  expected \n %#v", resp1, *r1)
+	}
+
+	resp2 := resp1
+	resp2.Version = proto.KafkaV2
+	resp2.ThrottleTime = 2 * time.Second
+
+	b2, err := resp2.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r2, err := proto.ReadOffsetResp(bytes.NewReader(b2), resp2.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(resp2, *r2) {
+		t.Fatalf("expected different response \n %#v  expected \n %#v", resp2, *r2)
+	}
+
 }
 
 func TestConnectionProduceNoAck(t *testing.T) {

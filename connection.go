@@ -424,7 +424,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadOffsetResp(bytes.NewReader(b))
+	return proto.ReadOffsetResp(bytes.NewReader(b), req.Version)
 }
 
 func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
