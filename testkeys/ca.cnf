@@ -25,7 +25,7 @@ private_key = ./ca.key
 default_md = sha1
 
 # for how many days will the signed certificate be valid
-default_days = 365
+default_days = 3650
 
 # a section with a set of variables corresponding to DN fields
 policy = my_policy
@@ -67,7 +67,7 @@ private_key = ./ca.key
 default_md = sha1
 
 # for how many days will the signed certificate be valid
-default_days = 365
+default_days = 3650
 
 # a section with a set of variables corresponding to DN fields
 policy = my_policy
