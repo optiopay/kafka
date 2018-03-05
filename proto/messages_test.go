@@ -584,14 +584,6 @@ func TestFetchResponseWithVersions(t *testing.T) {
 		t.Fatalf("Not equal %+#v ,  %+#v", fetchRespV5, resp5)
 	}
 
-	//LastStableOffset:    0,
-	//LogStartOffset:      0,
-	//AbortedTransactions: []FetchRespAbortedTransaction{
-	//FetchRespAbortedTransaction{
-	//ProducerID:  0,
-	//FirstOffset: 0,
-	//}
-	//},
 }
 
 func TestSerializeEmptyMessageSet(t *testing.T) {
