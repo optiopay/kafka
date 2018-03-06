@@ -468,7 +468,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadOffsetCommitResp(bytes.NewReader(b))
+	return proto.ReadOffsetCommitResp(bytes.NewReader(b), req.Version)
 }
 
 func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchResp, error) {

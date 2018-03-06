@@ -586,6 +586,50 @@ func TestFetchResponseWithVersions(t *testing.T) {
 
 }
 
+func TestOffsetCommitResponseWithVersions(t *testing.T) {
+	respV0 := OffsetCommitResp{
+		Version:       KafkaV0,
+		CorrelationID: 1,
+		ThrottleTime:  0,
+		Topics: []OffsetCommitRespTopic{
+			OffsetCommitRespTopic{
+				Name: "test",
+				Partitions: []OffsetCommitRespPartition{
+					OffsetCommitRespPartition{
+						ID:  1,
+						Err: nil,
+					},
+				},
+			},
+		},
+	}
+
+	b0, err := respV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp0, err := ReadOffsetCommitResp(bytes.NewReader(b0), respV0.Version)
+
+	if !reflect.DeepEqual(&respV0, resp0) {
+		t.Fatalf("Not equal %+#v ,  %+#v", respV0, resp0)
+	}
+
+	respV3 := respV0
+	respV3.Version = KafkaV3
+	respV3.ThrottleTime = 2 * time.Second
+
+	b3, err := respV3.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3, err := ReadOffsetCommitResp(bytes.NewReader(b3), respV3.Version)
+
+	if !reflect.DeepEqual(respV3, *resp3) {
+		t.Fatalf("Not equal \n%+#v ,  \n%+#v", respV3, *resp3)
+	}
+
+}
+
 func TestSerializeEmptyMessageSet(t *testing.T) {
 	var buf bytes.Buffer
 	messages := []*Message{}
