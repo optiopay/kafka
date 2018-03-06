@@ -281,7 +281,7 @@ func TestConnectionMetadata(t *testing.T) {
 	ch <- versionResp
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
-		t.Fatalf("could not conect to test server: %s", err)
+		t.Fatalf("could not connect to test server: %s", err)
 	}
 	ch <- resp1
 	resp, err := conn.Metadata(&proto.MetadataReq{
@@ -348,7 +348,7 @@ func TestConnectionProduce(t *testing.T) {
 	}()
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
-		t.Fatalf("could not conect to test server: %s", err)
+		t.Fatalf("could not connect to test server: %s", err)
 	}
 
 	go func() {
@@ -473,7 +473,7 @@ func TestConnectionFetch(t *testing.T) {
 	}()
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
-		t.Fatalf("could not conect to test server: %s", err)
+		t.Fatalf("could not connect to test server: %s", err)
 	}
 
 	go func() {
@@ -553,7 +553,7 @@ func TestConnectionOffset(t *testing.T) {
 
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
-		t.Fatalf("could not conect to test server: %s", err)
+		t.Fatalf("could not connect to test server: %s", err)
 	}
 
 	go func() {
@@ -598,7 +598,7 @@ func TestConnectionProduceNoAck(t *testing.T) {
 	}()
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
-		t.Fatalf("could not conect to test server: %s", err)
+		t.Fatalf("could not connect to test server: %s", err)
 	}
 	resp, err := conn.Produce(&proto.ProduceReq{
 		ClientID:     "tester",
@@ -643,7 +643,7 @@ func TestClosedConnectionWriter(t *testing.T) {
 	}
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
-		t.Fatalf("could not conect to test server: %s", err)
+		t.Fatalf("could not connect to test server: %s", err)
 	}
 
 	longBytes := []byte(strings.Repeat("xxxxxxxxxxxxxxxxxxxxxx", 1000))
@@ -690,7 +690,7 @@ func TestClosedConnectionReader(t *testing.T) {
 	}
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
-		t.Fatalf("could not conect to test server: %s", err)
+		t.Fatalf("could not connect to test server: %s", err)
 	}
 
 	req := &proto.FetchReq{
@@ -737,7 +737,7 @@ func TestConnectionReaderAfterEOF(t *testing.T) {
 
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
-		t.Fatalf("could not conect to test server: %s", err)
+		t.Fatalf("could not connect to test server: %s", err)
 	}
 
 	req := &proto.FetchReq{
@@ -777,7 +777,7 @@ func TestNoServerResponse(t *testing.T) {
 	}
 	conn, err := newTCPConnection(ln.Addr().String(), time.Second, time.Second)
 	if err != nil {
-		t.Fatalf("could not conect to test server: %s", err)
+		t.Fatalf("could not connect to test server: %s", err)
 	}
 	_, err = conn.Metadata(&proto.MetadataReq{
 		ClientID: "tester",
@@ -834,7 +834,7 @@ func TestTLSConnection(t *testing.T) {
 	conn, err := newTLSConnection(ln.Addr().String(), tlsConf.ca, tlsConf.cert, tlsConf.key, time.Second, time.Second)
 
 	if err != nil {
-		t.Fatalf("could not conect to test server: %s", err)
+		t.Fatalf("could not connect to test server: %s", err)
 	}
 	resp, err := conn.Metadata(&proto.MetadataReq{
 		ClientID: "tester",

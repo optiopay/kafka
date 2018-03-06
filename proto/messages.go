@@ -64,7 +64,7 @@ const (
 
 var SupportedByDriver = map[int16]SupportedVersion{
 	ProduceReqKind:          SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
-	FetchReqKind:            SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	FetchReqKind:            SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV5},
 	OffsetReqKind:           SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
 	MetadataReqKind:         SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV5},
 	OffsetCommitReqKind:     SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
@@ -964,15 +964,21 @@ func (r *FetchResp) Bytes() ([]byte, error) {
 	return []byte(buf), nil
 }
 
-func ReadFetchResp(r io.Reader) (*FetchResp, error) {
+func ReadFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 	var err error
 	var resp FetchResp
+
+	resp.Version = version
 
 	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
 	resp.CorrelationID = dec.DecodeInt32()
+
+	if resp.Version >= KafkaV1 {
+		resp.ThrottleTime = dec.DecodeDuration32()
+	}
 
 	len, err := dec.DecodeArrayLen()
 	if err != nil {
@@ -995,6 +1001,23 @@ func ReadFetchResp(r io.Reader) (*FetchResp, error) {
 			part.ID = dec.DecodeInt32()
 			part.Err = errFromNo(dec.DecodeInt16())
 			part.TipOffset = dec.DecodeInt64()
+
+			if resp.Version >= KafkaV4 {
+				part.LastStableOffset = dec.DecodeInt64()
+				if resp.Version >= KafkaV5 {
+					part.LogStartOffset = dec.DecodeInt64()
+				}
+				len, err := dec.DecodeArrayLen()
+				if err != nil {
+					return nil, err
+				}
+				part.AbortedTransactions = make([]FetchRespAbortedTransaction, len)
+				for i := range part.AbortedTransactions {
+					part.AbortedTransactions[i].ProducerID = dec.DecodeInt64()
+					part.AbortedTransactions[i].FirstOffset = dec.DecodeInt64()
+				}
+			}
+
 			if dec.Err() != nil {
 				return nil, dec.Err()
 			}

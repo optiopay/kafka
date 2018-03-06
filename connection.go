@@ -353,6 +353,8 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		return nil, c.stopErr
 	}
 
+	req.Version = c.getBestVersion(proto.FetchReqKind)
+
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
@@ -368,7 +370,7 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 	if !ok {
 		return nil, c.stopErr
 	}
-	resp, err := proto.ReadFetchResp(bytes.NewReader(b))
+	resp, err := proto.ReadFetchResp(bytes.NewReader(b), req.Version)
 	if err != nil {
 		return nil, err
 	}

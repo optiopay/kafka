@@ -478,7 +478,7 @@ func TestFetchResponse(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		resp, err := ReadFetchResp(bytes.NewBuffer(tt.Bytes))
+		resp, err := ReadFetchResp(bytes.NewBuffer(tt.Bytes), KafkaV0)
 		if err != nil {
 			t.Fatalf("could not read fetch response: %s", err)
 		}
@@ -495,6 +495,95 @@ func TestFetchResponse(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestFetchResponseWithVersions(t *testing.T) {
+
+	// Test version 0
+
+	fetchRespV0 := FetchResp{
+		Version:       KafkaV0,
+		CorrelationID: 1,
+		Topics: []FetchRespTopic{
+			FetchRespTopic{
+				Name: "Topic1",
+				Partitions: []FetchRespPartition{
+					FetchRespPartition{
+						ID:        1,
+						Err:       nil,
+						TipOffset: 1,
+						Messages:  []*Message{},
+					},
+				},
+			},
+		},
+	}
+
+	b0, err := fetchRespV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp0, err := ReadFetchResp(bytes.NewReader(b0), fetchRespV0.Version)
+	if !reflect.DeepEqual(&fetchRespV0, resp0) {
+		t.Fatalf("Not equal %+#v ,  %+#v", fetchRespV0, resp0)
+	}
+
+	// Test version 1
+
+	fetchRespV1 := fetchRespV0
+	fetchRespV1.Version = KafkaV1
+	fetchRespV1.ThrottleTime = time.Second
+
+	b1, err := fetchRespV1.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp1, err := ReadFetchResp(bytes.NewBuffer(b1), fetchRespV1.Version)
+	if !reflect.DeepEqual(&fetchRespV1, resp1) {
+		t.Fatalf("Not equal %+#v ,  %+#v", fetchRespV1, resp1)
+	}
+
+	// Test version 4
+
+	fetchRespV4 := fetchRespV1
+	fetchRespV4.Version = KafkaV4
+	fetchRespV4.Topics[0].Partitions[0].LastStableOffset = 1
+	fetchRespV4.Topics[0].Partitions[0].AbortedTransactions = []FetchRespAbortedTransaction{
+		FetchRespAbortedTransaction{
+			ProducerID:  1,
+			FirstOffset: 1,
+		},
+	}
+
+	b4, err := fetchRespV4.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp4, err := ReadFetchResp(bytes.NewBuffer(b4), fetchRespV4.Version)
+	if !reflect.DeepEqual(&fetchRespV4, resp4) {
+		t.Fatalf("Not equal %+#v ,  %+#v", fetchRespV4, resp4)
+	}
+
+	// Test version 5
+
+	fetchRespV5 := fetchRespV4
+	fetchRespV5.Version = KafkaV5
+
+	fetchRespV5.Topics[0].Partitions[0].LogStartOffset = 1
+
+	b5, err := fetchRespV5.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp5, err := ReadFetchResp(bytes.NewBuffer(b5), fetchRespV5.Version)
+	if !reflect.DeepEqual(&fetchRespV5, resp5) {
+		t.Fatalf("Not equal %+#v ,  %+#v", fetchRespV5, resp5)
+	}
+
 }
 
 func TestSerializeEmptyMessageSet(t *testing.T) {
@@ -688,7 +777,7 @@ func BenchmarkFetchResponseUnmarshal(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if _, err := ReadFetchResp(bytes.NewBuffer(raw)); err != nil {
+		if _, err := ReadFetchResp(bytes.NewBuffer(raw), KafkaV0); err != nil {
 			b.Fatalf("could not deserialize messages: %s", err)
 		}
 	}
