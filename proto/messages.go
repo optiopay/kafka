@@ -69,7 +69,7 @@ var SupportedByDriver = map[int16]SupportedVersion{
 	MetadataReqKind:         SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV5},
 	OffsetCommitReqKind:     SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV3},
 	OffsetFetchReqKind:      SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV3},
-	ConsumerMetadataReqKind: SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	ConsumerMetadataReqKind: SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV1},
 	APIVersionsReqKind:      SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
 }
 
@@ -1122,14 +1122,23 @@ type ConsumerMetadataResp struct {
 	CoordinatorPort int32
 }
 
-func ReadConsumerMetadataResp(r io.Reader) (*ConsumerMetadataResp, error) {
+func ReadConsumerMetadataResp(r io.Reader, version int16) (*ConsumerMetadataResp, error) {
 	var resp ConsumerMetadataResp
+	resp.Version = version
 	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
 	resp.CorrelationID = dec.DecodeInt32()
+
+	if version >= KafkaV1 {
+		resp.ThrottleTime = dec.DecodeDuration32()
+	}
+
 	resp.Err = errFromNo(dec.DecodeInt16())
+	if version >= KafkaV1 {
+		resp.ErrMsg = dec.DecodeString()
+	}
 	resp.CoordinatorID = dec.DecodeInt32()
 	resp.CoordinatorHost = dec.DecodeString()
 	resp.CoordinatorPort = dec.DecodeInt32()

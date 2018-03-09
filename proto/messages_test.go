@@ -658,6 +658,52 @@ func TestFetchResponseWithVersions(t *testing.T) {
 
 }
 
+func TestConsumerMetadataWithVersions(t *testing.T) {
+	respV0 := ConsumerMetadataResp{
+		Version:         0,
+		CorrelationID:   1,
+		ThrottleTime:    0,
+		Err:             nil,
+		ErrMsg:          "",
+		CoordinatorID:   1,
+		CoordinatorHost: "host",
+		CoordinatorPort: 33333,
+	}
+
+	b0, err := respV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r0, err := ReadConsumerMetadataResp(bytes.NewReader(b0), respV0.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(respV0, *r0) {
+		t.Errorf("Expected \n %#+v\n fot \n %#+v\n", respV0, *r0)
+	}
+
+	respV1 := respV0
+	respV1.Version = KafkaV1
+	respV1.ThrottleTime = 10 * time.Second
+	respV1.ErrMsg = "My error"
+
+	b1, err := respV1.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r1, err := ReadConsumerMetadataResp(bytes.NewReader(b1), respV1.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(respV1, *r1) {
+		t.Errorf("Expected \n %#+v\n fot \n %#+v\n", respV1, *r1)
+	}
+}
+
 func TestOffsetCommitResponseWithVersions(t *testing.T) {
 	respV0 := OffsetCommitResp{
 		Version:       KafkaV0,

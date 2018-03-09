@@ -431,6 +431,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 
 func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
 	var ok bool
+	req.Version = c.getBestVersion(proto.ConsumerMetadataReqKind)
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
@@ -448,7 +449,7 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadConsumerMetadataResp(bytes.NewReader(b))
+	return proto.ReadConsumerMetadataResp(bytes.NewReader(b), req.Version)
 }
 
 func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetCommitResp, error) {
