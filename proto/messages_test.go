@@ -152,7 +152,7 @@ func TestAPIVersionsResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := ReadAPIVersionsResp(bytes.NewBuffer(b))
+	resp, err := ReadAPIVersionsResp(bytes.NewBuffer(b), respOrig.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,6 +744,44 @@ func TestOffsetCommitResponseWithVersions(t *testing.T) {
 
 	if !reflect.DeepEqual(respV3, *resp3) {
 		t.Fatalf("Not equal \n%+#v ,  \n%+#v", respV3, *resp3)
+	}
+
+}
+
+func TestAPIVersionsResponseWithVersions(t *testing.T) {
+	respV0 := APIVersionsResp{
+		CorrelationID: 1,
+		APIVersions: []SupportedVersion{
+			SupportedVersion{
+				APIKey:     1,
+				MinVersion: 0,
+				MaxVersion: 2,
+			},
+		},
+	}
+
+	b0, err := respV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp0, err := ReadAPIVersionsResp(bytes.NewReader(b0), respV0.Version)
+
+	if !reflect.DeepEqual(respV0, *resp0) {
+		t.Fatalf("Not equal \n %+#v  ,  \n %+#v", respV0, *resp0)
+	}
+
+	respV1 := respV0
+	respV1.Version = KafkaV1
+	respV1.ThrottleTime = 2 * time.Second
+
+	b1, err := respV1.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp1, err := ReadAPIVersionsResp(bytes.NewReader(b1), respV1.Version)
+
+	if !reflect.DeepEqual(respV1, *resp1) {
+		t.Fatalf("Not equal \n%+#v ,  \n%+#v", respV1, *resp1)
 	}
 
 }

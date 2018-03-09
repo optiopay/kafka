@@ -70,7 +70,7 @@ var SupportedByDriver = map[int16]SupportedVersion{
 	OffsetCommitReqKind:     SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV3},
 	OffsetFetchReqKind:      SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV3},
 	ConsumerMetadataReqKind: SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV1},
-	APIVersionsReqKind:      SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	APIVersionsReqKind:      SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV1},
 }
 
 type Compression int8
@@ -2091,6 +2091,7 @@ func (b *buffer) Write(p []byte) (int, error) {
 }
 
 type APIVersionsReq struct {
+	Version       int16
 	CorrelationID int32
 	ClientID      string
 }
@@ -2145,8 +2146,10 @@ func (r *APIVersionsReq) WriteTo(w io.Writer) (int64, error) {
 }
 
 type APIVersionsResp struct {
+	Version       int16
 	CorrelationID int32
 	APIVersions   []SupportedVersion
+	ThrottleTime  time.Duration
 }
 
 type SupportedVersion struct {
@@ -2155,20 +2158,24 @@ type SupportedVersion struct {
 	MaxVersion int16
 }
 
-func (a *APIVersionsResp) Bytes() ([]byte, error) {
+func (r *APIVersionsResp) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(a.CorrelationID)
+	enc.Encode(r.CorrelationID)
 	//error code
 	enc.Encode(int16(0))
-	enc.EncodeArrayLen(len(a.APIVersions))
-	for _, api := range a.APIVersions {
+	enc.EncodeArrayLen(len(r.APIVersions))
+	for _, api := range r.APIVersions {
 		enc.Encode(api.APIKey)
 		enc.Encode(api.MinVersion)
 		enc.Encode(api.MaxVersion)
+	}
+
+	if r.Version >= KafkaV1 {
+		enc.Encode(r.ThrottleTime)
 	}
 
 	if enc.Err() != nil {
@@ -2182,8 +2189,9 @@ func (a *APIVersionsResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadAPIVersionsResp(r io.Reader) (*APIVersionsResp, error) {
+func ReadAPIVersionsResp(r io.Reader, version int16) (*APIVersionsResp, error) {
 	var resp APIVersionsResp
+	resp.Version = version
 	dec := NewDecoder(r)
 
 	// total message size
@@ -2206,6 +2214,11 @@ func ReadAPIVersionsResp(r io.Reader) (*APIVersionsResp, error) {
 		api.MinVersion = dec.DecodeInt16()
 		api.MaxVersion = dec.DecodeInt16()
 	}
+
+	if version >= KafkaV1 {
+		resp.ThrottleTime = dec.DecodeDuration32()
+	}
+
 	if dec.Err() != nil {
 		return nil, dec.Err()
 	}

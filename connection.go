@@ -258,6 +258,7 @@ func (c *connection) Close() error {
 // APIVersions sends a request to fetch the supported versions for each API.
 // Versioning is only supported in Kafka versions above 0.10.0.0
 func (c *connection) APIVersions(req *proto.APIVersionsReq) (*proto.APIVersionsResp, error) {
+	req.Version = c.getBestVersion(proto.APIVersionsReqKind)
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -278,7 +279,7 @@ func (c *connection) APIVersions(req *proto.APIVersionsReq) (*proto.APIVersionsR
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadAPIVersionsResp(bytes.NewReader(b))
+	return proto.ReadAPIVersionsResp(bytes.NewReader(b), req.Version)
 }
 
 // Metadata sends given metadata request to kafka node and returns related
