@@ -68,7 +68,7 @@ var SupportedByDriver = map[int16]SupportedVersion{
 	OffsetReqKind:           SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV2},
 	MetadataReqKind:         SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV5},
 	OffsetCommitReqKind:     SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV3},
-	OffsetFetchReqKind:      SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
+	OffsetFetchReqKind:      SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV3},
 	ConsumerMetadataReqKind: SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
 	APIVersionsReqKind:      SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV0},
 }
@@ -1518,13 +1518,19 @@ type OffsetFetchRespPartition struct {
 	Err      error
 }
 
-func ReadOffsetFetchResp(r io.Reader) (*OffsetFetchResp, error) {
+func ReadOffsetFetchResp(r io.Reader, version int16) (*OffsetFetchResp, error) {
 	var resp OffsetFetchResp
 	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
 	resp.CorrelationID = dec.DecodeInt32()
+
+	resp.Version = version
+
+	if version >= KafkaV3 {
+		resp.ThrottleTime = dec.DecodeDuration32()
+	}
 
 	len, err := dec.DecodeArrayLen()
 	if err != nil {
@@ -1549,6 +1555,10 @@ func ReadOffsetFetchResp(r io.Reader) (*OffsetFetchResp, error) {
 			p.Metadata = dec.DecodeString()
 			p.Err = errFromNo(dec.DecodeInt16())
 		}
+	}
+
+	if version >= KafkaV2 {
+		resp.Err = errFromNo(dec.DecodeInt16())
 	}
 
 	if err := dec.Err(); err != nil {

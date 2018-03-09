@@ -497,6 +497,78 @@ func TestFetchResponse(t *testing.T) {
 	}
 }
 
+func TestOffsetFetchWithVersions(t *testing.T) {
+	respV0 := OffsetFetchResp{
+		Version:       0,
+		CorrelationID: 0,
+		ThrottleTime:  0,
+		Topics: []OffsetFetchRespTopic{
+			OffsetFetchRespTopic{
+				Name: "",
+				Partitions: []OffsetFetchRespPartition{
+					OffsetFetchRespPartition{
+						ID:       0,
+						Offset:   0,
+						Metadata: "",
+						Err:      nil,
+					},
+				},
+			},
+		},
+		Err: nil,
+	}
+
+	b0, err := respV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r0, err := ReadOffsetFetchResp(bytes.NewReader(b0), respV0.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(respV0, *r0) {
+		t.Errorf("Expected \n %#+v\n fot \n %#+v\n", respV0, *r0)
+	}
+
+	respV2 := respV0
+	respV2.Version = KafkaV2
+	respV2.Err = errnoToErr[-1]
+
+	b2, err := respV2.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r2, err := ReadOffsetFetchResp(bytes.NewReader(b2), respV2.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(respV2, *r2) {
+		t.Errorf("Expected \n %#+v\n fot \n %#+v\n", respV2, *r2)
+	}
+
+	respV3 := respV2
+	respV3.Version = KafkaV3
+	respV3.ThrottleTime = 10 * time.Second
+
+	b3, err := respV3.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r3, err := ReadOffsetFetchResp(bytes.NewReader(b3), respV3.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(respV3, *r3) {
+		t.Errorf("Expected \n %#+v\n fot \n %#+v\n", respV3, *r3)
+	}
+}
+
 func TestFetchResponseWithVersions(t *testing.T) {
 
 	// Test version 0

@@ -406,6 +406,8 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 		return nil, c.stopErr
 	}
 
+	req.Version = c.getBestVersion(proto.MetadataReqKind)
+
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
@@ -454,6 +456,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
+	req.Version = c.getBestVersion(proto.MetadataReqKind)
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
@@ -476,6 +479,7 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
+	req.Version = c.getBestVersion(proto.OffsetFetchReqKind)
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
@@ -490,5 +494,5 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadOffsetFetchResp(bytes.NewReader(b))
+	return proto.ReadOffsetFetchResp(bytes.NewReader(b), req.Version)
 }
