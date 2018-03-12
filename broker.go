@@ -306,8 +306,8 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 	for nodeID, conn := range b.conns {
 		checkednodes[nodeID] = true
 		resp, err := conn.Metadata(&proto.MetadataReq{
-			ClientID: b.conf.ClientID,
-			Topics:   topics,
+			RequestHeader: proto.RequestHeader{ClientID: b.conf.ClientID},
+			Topics:        topics,
 		})
 		if err != nil {
 			b.conf.Logger.Debug("cannot fetch metadata from node",
@@ -331,8 +331,8 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 			continue
 		}
 		resp, err := conn.Metadata(&proto.MetadataReq{
-			ClientID: b.conf.ClientID,
-			Topics:   topics,
+			RequestHeader: proto.RequestHeader{ClientID: b.conf.ClientID},
+			Topics:        topics,
 		})
 
 		// we had no active connection to this node, so most likely we don't need it
@@ -356,8 +356,8 @@ func (b *Broker) fetchMetadata(topics ...string) (*proto.MetadataResp, error) {
 			continue
 		}
 		resp, err := conn.Metadata(&proto.MetadataReq{
-			ClientID: b.conf.ClientID,
-			Topics:   topics,
+			RequestHeader: proto.RequestHeader{ClientID: b.conf.ClientID},
+			Topics:        topics,
 		})
 		_ = conn.Close()
 		if err == nil {
@@ -535,7 +535,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 		// first try all already existing connections
 		for _, conn := range b.conns {
 			resp, err := conn.ConsumerMetadata(&proto.ConsumerMetadataReq{
-				ClientID:      b.conf.ClientID,
+				RequestHeader: proto.RequestHeader{ClientID: b.conf.ClientID},
 				ConsumerGroup: consumerGroup,
 			})
 			if err != nil {
@@ -592,7 +592,7 @@ func (b *Broker) muCoordinatorConnection(consumerGroup string) (conn *connection
 			b.conns[nodeID] = conn
 
 			resp, err := conn.ConsumerMetadata(&proto.ConsumerMetadataReq{
-				ClientID:      b.conf.ClientID,
+				RequestHeader: proto.RequestHeader{ClientID: b.conf.ClientID},
 				ConsumerGroup: consumerGroup,
 			})
 			if err != nil {
@@ -670,8 +670,8 @@ func (b *Broker) offset(topic string, partition int32, timems int64) (offset int
 		}
 		var resp *proto.OffsetResp
 		resp, err = conn.Offset(&proto.OffsetReq{
-			ClientID:  b.conf.ClientID,
-			ReplicaID: -1, // any client
+			RequestHeader: proto.RequestHeader{ClientID: b.conf.ClientID},
+			ReplicaID:     -1, // any client
 			Topics: []proto.OffsetReqTopic{
 				{
 					Name: topic,
@@ -851,10 +851,10 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 	}
 
 	req := proto.ProduceReq{
-		ClientID:     p.broker.conf.ClientID,
-		Compression:  p.conf.Compression,
-		RequiredAcks: p.conf.RequiredAcks,
-		Timeout:      p.conf.RequestTimeout,
+		RequestHeader: proto.RequestHeader{ClientID: p.broker.conf.ClientID},
+		Compression:   p.conf.Compression,
+		RequiredAcks:  p.conf.RequiredAcks,
+		Timeout:       p.conf.RequestTimeout,
 		Topics: []proto.ProduceReqTopic{
 			{
 				Name: topic,
@@ -1120,9 +1120,9 @@ func (c *consumer) ConsumeBatch() ([]*proto.Message, error) {
 // RetryErrLimit and RetryErrWait consumer configuration attributes.
 func (c *consumer) fetch() ([]*proto.Message, error) {
 	req := proto.FetchReq{
-		ClientID:    c.broker.conf.ClientID,
-		MaxWaitTime: c.conf.RequestTimeout,
-		MinBytes:    c.conf.MinFetchSize,
+		RequestHeader: proto.RequestHeader{ClientID: c.broker.conf.ClientID},
+		MaxWaitTime:   c.conf.RequestTimeout,
+		MinBytes:      c.conf.MinFetchSize,
 		Topics: []proto.FetchReqTopic{
 			{
 				Name: c.conf.Topic,
@@ -1312,7 +1312,7 @@ func (c *offsetCoordinator) commit(topic string, partition int32, offset int64, 
 		}
 
 		resp, err := c.conn.OffsetCommit(&proto.OffsetCommitReq{
-			ClientID:      c.broker.conf.ClientID,
+			RequestHeader: proto.RequestHeader{ClientID: c.broker.conf.ClientID},
 			ConsumerGroup: c.conf.ConsumerGroup,
 			Topics: []proto.OffsetCommitReqTopic{
 				{
