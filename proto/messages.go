@@ -62,6 +62,20 @@ const (
 	RequiredAcksLocal = 1
 )
 
+type Request interface {
+	Kind() int16
+	io.WriterTo
+}
+
+var _ Request = &ProduceReq{}
+var _ Request = &FetchReq{}
+var _ Request = &OffsetReq{}
+var _ Request = &MetadataReq{}
+var _ Request = &OffsetCommitReq{}
+var _ Request = &OffsetFetchReq{}
+var _ Request = &ConsumerMetadataReq{}
+var _ Request = &APIVersionsReq{}
+
 var SupportedByDriver = map[int16]SupportedVersion{
 	ProduceReqKind:          SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV2},
 	FetchReqKind:            SupportedVersion{MinVersion: KafkaV0, MaxVersion: KafkaV5},
@@ -489,13 +503,17 @@ func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
 	return &req, nil
 }
 
+func (r MetadataReq) Kind() int16 {
+	return MetadataReqKind
+}
+
 func (r *MetadataReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(MetadataReqKind))
+	enc.Encode(int16(r.Kind()))
 	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -822,13 +840,17 @@ func ReadFetchReq(r io.Reader) (*FetchReq, error) {
 	return &req, nil
 }
 
+func (r FetchReq) Kind() int16 {
+	return FetchReqKind
+}
+
 func (r *FetchReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(FetchReqKind))
+	enc.Encode(int16(r.Kind()))
 	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -1078,13 +1100,17 @@ func ReadConsumerMetadataReq(r io.Reader) (*ConsumerMetadataReq, error) {
 	return &req, nil
 }
 
+func (r ConsumerMetadataReq) Kind() int16 {
+	return ConsumerMetadataReqKind
+}
+
 func (r *ConsumerMetadataReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(ConsumerMetadataReqKind))
+	enc.Encode(int16(r.Kind()))
 	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -1262,13 +1288,17 @@ func ReadOffsetCommitReq(r io.Reader) (*OffsetCommitReq, error) {
 	return &req, nil
 }
 
+func (r OffsetCommitReq) Kind() int16 {
+	return OffsetCommitReqKind
+}
+
 func (r *OffsetCommitReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(OffsetCommitReqKind))
+	enc.Encode(int16(r.Kind()))
 	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -1466,13 +1496,17 @@ func ReadOffsetFetchReq(r io.Reader) (*OffsetFetchReq, error) {
 	return &req, nil
 }
 
+func (r OffsetFetchReq) Kind() int16 {
+	return OffsetFetchReq
+}
+
 func (r *OffsetFetchReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(OffsetFetchReqKind))
+	enc.Encode(int16(r.Kind()))
 	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -1694,12 +1728,16 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 	return &req, nil
 }
 
+func (r ProduceReq) Kind() int16 {
+	return ProduceReqKind
+}
+
 func (r *ProduceReq) Bytes() ([]byte, error) {
 	var buf buffer
 	enc := NewEncoder(&buf)
 
 	enc.EncodeInt32(0) // placeholder
-	enc.EncodeInt16(ProduceReqKind)
+	enc.EncodeInt16(r.Kind())
 	enc.EncodeInt16(r.Version)
 	enc.EncodeInt32(r.CorrelationID)
 	enc.EncodeString(r.ClientID)
@@ -1914,13 +1952,17 @@ func ReadOffsetReq(r io.Reader) (*OffsetReq, error) {
 	return &req, nil
 }
 
+func (r OffsetReq) Kind() int16 {
+	return OffsetReqKind
+}
+
 func (r *OffsetReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(OffsetReqKind))
+	enc.Encode(int16(r.Kind()))
 	enc.Encode(r.Version)
 	enc.Encode(r.CorrelationID)
 	enc.Encode(r.ClientID)
@@ -2113,13 +2155,17 @@ func ReadAPIVersionsReq(r io.Reader) (*APIVersionsReq, error) {
 	return &req, nil
 }
 
+func (r APIVersionsReq) Kind() int16 {
+	return APIVersionsReqKind
+}
+
 func (r *APIVersionsReq) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
 	enc.Encode(int32(0))
-	enc.Encode(int16(APIVersionsReqKind))
+	enc.Encode(int16(r.Kind()))
 	// Currently only supports version 0
 	enc.Encode(int16(0))
 	enc.Encode(r.CorrelationID)

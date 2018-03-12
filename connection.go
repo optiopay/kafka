@@ -258,7 +258,7 @@ func (c *connection) Close() error {
 // APIVersions sends a request to fetch the supported versions for each API.
 // Versioning is only supported in Kafka versions above 0.10.0.0
 func (c *connection) APIVersions(req *proto.APIVersionsReq) (*proto.APIVersionsResp, error) {
-	req.Version = c.getBestVersion(proto.APIVersionsReqKind)
+	req.Version = c.getBestVersion(req.Kind())
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -297,7 +297,7 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 		return nil, fmt.Errorf("wait for response: %s", err)
 	}
 
-	req.Version = c.getBestVersion(proto.MetadataReqKind)
+	req.Version = c.getBestVersion(req.Kind())
 
 	if _, err := req.WriteTo(c.rw); err != nil {
 		c.logger.Error("msg", "cannot write", "error", err)
@@ -321,7 +321,7 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 		return nil, c.stopErr
 	}
 
-	req.Version = c.getBestVersion(proto.MetadataReqKind)
+	req.Version = c.getBestVersion(req.Kind())
 
 	if req.RequiredAcks == proto.RequiredAcksNone {
 		_, err := req.WriteTo(c.rw)
@@ -354,7 +354,7 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		return nil, c.stopErr
 	}
 
-	req.Version = c.getBestVersion(proto.FetchReqKind)
+	req.Version = c.getBestVersion(req.Kind())
 
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
@@ -407,7 +407,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 		return nil, c.stopErr
 	}
 
-	req.Version = c.getBestVersion(proto.MetadataReqKind)
+	req.Version = c.getBestVersion(req.Kind())
 
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
@@ -432,7 +432,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 
 func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
 	var ok bool
-	req.Version = c.getBestVersion(proto.ConsumerMetadataReqKind)
+	req.Version = c.getBestVersion(req.Kind())
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
@@ -458,7 +458,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
-	req.Version = c.getBestVersion(proto.MetadataReqKind)
+	req.Version = c.getBestVersion(req.Kind())
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
@@ -481,7 +481,7 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
-	req.Version = c.getBestVersion(proto.OffsetFetchReqKind)
+	req.Version = c.getBestVersion(req.Kind())
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
