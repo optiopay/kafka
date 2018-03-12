@@ -71,6 +71,7 @@ type Request interface {
 	GetClientID() string
 	SetClientID(cliendID string)
 	io.WriterTo
+	Bytes() ([]byte, error)
 }
 
 var _ Request = &ProduceReq{}
