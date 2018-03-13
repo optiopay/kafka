@@ -695,7 +695,11 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadMetadataResp(r io.Reader, version int16) (*MetadataResp, error) {
+func ReadMetadataResp(r io.Reader) (*MetadataResp, error) {
+	return ReadVersionedMetadataResp(r, KafkaV0)
+}
+
+func ReadVersionedMetadataResp(r io.Reader, version int16) (*MetadataResp, error) {
 	var resp MetadataResp
 	resp.Version = version
 	dec := NewDecoder(r)
@@ -1016,7 +1020,11 @@ func (r *FetchResp) Bytes() ([]byte, error) {
 	return []byte(buf), nil
 }
 
-func ReadFetchResp(r io.Reader, version int16) (*FetchResp, error) {
+func ReadFetchResp(r io.Reader) (*FetchResp, error) {
+	return ReadVersionedFetchResp(r, KafkaV0)
+}
+
+func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 	var err error
 	var resp FetchResp
 
@@ -1166,7 +1174,11 @@ type ConsumerMetadataResp struct {
 	CoordinatorPort int32
 }
 
-func ReadConsumerMetadataResp(r io.Reader, version int16) (*ConsumerMetadataResp, error) {
+func ReadConsumerMetadataResp(r io.Reader) (*ConsumerMetadataResp, error) {
+	return ReadVersionedConsumerMetadataResp(r, KafkaV0)
+}
+
+func ReadVersionedConsumerMetadataResp(r io.Reader, version int16) (*ConsumerMetadataResp, error) {
 	var resp ConsumerMetadataResp
 	resp.Version = version
 	dec := NewDecoder(r)
@@ -1374,7 +1386,11 @@ type OffsetCommitRespPartition struct {
 	Err error
 }
 
-func ReadOffsetCommitResp(r io.Reader, version int16) (*OffsetCommitResp, error) {
+func ReadOffsetCommitResp(r io.Reader) (*OffsetCommitResp, error) {
+	return ReadVersionedOffsetCommitResp(r, KafkaV0)
+}
+
+func ReadVersionedOffsetCommitResp(r io.Reader, version int16) (*OffsetCommitResp, error) {
 	var resp OffsetCommitResp
 	resp.Version = version
 	dec := NewDecoder(r)
@@ -1555,7 +1571,11 @@ type OffsetFetchRespPartition struct {
 	Err      error
 }
 
-func ReadOffsetFetchResp(r io.Reader, version int16) (*OffsetFetchResp, error) {
+func ReadOffsetFetchResp(r io.Reader) (*OffsetFetchResp, error) {
+	return ReadVersionedOffsetFetchResp(r, KafkaV0)
+}
+
+func ReadVersionedOffsetFetchResp(r io.Reader, version int16) (*OffsetFetchResp, error) {
 	var resp OffsetFetchResp
 	dec := NewDecoder(r)
 
@@ -1819,7 +1839,11 @@ func (r *ProduceResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadProduceResp(r io.Reader, version int16) (*ProduceResp, error) {
+func ReadProduceResp(r io.Reader) (*ProduceResp, error) {
+	return ReadVersionedProduceResp(r, KafkaV0)
+}
+
+func ReadVersionedProduceResp(r io.Reader, version int16) (*ProduceResp, error) {
 	var resp ProduceResp
 	dec := NewDecoder(r)
 	resp.Version = version
@@ -2002,7 +2026,11 @@ type OffsetRespPartition struct {
 	Offsets   []int64
 }
 
-func ReadOffsetResp(r io.Reader, version int16) (*OffsetResp, error) {
+func ReadOffsetResp(r io.Reader) (*OffsetResp, error) {
+	return ReadVersionedOffsetResp(r, KafkaV0)
+}
+
+func ReadVersionedOffsetResp(r io.Reader, version int16) (*OffsetResp, error) {
 	var resp OffsetResp
 	dec := NewDecoder(r)
 	resp.Version = version
@@ -2202,7 +2230,11 @@ func (r *APIVersionsResp) Bytes() ([]byte, error) {
 	return b, nil
 }
 
-func ReadAPIVersionsResp(r io.Reader, version int16) (*APIVersionsResp, error) {
+func ReadAPIVersionsResp(r io.Reader) (*APIVersionsResp, error) {
+	return ReadVersionedAPIVersionsResp(r, KafkaV0)
+}
+
+func ReadVersionedAPIVersionsResp(r io.Reader, version int16) (*APIVersionsResp, error) {
 	var resp APIVersionsResp
 	resp.Version = version
 	dec := NewDecoder(r)

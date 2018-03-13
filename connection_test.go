@@ -604,7 +604,7 @@ func TestOffsetResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r0, err := proto.ReadOffsetResp(bytes.NewReader(b), resp0.Version)
+	r0, err := proto.ReadVersionedOffsetResp(bytes.NewReader(b), resp0.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -624,7 +624,7 @@ func TestOffsetResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r1, err := proto.ReadOffsetResp(bytes.NewReader(b1), resp1.Version)
+	r1, err := proto.ReadVersionedOffsetResp(bytes.NewReader(b1), resp1.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +642,7 @@ func TestOffsetResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r2, err := proto.ReadOffsetResp(bytes.NewReader(b2), resp2.Version)
+	r2, err := proto.ReadVersionedOffsetResp(bytes.NewReader(b2), resp2.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
