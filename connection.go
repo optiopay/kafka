@@ -33,80 +33,101 @@ type connection struct {
 }
 
 func newTLSConnection(address string, ca, cert, key []byte, timeout, readTimeout time.Duration) (*connection, error) {
-	roots := x509.NewCertPool()
-	ok := roots.AppendCertsFromPEM(ca)
-	if !ok {
-		return nil, fmt.Errorf("Cannot parse root certificate")
+	var fetchVersions = true
+	for {
+		roots := x509.NewCertPool()
+		ok := roots.AppendCertsFromPEM(ca)
+		if !ok {
+			return nil, fmt.Errorf("Cannot parse root certificate")
+		}
+
+		certificate, err := tls.X509KeyPair(cert, key)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to parse key/cert for TLS: %s", err)
+		}
+
+		conf := &tls.Config{
+			Certificates: []tls.Certificate{certificate},
+			RootCAs:      roots,
+		}
+
+		dialer := net.Dialer{
+			Timeout:   timeout,
+			KeepAlive: 30 * time.Second,
+		}
+		conn, err := tls.DialWithDialer(&dialer, "tcp", address, conf)
+		if err != nil {
+			return nil, err
+		}
+		c := &connection{
+			stop:        make(chan struct{}),
+			nextID:      make(chan int32),
+			rw:          conn,
+			respc:       make(map[int32]chan []byte),
+			logger:      &nullLogger{},
+			readTimeout: readTimeout,
+			apiVersions: make(map[int16]proto.SupportedVersion),
+		}
+		go c.nextIDLoop()
+		go c.readRespLoop()
+		if fetchVersions {
+			if c.cacheApiVersions() != nil {
+				fetchVersions = false
+				c.Close()
+			}
+		}
+
+		return c, nil
 	}
 
-	certificate, err := tls.X509KeyPair(cert, key)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to parse key/cert for TLS: %s", err)
-	}
-
-	conf := &tls.Config{
-		Certificates: []tls.Certificate{certificate},
-		RootCAs:      roots,
-	}
-
-	dialer := net.Dialer{
-		Timeout:   timeout,
-		KeepAlive: 30 * time.Second,
-	}
-	conn, err := tls.DialWithDialer(&dialer, "tcp", address, conf)
-	if err != nil {
-		return nil, err
-	}
-	c := &connection{
-		stop:        make(chan struct{}),
-		nextID:      make(chan int32),
-		rw:          conn,
-		respc:       make(map[int32]chan []byte),
-		logger:      &nullLogger{},
-		readTimeout: readTimeout,
-		apiVersions: make(map[int16]proto.SupportedVersion),
-	}
-	go c.nextIDLoop()
-	go c.readRespLoop()
-	c.cacheApiVersions()
-	return c, nil
 }
 
 // newConnection returns new, initialized connection or error
 func newTCPConnection(address string, timeout, readTimeout time.Duration) (*connection, error) {
-	dialer := net.Dialer{
-		Timeout:   timeout,
-		KeepAlive: 30 * time.Second,
+	var fetchVersions = true
+	for {
+		dialer := net.Dialer{
+			Timeout:   timeout,
+			KeepAlive: 30 * time.Second,
+		}
+		conn, err := dialer.Dial("tcp", address)
+		if err != nil {
+			return nil, err
+		}
+		c := &connection{
+			stop:        make(chan struct{}),
+			nextID:      make(chan int32),
+			rw:          conn,
+			respc:       make(map[int32]chan []byte),
+			logger:      &nullLogger{},
+			readTimeout: readTimeout,
+			apiVersions: make(map[int16]proto.SupportedVersion),
+		}
+		go c.nextIDLoop()
+		go c.readRespLoop()
+
+		if fetchVersions {
+			if c.cacheApiVersions() != nil {
+				fetchVersions = false
+				c.Close()
+			}
+		}
+		return c, nil
 	}
-	conn, err := dialer.Dial("tcp", address)
-	if err != nil {
-		return nil, err
-	}
-	c := &connection{
-		stop:        make(chan struct{}),
-		nextID:      make(chan int32),
-		rw:          conn,
-		respc:       make(map[int32]chan []byte),
-		logger:      &nullLogger{},
-		readTimeout: readTimeout,
-		apiVersions: make(map[int16]proto.SupportedVersion),
-	}
-	go c.nextIDLoop()
-	go c.readRespLoop()
-	c.cacheApiVersions()
-	return c, nil
+
 }
 
-func (c *connection) cacheApiVersions() {
+func (c *connection) cacheApiVersions() error {
 	apiVersions, err := c.APIVersions(&proto.APIVersionsReq{})
 	if err != nil {
 		c.logger.Debug("cannot fetch apiversions",
 			"error", err)
-	} else {
-		for _, api := range apiVersions.APIVersions {
-			c.apiVersions[api.APIKey] = api
-		}
+		return err
 	}
+	for _, api := range apiVersions.APIVersions {
+		c.apiVersions[api.APIKey] = api
+	}
+	return nil
 }
 
 //getBestVersion returns version for passed apiKey which best fit server and client requirements
