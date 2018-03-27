@@ -7,8 +7,10 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fsouza/go-dockerclient"
+	"github.com/optiopay/kafka"
 
 	"testing"
 )
@@ -87,6 +89,31 @@ func (cluster *KafkaCluster) Start() error {
 	}
 	cluster.containers = containers
 	return nil
+}
+
+func (cluster *KafkaCluster) WaitUntilReady() error {
+	for {
+		bconf := kafka.NewBrokerConf("waiter")
+		addrs, err := cluster.KafkaAddrs()
+		if err != nil {
+			return fmt.Errorf("cannot get kafka address: %s", err)
+		}
+
+		broker, err := kafka.Dial(addrs, bconf)
+		if err != nil {
+			return fmt.Errorf("cannot connect to cluster (%q): %s", addrs, err)
+		}
+
+		met, err := broker.Metadata()
+		if err != nil {
+			return fmt.Errorf("Cannot get metadata : %s", err)
+		}
+		if len(met.Topics) > 0 {
+			return nil
+		}
+		broker.Close()
+		time.Sleep(time.Second)
+	}
 }
 
 // Containers inspect all containers running within cluster and return

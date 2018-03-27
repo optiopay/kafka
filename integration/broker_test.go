@@ -22,6 +22,10 @@ func TestProducerBrokenConnection(t *testing.T) {
 		_ = cluster.Stop()
 	}()
 
+	if err := cluster.WaitUntilReady(); err != nil {
+		t.Fatal(err)
+	}
+
 	bconf := kafka.NewBrokerConf("producer-broken-connection")
 	bconf.Logger = &testLogger{t}
 	addrs, err := cluster.KafkaAddrs()
@@ -121,7 +125,9 @@ func TestConsumerBrokenConnection(t *testing.T) {
 	defer func() {
 		_ = cluster.Stop()
 	}()
-	//time.Sleep(5 * time.Second)
+	if err := cluster.WaitUntilReady(); err != nil {
+		t.Fatal(err)
+	}
 
 	bconf := kafka.NewBrokerConf("producer-broken-connection")
 	bconf.Logger = &testLogger{t}
@@ -219,6 +225,15 @@ func TestNewTopic(t *testing.T) {
 	defer func() {
 		_ = cluster.Stop()
 	}()
+
+	// We cannot use here cluster.WaitUntilReady() because
+	// it waits until topics will be created. But in this
+	// tests we create cluster with 1 cluster node only,
+	// which means that topic creation will fail
+	// because they require 4 partitions
+	// So we can only wait and hope that 10 seconds is enough
+
+	time.Sleep(10 * time.Second)
 
 	//time.Sleep(5 * time.Second)
 	//	go func() {
