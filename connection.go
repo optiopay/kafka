@@ -110,6 +110,7 @@ func newTCPConnection(address string, timeout, readTimeout time.Duration) (*conn
 			if c.cacheApiVersions() != nil {
 				fetchVersions = false
 				c.Close()
+				continue
 			}
 		}
 		return c, nil
