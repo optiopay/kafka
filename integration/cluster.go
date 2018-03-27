@@ -44,7 +44,7 @@ func NewKafkaCluster(kafkaDockerDir string, size int) *KafkaCluster {
 
 // RunningKafka returns true if container is running kafka node
 func (c *Container) RunningKafka() bool {
-	return c.Args[1] == "start-kafka.sh"
+	return c.Config.Image == "kafkadocker_kafka"
 }
 
 // Start starts current container
