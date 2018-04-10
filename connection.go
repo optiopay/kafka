@@ -258,6 +258,7 @@ func (c *connection) Close() error {
 // APIVersions sends a request to fetch the supported versions for each API.
 // Versioning is only supported in Kafka versions above 0.10.0.0
 func (c *connection) APIVersions(req *proto.APIVersionsReq) (*proto.APIVersionsResp, error) {
+	req.Version = c.getBestVersion(proto.APIVersionsReqKind)
 	var ok bool
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
@@ -278,7 +279,7 @@ func (c *connection) APIVersions(req *proto.APIVersionsReq) (*proto.APIVersionsR
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadAPIVersionsResp(bytes.NewReader(b))
+	return proto.ReadAPIVersionsResp(bytes.NewReader(b), req.Version)
 }
 
 // Metadata sends given metadata request to kafka node and returns related
@@ -406,6 +407,8 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 		return nil, c.stopErr
 	}
 
+	req.Version = c.getBestVersion(proto.MetadataReqKind)
+
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
@@ -429,6 +432,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 
 func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
 	var ok bool
+	req.Version = c.getBestVersion(proto.ConsumerMetadataReqKind)
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
@@ -446,7 +450,7 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadConsumerMetadataResp(bytes.NewReader(b))
+	return proto.ReadConsumerMetadataResp(bytes.NewReader(b), req.Version)
 }
 
 func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetCommitResp, error) {
@@ -454,6 +458,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
+	req.Version = c.getBestVersion(proto.MetadataReqKind)
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
@@ -468,7 +473,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadOffsetCommitResp(bytes.NewReader(b))
+	return proto.ReadOffsetCommitResp(bytes.NewReader(b), req.Version)
 }
 
 func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchResp, error) {
@@ -476,6 +481,7 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 	if req.CorrelationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
+	req.Version = c.getBestVersion(proto.OffsetFetchReqKind)
 	respc, err := c.respWaiter(req.CorrelationID)
 	if err != nil {
 		c.logger.Error("msg", "failed waiting for response", "error", err)
@@ -490,5 +496,5 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 	if !ok {
 		return nil, c.stopErr
 	}
-	return proto.ReadOffsetFetchResp(bytes.NewReader(b))
+	return proto.ReadOffsetFetchResp(bytes.NewReader(b), req.Version)
 }

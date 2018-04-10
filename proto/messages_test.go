@@ -152,7 +152,7 @@ func TestAPIVersionsResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := ReadAPIVersionsResp(bytes.NewBuffer(b))
+	resp, err := ReadAPIVersionsResp(bytes.NewBuffer(b), respOrig.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,6 +497,78 @@ func TestFetchResponse(t *testing.T) {
 	}
 }
 
+func TestOffsetFetchWithVersions(t *testing.T) {
+	respV0 := OffsetFetchResp{
+		Version:       0,
+		CorrelationID: 0,
+		ThrottleTime:  0,
+		Topics: []OffsetFetchRespTopic{
+			OffsetFetchRespTopic{
+				Name: "",
+				Partitions: []OffsetFetchRespPartition{
+					OffsetFetchRespPartition{
+						ID:       0,
+						Offset:   0,
+						Metadata: "",
+						Err:      nil,
+					},
+				},
+			},
+		},
+		Err: nil,
+	}
+
+	b0, err := respV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r0, err := ReadOffsetFetchResp(bytes.NewReader(b0), respV0.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(respV0, *r0) {
+		t.Errorf("Expected \n %#+v\n fot \n %#+v\n", respV0, *r0)
+	}
+
+	respV2 := respV0
+	respV2.Version = KafkaV2
+	respV2.Err = errnoToErr[-1]
+
+	b2, err := respV2.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r2, err := ReadOffsetFetchResp(bytes.NewReader(b2), respV2.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(respV2, *r2) {
+		t.Errorf("Expected \n %#+v\n fot \n %#+v\n", respV2, *r2)
+	}
+
+	respV3 := respV2
+	respV3.Version = KafkaV3
+	respV3.ThrottleTime = 10 * time.Second
+
+	b3, err := respV3.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r3, err := ReadOffsetFetchResp(bytes.NewReader(b3), respV3.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(respV3, *r3) {
+		t.Errorf("Expected \n %#+v\n fot \n %#+v\n", respV3, *r3)
+	}
+}
+
 func TestFetchResponseWithVersions(t *testing.T) {
 
 	// Test version 0
@@ -582,6 +654,134 @@ func TestFetchResponseWithVersions(t *testing.T) {
 	resp5, err := ReadFetchResp(bytes.NewBuffer(b5), fetchRespV5.Version)
 	if !reflect.DeepEqual(&fetchRespV5, resp5) {
 		t.Fatalf("Not equal %+#v ,  %+#v", fetchRespV5, resp5)
+	}
+
+}
+
+func TestConsumerMetadataWithVersions(t *testing.T) {
+	respV0 := ConsumerMetadataResp{
+		Version:         0,
+		CorrelationID:   1,
+		ThrottleTime:    0,
+		Err:             nil,
+		ErrMsg:          "",
+		CoordinatorID:   1,
+		CoordinatorHost: "host",
+		CoordinatorPort: 33333,
+	}
+
+	b0, err := respV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r0, err := ReadConsumerMetadataResp(bytes.NewReader(b0), respV0.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(respV0, *r0) {
+		t.Errorf("Expected \n %#+v\n fot \n %#+v\n", respV0, *r0)
+	}
+
+	respV1 := respV0
+	respV1.Version = KafkaV1
+	respV1.ThrottleTime = 10 * time.Second
+	respV1.ErrMsg = "My error"
+
+	b1, err := respV1.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r1, err := ReadConsumerMetadataResp(bytes.NewReader(b1), respV1.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(respV1, *r1) {
+		t.Errorf("Expected \n %#+v\n fot \n %#+v\n", respV1, *r1)
+	}
+}
+
+func TestOffsetCommitResponseWithVersions(t *testing.T) {
+	respV0 := OffsetCommitResp{
+		Version:       KafkaV0,
+		CorrelationID: 1,
+		ThrottleTime:  0,
+		Topics: []OffsetCommitRespTopic{
+			OffsetCommitRespTopic{
+				Name: "test",
+				Partitions: []OffsetCommitRespPartition{
+					OffsetCommitRespPartition{
+						ID:  1,
+						Err: nil,
+					},
+				},
+			},
+		},
+	}
+
+	b0, err := respV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp0, err := ReadOffsetCommitResp(bytes.NewReader(b0), respV0.Version)
+
+	if !reflect.DeepEqual(&respV0, resp0) {
+		t.Fatalf("Not equal %+#v ,  %+#v", respV0, resp0)
+	}
+
+	respV3 := respV0
+	respV3.Version = KafkaV3
+	respV3.ThrottleTime = 2 * time.Second
+
+	b3, err := respV3.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp3, err := ReadOffsetCommitResp(bytes.NewReader(b3), respV3.Version)
+
+	if !reflect.DeepEqual(respV3, *resp3) {
+		t.Fatalf("Not equal \n%+#v ,  \n%+#v", respV3, *resp3)
+	}
+
+}
+
+func TestAPIVersionsResponseWithVersions(t *testing.T) {
+	respV0 := APIVersionsResp{
+		CorrelationID: 1,
+		APIVersions: []SupportedVersion{
+			SupportedVersion{
+				APIKey:     1,
+				MinVersion: 0,
+				MaxVersion: 2,
+			},
+		},
+	}
+
+	b0, err := respV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp0, err := ReadAPIVersionsResp(bytes.NewReader(b0), respV0.Version)
+
+	if !reflect.DeepEqual(respV0, *resp0) {
+		t.Fatalf("Not equal \n %+#v  ,  \n %+#v", respV0, *resp0)
+	}
+
+	respV1 := respV0
+	respV1.Version = KafkaV1
+	respV1.ThrottleTime = 2 * time.Second
+
+	b1, err := respV1.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp1, err := ReadAPIVersionsResp(bytes.NewReader(b1), respV1.Version)
+
+	if !reflect.DeepEqual(respV1, *resp1) {
+		t.Fatalf("Not equal \n%+#v ,  \n%+#v", respV1, *resp1)
 	}
 
 }
