@@ -73,7 +73,8 @@ func newTLSConnection(address string, ca, cert, key []byte, timeout, readTimeout
 		if fetchVersions {
 			if c.cacheApiVersions() != nil {
 				fetchVersions = false
-				c.Close()
+				//required for errorchk
+				_ = c.Close()
 			}
 		}
 
@@ -109,7 +110,8 @@ func newTCPConnection(address string, timeout, readTimeout time.Duration) (*conn
 		if fetchVersions {
 			if c.cacheApiVersions() != nil {
 				fetchVersions = false
-				c.Close()
+				//required for errorchk
+				_ = c.Close()
 				continue
 			}
 		}
