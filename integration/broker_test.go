@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -8,6 +9,152 @@ import (
 	"github.com/optiopay/kafka"
 	"github.com/optiopay/kafka/proto"
 )
+
+func TestProduceAndConsume(t *testing.T) {
+	IntegrationTest(t)
+
+	topics := []string{"Topic3", "Topic4"}
+
+	cluster := NewKafkaCluster("kafka-docker/", 4)
+	if err := cluster.Start(); err != nil {
+		t.Fatalf("cannot start kafka cluster: %s", err)
+	}
+	defer func() {
+		_ = cluster.Stop()
+	}()
+
+	if err := cluster.WaitUntilReady(); err != nil {
+		t.Fatal(err)
+	}
+
+	bconf := kafka.NewBrokerConf("producer-broken-connection")
+	bconf.Logger = &testLogger{t}
+	addrs, err := cluster.KafkaAddrs()
+	if err != nil {
+		t.Fatalf("cannot get kafka address: %s", err)
+	}
+	broker, err := kafka.Dial(addrs, bconf)
+	if err != nil {
+		t.Fatalf("cannot connect to cluster (%q): %s", addrs, err)
+	}
+	defer broker.Close()
+
+	// produce big message to enforce TCP buffer flush
+	m := proto.Message{
+		//Value: []byte(strings.Repeat("producer broken connection message ", 1000)),
+		Value: []byte("hello world"),
+	}
+	pconf := kafka.NewProducerConf()
+	producer := broker.Producer(pconf)
+
+	// send message to all topics to make sure it's working
+	for _, name := range topics {
+		if _, err := producer.Produce(name, 0, &m); err != nil {
+			t.Fatalf("cannot produce to %q: %s", name, err)
+		}
+	}
+
+	time.Sleep(5 * time.Second)
+
+	// make sure data was persisted
+	for _, name := range topics {
+		consumer, err := broker.Consumer(kafka.NewConsumerConf(name, 0))
+		if err != nil {
+			t.Errorf("cannot create consumer for %q: %s", name, err)
+			continue
+		}
+		m1, err := consumer.Consume()
+		if err != nil {
+			t.Errorf("cannot consume %d message from %q: %s", 0, name, err)
+		} else {
+			if !reflect.DeepEqual(m.Value, m1.Value) {
+				t.Errorf("Got different message. Wait:\n%#+v   got:\n%#+v", m.Value, m1.Value)
+			}
+
+		}
+	}
+
+}
+
+func TestCompression(t *testing.T) {
+	IntegrationTest(t)
+
+	topics := []string{"Topic3", "Topic4"}
+
+	cluster := NewKafkaCluster("kafka-docker/", 4)
+	if err := cluster.Start(); err != nil {
+		t.Fatalf("cannot start kafka cluster: %s", err)
+	}
+	defer func() {
+		_ = cluster.Stop()
+	}()
+
+	if err := cluster.WaitUntilReady(); err != nil {
+		t.Fatal(err)
+	}
+
+	bconf := kafka.NewBrokerConf("producer-broken-connection")
+	bconf.Logger = &testLogger{t}
+	addrs, err := cluster.KafkaAddrs()
+	if err != nil {
+		t.Fatalf("cannot get kafka address: %s", err)
+	}
+	broker, err := kafka.Dial(addrs, bconf)
+	if err != nil {
+		t.Fatalf("cannot connect to cluster (%q): %s", addrs, err)
+	}
+	defer broker.Close()
+
+	// produce big message to enforce TCP buffer flush
+	m := proto.Message{
+		//Value: []byte(strings.Repeat("producer broken connection message ", 1000)),
+		Value: []byte("hello world"),
+	}
+
+	// Use GZIP compression for Topic3
+	pconf := kafka.NewProducerConf()
+	pconf.Compression = proto.CompressionGzip
+	producer := broker.Producer(pconf)
+
+	// send message to all topics to make sure it's working
+	//for i := 0; i < 2; i++ {
+	if _, err := producer.Produce(topics[0], 0, &m); err != nil {
+		t.Fatalf("cannot produce to %q: %s", topics[0], err)
+	}
+
+	// Use Snappy compression for Topic4
+	pconf = kafka.NewProducerConf()
+	pconf.Compression = proto.CompressionSnappy
+	producer = broker.Producer(pconf)
+
+	if _, err := producer.Produce(topics[1], 0, &m); err != nil {
+		t.Fatalf("cannot produce to %q: %s", topics[1], err)
+	}
+
+	time.Sleep(5 * time.Second)
+
+	// make sure data was persisted
+	for _, name := range topics {
+		consumer, err := broker.Consumer(kafka.NewConsumerConf(name, 0))
+		if err != nil {
+			t.Errorf("cannot create consumer for %q: %s", name, err)
+			continue
+		}
+		//for i := 0; i < 2; i++ {
+		m1, err := consumer.Consume()
+		if err != nil {
+			t.Errorf("cannot consume %d message from %q: %s", 0, name, err)
+		} else {
+
+			if !reflect.DeepEqual(m.Value, m1.Value) {
+				t.Errorf("Got different message. Wait:\n%#+v   got:\n%#+v", m.Value, m1.Value)
+
+			}
+
+		}
+	}
+
+}
 
 func TestProducerBrokenConnection(t *testing.T) {
 	IntegrationTest(t)
