@@ -286,8 +286,8 @@ func TestConnectionMetadata(t *testing.T) {
 	}
 	ch <- resp1
 	resp, err := conn.Metadata(&proto.MetadataReq{
-		ClientID: "tester",
-		Topics:   []string{"first", "second"},
+		RequestHeader: proto.RequestHeader{ClientID: "tester"},
+		Topics:        []string{"first", "second"},
 	})
 	if err != nil {
 		t.Fatalf("could not fetch response: %s", err)
@@ -362,8 +362,7 @@ func TestConnectionProduce(t *testing.T) {
 	}()
 
 	resp, err := conn.Produce(&proto.ProduceReq{
-		CorrelationID: 1,
-		ClientID:      "tester",
+		RequestHeader: proto.RequestHeader{CorrelationID: 1, ClientID: "tester"},
 		Compression:   proto.CompressionNone,
 		RequiredAcks:  proto.RequiredAcksAll,
 		Timeout:       time.Second,
@@ -389,8 +388,7 @@ func TestConnectionProduce(t *testing.T) {
 		t.Fatalf("expected different response %#v", resp)
 	}
 	resp, err = conn.Produce(&proto.ProduceReq{
-		CorrelationID: 2,
-		ClientID:      "tester",
+		RequestHeader: proto.RequestHeader{CorrelationID: 2, ClientID: "tester"},
 		Compression:   proto.CompressionNone,
 		RequiredAcks:  proto.RequiredAcksAll,
 		Timeout:       time.Second,
@@ -483,8 +481,7 @@ func TestConnectionFetch(t *testing.T) {
 	}()
 
 	resp, err := conn.Fetch(&proto.FetchReq{
-		CorrelationID: 2,
-		ClientID:      "tester",
+		RequestHeader: proto.RequestHeader{CorrelationID: 2, ClientID: "tester"},
 		Topics: []proto.FetchReqTopic{
 			{
 				Name: "foo",
@@ -563,7 +560,7 @@ func TestConnectionOffset(t *testing.T) {
 	}()
 
 	resp, err := conn.Offset(&proto.OffsetReq{
-		ClientID: "tester",
+		RequestHeader: proto.RequestHeader{ClientID: "tester"},
 		Topics: []proto.OffsetReqTopic{
 			{
 				Name: "test",
@@ -607,7 +604,7 @@ func TestOffsetResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r0, err := proto.ReadOffsetResp(bytes.NewReader(b), resp0.Version)
+	r0, err := proto.ReadVersionedOffsetResp(bytes.NewReader(b), resp0.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +624,7 @@ func TestOffsetResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r1, err := proto.ReadOffsetResp(bytes.NewReader(b1), resp1.Version)
+	r1, err := proto.ReadVersionedOffsetResp(bytes.NewReader(b1), resp1.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,7 +642,7 @@ func TestOffsetResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r2, err := proto.ReadOffsetResp(bytes.NewReader(b2), resp2.Version)
+	r2, err := proto.ReadVersionedOffsetResp(bytes.NewReader(b2), resp2.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -673,10 +670,10 @@ func TestConnectionProduceNoAck(t *testing.T) {
 		t.Fatalf("could not connect to test server: %s", err)
 	}
 	resp, err := conn.Produce(&proto.ProduceReq{
-		ClientID:     "tester",
-		Compression:  proto.CompressionNone,
-		RequiredAcks: proto.RequiredAcksNone,
-		Timeout:      time.Second,
+		RequestHeader: proto.RequestHeader{ClientID: "tester"},
+		Compression:   proto.CompressionNone,
+		RequiredAcks:  proto.RequiredAcksNone,
+		Timeout:       time.Second,
 		Topics: []proto.ProduceReqTopic{
 			{
 				Name: "first",
@@ -720,10 +717,10 @@ func TestClosedConnectionWriter(t *testing.T) {
 
 	longBytes := []byte(strings.Repeat("xxxxxxxxxxxxxxxxxxxxxx", 1000))
 	req := proto.ProduceReq{
-		ClientID:     "test-client",
-		Compression:  proto.CompressionNone,
-		RequiredAcks: proto.RequiredAcksAll,
-		Timeout:      100,
+		RequestHeader: proto.RequestHeader{ClientID: "test-client"},
+		Compression:   proto.CompressionNone,
+		RequiredAcks:  proto.RequiredAcksAll,
+		Timeout:       100,
 		Topics: []proto.ProduceReqTopic{
 			{
 				Name: "test-topic",
@@ -766,9 +763,9 @@ func TestClosedConnectionReader(t *testing.T) {
 	}
 
 	req := &proto.FetchReq{
-		ClientID:    "test-client",
-		MaxWaitTime: 100,
-		MinBytes:    0,
+		RequestHeader: proto.RequestHeader{ClientID: "test-client"},
+		MaxWaitTime:   100,
+		MinBytes:      0,
 		Topics: []proto.FetchReqTopic{
 			{
 				Name: "my-topic",
@@ -813,9 +810,9 @@ func TestConnectionReaderAfterEOF(t *testing.T) {
 	}
 
 	req := &proto.FetchReq{
-		ClientID:    "test-client",
-		MaxWaitTime: 100,
-		MinBytes:    0,
+		RequestHeader: proto.RequestHeader{ClientID: "test-client"},
+		MaxWaitTime:   100,
+		MinBytes:      0,
 		Topics: []proto.FetchReqTopic{
 			{
 				Name: "my-topic",
@@ -852,8 +849,8 @@ func TestNoServerResponse(t *testing.T) {
 		t.Fatalf("could not connect to test server: %s", err)
 	}
 	_, err = conn.Metadata(&proto.MetadataReq{
-		ClientID: "tester",
-		Topics:   []string{"first", "second"},
+		RequestHeader: proto.RequestHeader{ClientID: "tester"},
+		Topics:        []string{"first", "second"},
 	})
 	if err == nil {
 		t.Fatalf("expected timeout error, did not happen")
@@ -909,8 +906,8 @@ func TestTLSConnection(t *testing.T) {
 		t.Fatalf("could not connect to test server: %s", err)
 	}
 	resp, err := conn.Metadata(&proto.MetadataReq{
-		ClientID: "tester",
-		Topics:   []string{"first", "second"},
+		RequestHeader: proto.RequestHeader{ClientID: "tester"},
+		Topics:        []string{"first", "second"},
 	})
 	if err != nil {
 		t.Fatalf("could not fetch response: %s", err)

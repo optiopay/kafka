@@ -2,25 +2,10 @@ package proto
 
 import (
 	"bytes"
-	"io"
 	"reflect"
 	"testing"
 	"time"
 )
-
-type Request interface {
-	Bytes() ([]byte, error)
-	WriteTo(w io.Writer) (int64, error)
-}
-
-var _ Request = &MetadataReq{}
-var _ Request = &ProduceReq{}
-var _ Request = &FetchReq{}
-var _ Request = &ConsumerMetadataReq{}
-var _ Request = &OffsetReq{}
-var _ Request = &OffsetCommitReq{}
-var _ Request = &OffsetFetchReq{}
-var _ Request = &APIVersionsReq{}
 
 func testRequestSerialization(t *testing.T, r Request) {
 	var buf bytes.Buffer
@@ -40,10 +25,8 @@ func testRequestSerialization(t *testing.T, r Request) {
 
 func TestMetadataRequest(t *testing.T) {
 	req1 := &MetadataReq{
-		CorrelationID: 123,
-		ClientID:      "testcli",
+		RequestHeader: RequestHeader{CorrelationID: 123, ClientID: "testcli", Version: KafkaV0},
 		Topics:        nil,
-		Version:       KafkaV0,
 	}
 	testRequestSerialization(t, req1)
 	b, _ := req1.Bytes()
@@ -54,8 +37,7 @@ func TestMetadataRequest(t *testing.T) {
 	}
 
 	req2 := &MetadataReq{
-		CorrelationID: 123,
-		ClientID:      "testcli",
+		RequestHeader: RequestHeader{CorrelationID: 123, ClientID: "testcli"},
 		Topics:        []string{"foo", "bar"},
 	}
 	testRequestSerialization(t, req2)
@@ -72,10 +54,8 @@ func TestMetadataRequest(t *testing.T) {
 	}
 
 	req3 := &MetadataReq{
-		CorrelationID:          123,
-		ClientID:               "testcli",
+		RequestHeader:          RequestHeader{CorrelationID: 123, ClientID: "testcli", Version: KafkaV4},
 		Topics:                 nil,
-		Version:                KafkaV4,
 		AllowAutoTopicCreation: true,
 	}
 	testRequestSerialization(t, req3)
@@ -89,7 +69,7 @@ func TestMetadataRequest(t *testing.T) {
 
 func TestMetadataResponse(t *testing.T) {
 	msgb := []byte{0x0, 0x0, 0x1, 0xc7, 0x0, 0x0, 0x0, 0x7b, 0x0, 0x0, 0x0, 0x4, 0x0, 0x0, 0xc0, 0x10, 0x0, 0xb, 0x31, 0x37, 0x32, 0x2e, 0x31, 0x37, 0x2e, 0x34, 0x32, 0x2e, 0x31, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0xc0, 0x12, 0x0, 0xb, 0x31, 0x37, 0x32, 0x2e, 0x31, 0x37, 0x2e, 0x34, 0x32, 0x2e, 0x31, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0xc0, 0x11, 0x0, 0xb, 0x31, 0x37, 0x32, 0x2e, 0x31, 0x37, 0x2e, 0x34, 0x32, 0x2e, 0x31, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x13, 0x0, 0xb, 0x31, 0x37, 0x32, 0x2e, 0x31, 0x37, 0x2e, 0x34, 0x32, 0x2e, 0x31, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x3, 0x66, 0x6f, 0x6f, 0x0, 0x0, 0x0, 0x6, 0x0, 0x0, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0x0, 0x0, 0x0, 0x5, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0x0, 0x0, 0x0, 0x4, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0x0, 0x4, 0x74, 0x65, 0x73, 0x74, 0x0, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0xc0, 0x13, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x12, 0x0, 0x0, 0x0, 0x3, 0x0, 0x0, 0xc0, 0x10, 0x0, 0x0, 0xc0, 0x11, 0x0, 0x0, 0xc0, 0x12}
-	resp, err := ReadMetadataResp(bytes.NewBuffer(msgb), 0)
+	resp, err := ReadVersionedMetadataResp(bytes.NewBuffer(msgb), 0)
 	if err != nil {
 		t.Fatalf("could not read metadata response: %s", err)
 	}
@@ -152,7 +132,7 @@ func TestAPIVersionsResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := ReadAPIVersionsResp(bytes.NewBuffer(b), respOrig.Version)
+	resp, err := ReadVersionedAPIVersionsResp(bytes.NewBuffer(b), respOrig.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +182,7 @@ func TestMetadataResponseVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := ReadMetadataResp(bytes.NewBuffer(b), expectedV1.Version)
+	resp, err := ReadVersionedMetadataResp(bytes.NewBuffer(b), expectedV1.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +200,7 @@ func TestMetadataResponseVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp2, err := ReadMetadataResp(bytes.NewBuffer(b), expectedV2.Version)
+	resp2, err := ReadVersionedMetadataResp(bytes.NewBuffer(b), expectedV2.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +217,7 @@ func TestMetadataResponseVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp3, err := ReadMetadataResp(bytes.NewBuffer(b), expectedV3.Version)
+	resp3, err := ReadVersionedMetadataResp(bytes.NewBuffer(b), expectedV3.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +230,7 @@ func TestMetadataResponseVersions(t *testing.T) {
 
 func TestProduceResponse(t *testing.T) {
 	msgb1 := []byte{0x0, 0x0, 0x0, 0x22, 0x0, 0x0, 0x0, 0xf1, 0x0, 0x0, 0x0, 0x1, 0x0, 0x6, 0x66, 0x72, 0x75, 0x69, 0x74, 0x73, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x5d, 0x0, 0x3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-	resp1, err := ReadProduceResp(bytes.NewBuffer(msgb1), KafkaV0)
+	resp1, err := ReadVersionedProduceResp(bytes.NewBuffer(msgb1), KafkaV0)
 	if err != nil {
 		t.Fatalf("could not read metadata response: %s", err)
 	}
@@ -282,7 +262,7 @@ func TestProduceResponse(t *testing.T) {
 	}
 
 	msgb2 := []byte{0x0, 0x0, 0x0, 0x1f, 0x0, 0x0, 0x0, 0xf1, 0x0, 0x0, 0x0, 0x1, 0x0, 0x3, 0x66, 0x6f, 0x6f, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1}
-	resp2, err := ReadProduceResp(bytes.NewBuffer(msgb2), KafkaV0)
+	resp2, err := ReadVersionedProduceResp(bytes.NewBuffer(msgb2), KafkaV0)
 	if err != nil {
 		t.Fatalf("could not read metadata response: %s", err)
 	}
@@ -338,7 +318,7 @@ func TestProduceResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err := ReadProduceResp(bytes.NewBuffer(b), produceRespV1.Version)
+	resp, err := ReadVersionedProduceResp(bytes.NewBuffer(b), produceRespV1.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +335,7 @@ func TestProduceResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp, err = ReadProduceResp(bytes.NewBuffer(b), produceRespV2.Version)
+	resp, err = ReadVersionedProduceResp(bytes.NewBuffer(b), produceRespV2.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,8 +347,7 @@ func TestProduceResponseWithVersions(t *testing.T) {
 
 func TestFetchRequest(t *testing.T) {
 	req := &FetchReq{
-		CorrelationID: 241,
-		ClientID:      "test",
+		RequestHeader: RequestHeader{CorrelationID: 241, ClientID: "test"},
 		ReplicaID:     -1,
 		MaxWaitTime:   time.Second * 2,
 		MinBytes:      12454,
@@ -478,7 +457,7 @@ func TestFetchResponse(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		resp, err := ReadFetchResp(bytes.NewBuffer(tt.Bytes), KafkaV0)
+		resp, err := ReadVersionedFetchResp(bytes.NewBuffer(tt.Bytes), KafkaV0)
 		if err != nil {
 			t.Fatalf("could not read fetch response: %s", err)
 		}
@@ -523,7 +502,7 @@ func TestOffsetFetchWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r0, err := ReadOffsetFetchResp(bytes.NewReader(b0), respV0.Version)
+	r0, err := ReadVersionedOffsetFetchResp(bytes.NewReader(b0), respV0.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +520,7 @@ func TestOffsetFetchWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r2, err := ReadOffsetFetchResp(bytes.NewReader(b2), respV2.Version)
+	r2, err := ReadVersionedOffsetFetchResp(bytes.NewReader(b2), respV2.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,7 +538,7 @@ func TestOffsetFetchWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r3, err := ReadOffsetFetchResp(bytes.NewReader(b3), respV3.Version)
+	r3, err := ReadVersionedOffsetFetchResp(bytes.NewReader(b3), respV3.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -596,7 +575,7 @@ func TestFetchResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp0, err := ReadFetchResp(bytes.NewReader(b0), fetchRespV0.Version)
+	resp0, err := ReadVersionedFetchResp(bytes.NewReader(b0), fetchRespV0.Version)
 	if !reflect.DeepEqual(&fetchRespV0, resp0) {
 		t.Fatalf("Not equal %+#v ,  %+#v", fetchRespV0, resp0)
 	}
@@ -612,7 +591,7 @@ func TestFetchResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp1, err := ReadFetchResp(bytes.NewBuffer(b1), fetchRespV1.Version)
+	resp1, err := ReadVersionedFetchResp(bytes.NewBuffer(b1), fetchRespV1.Version)
 	if !reflect.DeepEqual(&fetchRespV1, resp1) {
 		t.Fatalf("Not equal %+#v ,  %+#v", fetchRespV1, resp1)
 	}
@@ -634,7 +613,7 @@ func TestFetchResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp4, err := ReadFetchResp(bytes.NewBuffer(b4), fetchRespV4.Version)
+	resp4, err := ReadVersionedFetchResp(bytes.NewBuffer(b4), fetchRespV4.Version)
 	if !reflect.DeepEqual(&fetchRespV4, resp4) {
 		t.Fatalf("Not equal %+#v ,  %+#v", fetchRespV4, resp4)
 	}
@@ -651,7 +630,7 @@ func TestFetchResponseWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resp5, err := ReadFetchResp(bytes.NewBuffer(b5), fetchRespV5.Version)
+	resp5, err := ReadVersionedFetchResp(bytes.NewBuffer(b5), fetchRespV5.Version)
 	if !reflect.DeepEqual(&fetchRespV5, resp5) {
 		t.Fatalf("Not equal %+#v ,  %+#v", fetchRespV5, resp5)
 	}
@@ -675,7 +654,7 @@ func TestConsumerMetadataWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r0, err := ReadConsumerMetadataResp(bytes.NewReader(b0), respV0.Version)
+	r0, err := ReadVersionedConsumerMetadataResp(bytes.NewReader(b0), respV0.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,7 +673,7 @@ func TestConsumerMetadataWithVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r1, err := ReadConsumerMetadataResp(bytes.NewReader(b1), respV1.Version)
+	r1, err := ReadVersionedConsumerMetadataResp(bytes.NewReader(b1), respV1.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -726,7 +705,7 @@ func TestOffsetCommitResponseWithVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp0, err := ReadOffsetCommitResp(bytes.NewReader(b0), respV0.Version)
+	resp0, err := ReadVersionedOffsetCommitResp(bytes.NewReader(b0), respV0.Version)
 
 	if !reflect.DeepEqual(&respV0, resp0) {
 		t.Fatalf("Not equal %+#v ,  %+#v", respV0, resp0)
@@ -740,7 +719,7 @@ func TestOffsetCommitResponseWithVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp3, err := ReadOffsetCommitResp(bytes.NewReader(b3), respV3.Version)
+	resp3, err := ReadVersionedOffsetCommitResp(bytes.NewReader(b3), respV3.Version)
 
 	if !reflect.DeepEqual(respV3, *resp3) {
 		t.Fatalf("Not equal \n%+#v ,  \n%+#v", respV3, *resp3)
@@ -764,7 +743,7 @@ func TestAPIVersionsResponseWithVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp0, err := ReadAPIVersionsResp(bytes.NewReader(b0), respV0.Version)
+	resp0, err := ReadVersionedAPIVersionsResp(bytes.NewReader(b0), respV0.Version)
 
 	if !reflect.DeepEqual(respV0, *resp0) {
 		t.Fatalf("Not equal \n %+#v  ,  \n %+#v", respV0, *resp0)
@@ -778,7 +757,7 @@ func TestAPIVersionsResponseWithVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp1, err := ReadAPIVersionsResp(bytes.NewReader(b1), respV1.Version)
+	resp1, err := ReadVersionedAPIVersionsResp(bytes.NewReader(b1), respV1.Version)
 
 	if !reflect.DeepEqual(respV1, *resp1) {
 		t.Fatalf("Not equal \n%+#v ,  \n%+#v", respV1, *resp1)
@@ -859,8 +838,7 @@ func BenchmarkProduceRequestMarshal(b *testing.B) {
 
 	}
 	req := &ProduceReq{
-		CorrelationID: 241,
-		ClientID:      "test",
+		RequestHeader: RequestHeader{CorrelationID: 241, ClientID: "test"},
 		Compression:   CompressionNone,
 		RequiredAcks:  RequiredAcksAll,
 		Timeout:       time.Second,
@@ -908,7 +886,7 @@ func BenchmarkProduceResponseUnmarshal(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if _, err := ReadProduceResp(bytes.NewBuffer(raw), resp.Version); err != nil {
+		if _, err := ReadVersionedProduceResp(bytes.NewBuffer(raw), resp.Version); err != nil {
 			b.Fatalf("could not deserialize messages: %s", err)
 		}
 	}
@@ -916,8 +894,7 @@ func BenchmarkProduceResponseUnmarshal(b *testing.B) {
 
 func BenchmarkFetchRequestMarshal(b *testing.B) {
 	req := &FetchReq{
-		CorrelationID: 241,
-		ClientID:      "test",
+		RequestHeader: RequestHeader{CorrelationID: 241, ClientID: "test"},
 		MaxWaitTime:   time.Second * 2,
 		MinBytes:      12454,
 		Topics: []FetchReqTopic{
@@ -977,7 +954,7 @@ func BenchmarkFetchResponseUnmarshal(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		if _, err := ReadFetchResp(bytes.NewBuffer(raw), KafkaV0); err != nil {
+		if _, err := ReadVersionedFetchResp(bytes.NewBuffer(raw), KafkaV0); err != nil {
 			b.Fatalf("could not deserialize messages: %s", err)
 		}
 	}
