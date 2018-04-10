@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
@@ -365,14 +366,129 @@ func (w *slicewriter) Slice() []byte {
 	return w.buf[:w.pos]
 }
 
+// readRecordBatch reasd and return record batch from the stream
+// RecordBatch replace MessageSet for kafka >= 0.11
+
+// Because kafka is sending message set directly from the drive, it might cut
+// off part of the last message. This also means that the last message can be
+// shorter than the header is saying. In such case just ignore the last
+// malformed message from the set and returned earlier data.
+
+func readRecordBatch(r io.Reader, size int32) (*RecordBatch, error) {
+	rd := io.LimitReader(r, int64(size))
+	dec := NewDecoder(rd)
+
+	rb := &RecordBatch{}
+	rb.FirstOffset = dec.DecodeInt64()
+	rb.Length = dec.DecodeInt32()
+	rb.PartitionLeaderEpoch = dec.DecodeInt32()
+
+	// Magic byte. It represents a version of a message.
+	// But we've already determinated that this is a record batch
+	// and since there is only one version of record batch exists, we can just ignore it.
+	_ = dec.DecodeInt8()
+
+	rb.CRC = dec.DecodeInt32()
+	rb.Attributes = dec.DecodeInt16()
+	rb.LastOffsetDelta = dec.DecodeInt32()
+
+	rb.FirstTimestamp = dec.DecodeInt64()
+	rb.MaxTimestamp = dec.DecodeInt64()
+	rb.ProducerId = dec.DecodeInt64()
+	rb.ProducerEpoch = dec.DecodeInt16()
+	rb.FirstSequence = dec.DecodeInt32()
+
+	slen, err := dec.DecodeArrayLen()
+	if err != nil {
+		return nil, err
+	}
+
+	allZipped, err := ioutil.ReadAll(r)
+	if err != nil {
+		panic("aaa")
+	}
+	r = bytes.NewReader(allZipped)
+
+	switch rb.Compression() {
+	case CompressionNone:
+		break
+	case CompressionGzip:
+		r, err = gzip.NewReader(r)
+		if err != nil {
+			return nil, err
+		}
+		allUnzipped, err := ioutil.ReadAll(r)
+		if err != nil {
+			return nil, err
+		}
+		r = bytes.NewReader(allUnzipped)
+
+	case CompressionSnappy:
+		var err error
+		val, err := ioutil.ReadAll(r)
+		if err != nil {
+			return nil, err
+		}
+		decoded, err := snappyDecode(val)
+		if err != nil {
+			return nil, err
+		}
+		r = bytes.NewReader(decoded)
+	default:
+		return nil, errors.New("Unknown compression")
+	}
+
+	if dec.Err() != nil {
+		return nil, dec.Err()
+	}
+
+	rb.Records = make([]*Record, 0, slen)
+
+	for i := 0; i < slen; i++ {
+		rec, err := readRecord(r)
+		if (err == ErrNotEnoughData || err == io.EOF || err == io.ErrUnexpectedEOF) && len(rb.Records) > 0 {
+			// Think that it was partial record and we just ignore it
+			return rb, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		rb.Records = append(rb.Records, rec)
+	}
+	return rb, nil
+}
+
+func readRecord(r io.Reader) (*Record, error) {
+	dec := NewDecoder(r)
+	rec := &Record{}
+	rec.Length = dec.DecodeVarInt()
+	rec.Attributes = dec.DecodeInt8()
+	rec.TimestampDelta = dec.DecodeVarInt()
+	rec.OffsetDelta = dec.DecodeVarInt()
+
+	rec.Key = dec.DecodeVarBytes()
+	rec.Value = dec.DecodeVarBytes()
+
+	len, err := dec.DecodeArrayLen()
+	if err != nil {
+		return nil, err
+	}
+
+	rec.Headers = make([]RecordHeader, len)
+	for i := range rec.Headers {
+		rec.Headers[i].Key = dec.DecodeVarString()
+		rec.Headers[i].Value = dec.DecodeVarBytes()
+	}
+	return rec, nil
+}
+
 // readMessageSet reads and return messages from the stream.
 // The size is known before a message set is decoded.
 // Because kafka is sending message set directly from the drive, it might cut
 // off part of the last message. This also means that the last message can be
 // shorter than the header is saying. In such case just ignore the last
 // malformed message from the set and returned earlier data.
-// The version refers to the kafka version used for the requests and responses.
-func readMessageSet(r io.Reader, size int32, version int16) ([]*Message, error) {
+func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 	if size < 0 || size > maxParseBufSize {
 		return nil, messageSizeError(int(size))
 	}
@@ -447,11 +563,11 @@ func readMessageSet(r io.Reader, size int32, version int16) ([]*Message, error) 
 		}
 
 		// magic byte
-		_ = msgdec.DecodeInt8()
+		messageVersion := MessageVersion(msgdec.DecodeInt8())
 
 		attributes := msgdec.DecodeInt8()
 
-		if version >= KafkaV1 {
+		if messageVersion == MessageV1 {
 			// timestamp
 			_ = msgdec.DecodeInt64()
 		}
@@ -489,7 +605,7 @@ func readMessageSet(r io.Reader, size int32, version int16) ([]*Message, error) 
 					return nil, err
 				}
 			}
-			msgs, err := readMessageSet(bytes.NewReader(decoded), int32(len(decoded)), version)
+			msgs, err := readMessageSet(bytes.NewReader(decoded), int32(len(decoded)))
 			if err != nil {
 				return nil, err
 			}
@@ -951,6 +1067,17 @@ type FetchRespTopic struct {
 	Partitions []FetchRespPartition
 }
 
+// Message version define which format of messages
+// is using in this particular Produce/Response
+// MessageV0  and MessageV1 indicate usage of MessageSet
+// MessageV3 indicate usage of RecordBatch
+// See https://cwiki.apache.org/confluence/display/KAFKA/A+Guide+To+The+Kafka+Protocol#AGuideToTheKafkaProtocol-Messagesets
+type MessageVersion int8
+
+const MessageV0 MessageVersion = 0
+const MessageV1 MessageVersion = 1
+const MessageV2 MessageVersion = 2
+
 type FetchRespPartition struct {
 	ID                  int32
 	Err                 error
@@ -959,11 +1086,48 @@ type FetchRespPartition struct {
 	LogStartOffset      int64
 	AbortedTransactions []FetchRespAbortedTransaction
 	Messages            []*Message
+	MessageVersion      MessageVersion
+	RecordBatch         *RecordBatch
 }
 
 type FetchRespAbortedTransaction struct {
 	ProducerID  int64
 	FirstOffset int64
+}
+
+type RecordBatch struct {
+	FirstOffset          int64
+	Length               int32
+	PartitionLeaderEpoch int32
+	Magic                int8
+	CRC                  int32
+	Attributes           int16
+	LastOffsetDelta      int32
+	FirstTimestamp       int64
+	MaxTimestamp         int64
+	ProducerId           int64
+	ProducerEpoch        int16
+	FirstSequence        int32
+	Records              []*Record
+}
+
+type Record struct {
+	Length         int64
+	Attributes     int8
+	TimestampDelta int64
+	OffsetDelta    int64
+	Key            []byte
+	Value          []byte
+	Headers        []RecordHeader
+}
+
+type RecordHeader struct {
+	Key   string
+	Value []byte
+}
+
+func (rb *RecordBatch) Compression() Compression {
+	return Compression(rb.Attributes & 3)
 }
 
 func (r *FetchResp) Bytes() ([]byte, error) {
@@ -1085,13 +1249,37 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 			if dec.Err() != nil {
 				return nil, dec.Err()
 			}
-			if part.Messages, err = readMessageSet(r, msgSetSize, 0); err != nil {
-				return nil, err
-			}
-			for _, msg := range part.Messages {
-				msg.Topic = topic.Name
-				msg.Partition = part.ID
-				msg.TipOffset = part.TipOffset
+
+			if msgSetSize > 0 {
+				// try to figure out what is next - MessageSet or RecordBatch
+
+				br := bufio.NewReader(r)
+				b, err := br.Peek(17)
+				if err != nil {
+					return nil, err
+				}
+				part.MessageVersion = MessageVersion(int8(b[16]))
+				r = br
+				dec = NewDecoder(r)
+
+				if part.MessageVersion < MessageV2 {
+					// Response contains MessageSet
+					if part.Messages, err = readMessageSet(r, msgSetSize); err != nil {
+						return nil, err
+					}
+					for _, msg := range part.Messages {
+						msg.Topic = topic.Name
+						msg.Partition = part.ID
+						msg.TipOffset = part.TipOffset
+					}
+				} else if part.MessageVersion == MessageV2 {
+					// Response contains RecordBatch
+					if part.RecordBatch, err = readRecordBatch(br, msgSetSize); err != nil {
+						return nil, err
+					}
+				} else {
+					return nil, errors.New("Incorrect message byte")
+				}
 			}
 		}
 	}
@@ -1722,7 +1910,7 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 				return nil, dec.Err()
 			}
 			var err error
-			if part.Messages, err = readMessageSet(r, msgSetSize, req.Version); err != nil {
+			if part.Messages, err = readMessageSet(r, msgSetSize); err != nil {
 				return nil, err
 			}
 		}

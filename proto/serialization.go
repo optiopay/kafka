@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -155,7 +156,12 @@ func (d *decoder) DecodeString() string {
 func (d *decoder) DecodeArrayLen() (int, error) {
 	len := int(d.DecodeInt32())
 
-	if len < 0 || len > maxParseBufSize {
+	// Sometime kafka may send -1 as size of array.
+	if len == -1 {
+		return 0, nil
+	}
+
+	if len > maxParseBufSize {
 		return 0, ErrInvalidArrayLen
 	}
 
@@ -189,6 +195,77 @@ func (d *decoder) DecodeBytes() []byte {
 		return nil
 	}
 	return b
+}
+
+func (d *decoder) DecodeVarInt() int64 {
+	// have to use wrapper because
+	// ReadVarint require ByteReader
+	r2 := bufio.NewReader(d.r)
+	res, err := binary.ReadVarint(r2)
+	d.r = r2
+	if err != nil {
+		d.err = err
+	}
+	return res
+}
+
+func (d *decoder) DecodeVarBytes() []byte {
+	slen := d.DecodeVarInt()
+
+	if slen < 1 {
+		return nil
+	}
+
+	b, err := allocParseBuf(int(slen))
+	if err != nil {
+		d.err = err
+		return nil
+	}
+	n, err := io.ReadFull(d.r, b)
+	if err != nil {
+		d.err = err
+		return nil
+	}
+	if n != int(slen) {
+		d.err = ErrNotEnoughData
+		return nil
+	}
+	return b
+}
+
+func (d *decoder) DecodeVarString() string {
+	if d.err != nil {
+		return ""
+	}
+	slen := d.DecodeVarInt()
+	if d.err != nil {
+		return ""
+	}
+	if slen < 1 {
+		return ""
+	}
+
+	var b []byte
+	if int(slen) > len(d.buf) {
+		var err error
+		b, err = allocParseBuf(int(slen))
+		if err != nil {
+			d.err = err
+			return ""
+		}
+	} else {
+		b = d.buf[:int(slen)]
+	}
+	n, err := io.ReadFull(d.r, b)
+	if err != nil {
+		d.err = err
+		return ""
+	}
+	if n != int(slen) {
+		d.err = ErrNotEnoughData
+		return ""
+	}
+	return string(b)
 }
 
 func (d *decoder) Err() error {

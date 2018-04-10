@@ -456,7 +456,7 @@ func TestConnectionFetch(t *testing.T) {
 						ID:        6,
 						Err:       proto.ErrUnknownTopicOrPartition,
 						TipOffset: -1,
-						Messages:  []*proto.Message{},
+						Messages:  nil,
 					},
 				},
 			},
