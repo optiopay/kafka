@@ -12,8 +12,7 @@ import (
 
 func TestProduceRequest(t *testing.T) {
 	req := &ProduceReq{
-		CorrelationID: 241,
-		ClientID:      "test",
+		RequestHeader: RequestHeader{CorrelationID: 241, ClientID: "test"},
 		RequiredAcks:  RequiredAcksAll,
 		Timeout:       time.Second,
 		Topics: []ProduceReqTopic{
