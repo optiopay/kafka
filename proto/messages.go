@@ -403,12 +403,6 @@ func readRecordBatch(r io.Reader, size int32) (*RecordBatch, error) {
 		return nil, err
 	}
 
-	allZipped, err := ioutil.ReadAll(r)
-	if err != nil {
-		panic("aaa")
-	}
-	r = bytes.NewReader(allZipped)
-
 	switch rb.Compression() {
 	case CompressionNone:
 		break
