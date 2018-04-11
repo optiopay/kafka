@@ -373,7 +373,6 @@ func (w *slicewriter) Slice() []byte {
 // off part of the last message. This also means that the last message can be
 // shorter than the header is saying. In such case just ignore the last
 // malformed message from the set and returned earlier data.
-
 func readRecordBatch(r io.Reader, size int32) (*RecordBatch, error) {
 	rd := io.LimitReader(r, int64(size))
 	dec := NewDecoder(rd)
@@ -389,6 +388,11 @@ func readRecordBatch(r io.Reader, size int32) (*RecordBatch, error) {
 	_ = dec.DecodeInt8()
 
 	rb.CRC = dec.DecodeInt32()
+
+	crc := crc32.New(crc32.MakeTable(crc32.Castagnoli))
+	r = io.TeeReader(rd, crc)
+	dec = NewDecoder(r)
+
 	rb.Attributes = dec.DecodeInt16()
 	rb.LastOffsetDelta = dec.DecodeInt32()
 
@@ -448,6 +452,9 @@ func readRecordBatch(r io.Reader, size int32) (*RecordBatch, error) {
 			return nil, err
 		}
 		rb.Records = append(rb.Records, rec)
+	}
+	if uint32(rb.CRC) != crc.Sum32() {
+		return nil, fmt.Errorf("Wrong CRC32")
 	}
 	return rb, nil
 }
