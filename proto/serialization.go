@@ -1,7 +1,6 @@
 package proto
 
 import (
-	"bufio"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -197,12 +196,20 @@ func (d *decoder) DecodeBytes() []byte {
 	return b
 }
 
+type byteReader struct {
+	r io.Reader
+}
+
+func (br byteReader) ReadByte() (byte, error) {
+	buf := make([]byte, 1)
+	_, err := io.ReadFull(br.r, buf)
+	return buf[0], err
+}
+
 func (d *decoder) DecodeVarInt() int64 {
 	// have to use wrapper because
 	// ReadVarint require ByteReader
-	r2 := bufio.NewReader(d.r)
-	res, err := binary.ReadVarint(r2)
-	d.r = r2
+	res, err := binary.ReadVarint(byteReader{d.r})
 	if err != nil {
 		d.err = err
 	}
