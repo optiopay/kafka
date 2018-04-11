@@ -1188,7 +1188,10 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 
 	resp.Version = version
 
-	dec := NewDecoder(r)
+	//Have to wrap because we use Peek later
+	br := bufio.NewReader(r)
+	dec := NewDecoder(br)
+	r = nil // just to prevent later usage
 
 	// total message size
 	_ = dec.DecodeInt32()
@@ -1247,18 +1250,15 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 			if msgSetSize > 0 {
 				// try to figure out what is next - MessageSet or RecordBatch
 
-				br := bufio.NewReader(r)
 				b, err := br.Peek(17)
 				if err != nil {
 					return nil, err
 				}
 				part.MessageVersion = MessageVersion(int8(b[16]))
-				r = br
-				dec = NewDecoder(r)
 
 				if part.MessageVersion < MessageV2 {
 					// Response contains MessageSet
-					if part.Messages, err = readMessageSet(r, msgSetSize); err != nil {
+					if part.Messages, err = readMessageSet(br, msgSetSize); err != nil {
 						return nil, err
 					}
 					for _, msg := range part.Messages {
