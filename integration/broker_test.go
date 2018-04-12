@@ -230,7 +230,6 @@ func TestNewTopic(t *testing.T) {
 
 	bconf := kafka.NewBrokerConf("producer-new-topic")
 	bconf.Logger = &testLogger{t}
-	bconf.AllowTopicCreation = true
 	addrs, err := cluster.KafkaAddrs()
 	if err != nil {
 		t.Fatalf("cannot get kafka address: %s", err)
@@ -240,6 +239,22 @@ func TestNewTopic(t *testing.T) {
 		t.Fatalf("cannot connect to cluster (%q): %s", addrs, err)
 	}
 	defer broker.Close()
+
+	topicInfo := proto.TopicInfo{
+		Topic:             topic,
+		NumPartitions:     1,
+		ReplicationFactor: 1,
+	}
+
+	resp, err := broker.CreateTopic([]proto.TopicInfo{topicInfo})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(resp.TopicErrors) > 0 {
+		t.Fatalf("Got error on topic creations %#+v", resp.TopicErrors)
+	}
 
 	m := proto.Message{
 		Value: []byte("Test message"),
