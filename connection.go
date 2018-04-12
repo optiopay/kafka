@@ -381,15 +381,26 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		reqTopic := &req.Topics[ti]
 		for pi := range topic.Partitions {
 			partition := &topic.Partitions[pi]
-			reqPartition := &reqTopic.Partitions[pi]
+			requestedOffset := reqTopic.Partitions[pi].FetchOffset
 			i := 0
-			for _, msg := range partition.Messages {
-				if msg.Offset >= reqPartition.FetchOffset {
-					break
+			if partition.MessageVersion < 2 {
+				for _, msg := range partition.Messages {
+					if msg.Offset >= requestedOffset {
+						break
+					}
+					i++
 				}
-				i++
+				partition.Messages = partition.Messages[i:]
+			} else {
+				firstOffset := partition.RecordBatch.FirstOffset
+				for _, rec := range partition.RecordBatch.Records {
+					if firstOffset+rec.OffsetDelta >= requestedOffset {
+						break
+					}
+					i++
+				}
+				partition.RecordBatch.Records = partition.RecordBatch.Records[i:]
 			}
-			partition.Messages = partition.Messages[i:]
 		}
 	}
 	return resp, nil

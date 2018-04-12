@@ -1210,7 +1210,30 @@ consumeRetryLoop:
 					c.conn = nil
 					continue consumeRetryLoop
 				}
-				return part.Messages, part.Err
+				if part.MessageVersion < 2 {
+					return part.Messages, part.Err
+				} else {
+					// In the kafka > 0.11 MessageSet was replaced
+					// with a new structure called RecordBatch
+					// and Message was replaced with Record
+					// In order to keep API for Consumer
+					// here we repack Records to Messages
+
+					messages := make([]*proto.Message, 0, len(part.RecordBatch.Records))
+					for _, r := range part.RecordBatch.Records {
+						m := &proto.Message{
+							Key:       r.Key,
+							Value:     r.Value,
+							Offset:    part.RecordBatch.FirstOffset + r.OffsetDelta,
+							Topic:     topic.Name,
+							Partition: part.ID,
+							TipOffset: part.TipOffset,
+						}
+						messages = append(messages, m)
+					}
+
+					return messages, part.Err
+				}
 			}
 		}
 		return nil, errors.New("incomplete fetch response")
