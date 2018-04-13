@@ -345,25 +345,9 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 // response.
 // Calling this method on closed connection will always return ErrClosed.
 func (c *connection) CreateTopic(req *proto.CreateTopicsReq) (*proto.CreateTopicsResp, error) {
-	var ok bool
-	if req.CorrelationID, ok = <-c.nextID; !ok {
-		return nil, c.stopErr
-	}
-
-	respc, err := c.respWaiter(req.CorrelationID)
+	b, err := c.sendRequest(req)
 	if err != nil {
-		c.logger.Error("msg", "failed waiting for response", "error", err)
-		return nil, fmt.Errorf("wait for response: %s", err)
-	}
-
-	if _, err := req.WriteTo(c.rw); err != nil {
-		c.logger.Error("msg", "cannot write", "error", err)
-		c.releaseWaiter(req.CorrelationID)
 		return nil, err
-	}
-	b, ok := <-respc
-	if !ok {
-		return nil, c.stopErr
 	}
 	return proto.ReadCreateTopicsResp(bytes.NewReader(b))
 }
