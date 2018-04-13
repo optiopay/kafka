@@ -246,14 +246,16 @@ func TestNewTopic(t *testing.T) {
 		ReplicationFactor: 1,
 	}
 
-	resp, err := broker.CreateTopic([]proto.TopicInfo{topicInfo})
+	resp, err := broker.CreateTopic([]proto.TopicInfo{topicInfo}, 10*time.Second, false)
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(resp.TopicErrors) > 0 {
-		t.Fatalf("Got error on topic creations %#+v", resp.TopicErrors)
+	for _, e := range resp.TopicErrors {
+		if e.ErrorCode != 0 {
+			t.Fatalf("Got error on topic creation %#+v", e)
+		}
 	}
 
 	m := proto.Message{
