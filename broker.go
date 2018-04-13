@@ -273,7 +273,7 @@ func (b *Broker) Metadata() (*proto.MetadataResp, error) {
 }
 
 // CreateTopic request topic creation
-func (b *Broker) CreateTopic(topics []proto.TopicInfo) (*proto.CreateTopicsResp, error) {
+func (b *Broker) CreateTopic(topics []proto.TopicInfo, timeout time.Duration, validateOnly bool) (*proto.CreateTopicsResp, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	var resp *proto.CreateTopicsResp
@@ -281,7 +281,9 @@ func (b *Broker) CreateTopic(topics []proto.TopicInfo) (*proto.CreateTopicsResp,
 		fmt.Printf("\x1B[32;1m got connection\x1B[0m = %+v\n", c)
 		var err error
 		req := proto.CreateTopicsReq{
+			Timeout:              timeout,
 			CreateTopicsRequests: topics,
+			ValidateOnly:         validateOnly,
 		}
 		resp, err = c.CreateTopic(&req)
 		fmt.Println("\x1B[32;1m GOT RESP\x1B[0m")
