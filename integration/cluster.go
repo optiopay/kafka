@@ -183,7 +183,7 @@ func (cluster *KafkaCluster) ContainerNetworkIP(container Container, network str
 	inspectCmd, stdout, stderr := cluster.cmd("docker", "inspect", ".NetworkSettings.Networks."+network+".IPAddress", container.ID)
 	err := inspectCmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("Cannot inspect %s: %s, %s", err, stderr)
+		return "", fmt.Errorf("Cannot inspect %s: %s, %s", container, err, stderr)
 	}
 	cleanIP := strings.TrimSpace(stdout.String())
 	return cleanIP, nil
