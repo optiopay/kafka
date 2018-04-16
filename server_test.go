@@ -176,7 +176,7 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 	switch req := request.(type) {
 	case *proto.FetchReq:
 		resp := &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics:        make([]proto.FetchRespTopic, len(req.Topics)),
 		}
 		for ti, topic := range req.Topics {
@@ -196,7 +196,7 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		return resp
 	case *proto.ProduceReq:
 		resp := &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 		}
 		resp.Topics = make([]proto.ProduceRespTopic, len(req.Topics))
 		for ti, topic := range req.Topics {
@@ -227,7 +227,7 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		}
 
 		return &proto.OffsetResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics:        topics,
 		}
 	case *proto.MetadataReq:
@@ -243,7 +243,7 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 			host = "localhost"
 		}
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: host, Port: int32(port)},
 			},
@@ -257,7 +257,7 @@ func (srv *Server) defaultRequestHandler(request Serializable) Serializable {
 		panic("not implemented")
 	case *proto.APIVersionsReq:
 		return &proto.APIVersionsResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			APIVersions: []proto.SupportedVersion{
 				proto.SupportedVersion{APIKey: proto.ProduceReqKind, MinVersion: 0, MaxVersion: 0},
 				proto.SupportedVersion{APIKey: proto.FetchReqKind, MinVersion: 0, MaxVersion: 0},

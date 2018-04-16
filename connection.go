@@ -280,13 +280,13 @@ func (c *connection) Close() error {
 }
 
 func (c *connection) sendRequest(req proto.Request) ([]byte, error) {
-	req.SetVersion(c.getBestVersion(req.Kind()))
+	proto.SetVersion(req.GetHeader(), c.getBestVersion(req.Kind()))
 	var ok bool
 	var correlationID int32
 	if correlationID, ok = <-c.nextID; !ok {
 		return nil, c.stopErr
 	}
-	req.SetCorrelationID(correlationID)
+	proto.SetCorrelationID(req.GetHeader(), correlationID)
 
 	respc, err := c.respWaiter(req.GetCorrelationID())
 	if err != nil {
@@ -312,9 +312,9 @@ func (c *connection) sendRequestWithoutAcks(req proto.Request) error {
 	if correlationID, ok = <-c.nextID; !ok {
 		return c.stopErr
 	}
-	req.SetCorrelationID(correlationID)
+	proto.SetCorrelationID(req.GetHeader(), correlationID)
 
-	req.SetVersion(c.getBestVersion(req.Kind()))
+	proto.SetVersion(req.GetHeader(), c.getBestVersion(req.Kind()))
 
 	_, err := req.WriteTo(c.rw)
 	return err
@@ -327,7 +327,7 @@ func (c *connection) APIVersions(req *proto.APIVersionsReq) (*proto.APIVersionsR
 	if err != nil {
 		return nil, err
 	}
-	return proto.ReadVersionedAPIVersionsResp(bytes.NewReader(b), req.Version)
+	return proto.ReadVersionedAPIVersionsResp(bytes.NewReader(b), req.GetVersion())
 }
 
 // Metadata sends given metadata request to kafka node and returns related
@@ -338,7 +338,7 @@ func (c *connection) Metadata(req *proto.MetadataReq) (*proto.MetadataResp, erro
 	if err != nil {
 		return nil, err
 	}
-	return proto.ReadVersionedMetadataResp(bytes.NewReader(b), req.Version)
+	return proto.ReadVersionedMetadataResp(bytes.NewReader(b), req.GetVersion())
 }
 
 // CreateTopic sends given createTopic request to kafka node and returns related
@@ -367,7 +367,7 @@ func (c *connection) Produce(req *proto.ProduceReq) (*proto.ProduceResp, error) 
 		return nil, err
 	}
 
-	return proto.ReadVersionedProduceResp(bytes.NewReader(b), req.Version)
+	return proto.ReadVersionedProduceResp(bytes.NewReader(b), req.GetVersion())
 }
 
 // Fetch sends given fetch request to kafka node and returns related response.
@@ -378,7 +378,7 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		return nil, err
 	}
 
-	resp, err := proto.ReadVersionedFetchResp(bytes.NewReader(b), req.Version)
+	resp, err := proto.ReadVersionedFetchResp(bytes.NewReader(b), req.GetVersion())
 	if err != nil {
 		return nil, err
 	}
@@ -428,7 +428,7 @@ func (c *connection) Offset(req *proto.OffsetReq) (*proto.OffsetResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	return proto.ReadVersionedOffsetResp(bytes.NewReader(b), req.Version)
+	return proto.ReadVersionedOffsetResp(bytes.NewReader(b), req.GetVersion())
 }
 
 func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.ConsumerMetadataResp, error) {
@@ -436,7 +436,7 @@ func (c *connection) ConsumerMetadata(req *proto.ConsumerMetadataReq) (*proto.Co
 	if err != nil {
 		return nil, err
 	}
-	return proto.ReadVersionedConsumerMetadataResp(bytes.NewReader(b), req.Version)
+	return proto.ReadVersionedConsumerMetadataResp(bytes.NewReader(b), req.GetVersion())
 }
 
 func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetCommitResp, error) {
@@ -444,7 +444,7 @@ func (c *connection) OffsetCommit(req *proto.OffsetCommitReq) (*proto.OffsetComm
 	if err != nil {
 		return nil, err
 	}
-	return proto.ReadVersionedOffsetCommitResp(bytes.NewReader(b), req.Version)
+	return proto.ReadVersionedOffsetCommitResp(bytes.NewReader(b), req.GetVersion())
 }
 
 func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchResp, error) {
@@ -452,5 +452,5 @@ func (c *connection) OffsetFetch(req *proto.OffsetFetchReq) (*proto.OffsetFetchR
 	if err != nil {
 		return nil, err
 	}
-	return proto.ReadVersionedOffsetFetchResp(bytes.NewReader(b), req.Version)
+	return proto.ReadVersionedOffsetFetchResp(bytes.NewReader(b), req.GetVersion())
 }

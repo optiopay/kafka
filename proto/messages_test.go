@@ -25,7 +25,7 @@ func testRequestSerialization(t *testing.T, r Request) {
 
 func TestMetadataRequest(t *testing.T) {
 	req1 := &MetadataReq{
-		RequestHeader: RequestHeader{CorrelationID: 123, ClientID: "testcli", Version: KafkaV0},
+		RequestHeader: RequestHeader{correlationID: 123, ClientID: "testcli", version: KafkaV0},
 		Topics:        nil,
 	}
 	testRequestSerialization(t, req1)
@@ -37,7 +37,7 @@ func TestMetadataRequest(t *testing.T) {
 	}
 
 	req2 := &MetadataReq{
-		RequestHeader: RequestHeader{CorrelationID: 123, ClientID: "testcli"},
+		RequestHeader: RequestHeader{correlationID: 123, ClientID: "testcli"},
 		Topics:        []string{"foo", "bar"},
 	}
 	testRequestSerialization(t, req2)
@@ -54,7 +54,7 @@ func TestMetadataRequest(t *testing.T) {
 	}
 
 	req3 := &MetadataReq{
-		RequestHeader:          RequestHeader{CorrelationID: 123, ClientID: "testcli", Version: KafkaV4},
+		RequestHeader:          RequestHeader{correlationID: 123, ClientID: "testcli", version: KafkaV4},
 		Topics:                 nil,
 		AllowAutoTopicCreation: true,
 	}
@@ -347,7 +347,7 @@ func TestProduceResponseWithVersions(t *testing.T) {
 
 func TestFetchRequest(t *testing.T) {
 	req := &FetchReq{
-		RequestHeader: RequestHeader{CorrelationID: 241, ClientID: "test"},
+		RequestHeader: RequestHeader{correlationID: 241, ClientID: "test"},
 		ReplicaID:     -1,
 		MaxWaitTime:   time.Second * 2,
 		MinBytes:      12454,
@@ -975,7 +975,7 @@ func TestCreateTopics(t *testing.T) {
 		ValidateOnly: false,
 	}
 
-	req.CorrelationID = 3
+	req.correlationID = 3
 
 	topicInfo := TopicInfo{
 		Topic:              "topic",
@@ -1132,7 +1132,7 @@ func TestVersionedCreateTopicRequest(t *testing.T) {
 	}
 
 	reqV1 := reqV0
-	reqV1.Version = KafkaV1
+	reqV1.version = KafkaV1
 	reqV1.ValidateOnly = true
 
 	b, err = reqV1.Bytes()
@@ -1149,7 +1149,7 @@ func TestVersionedCreateTopicRequest(t *testing.T) {
 	}
 
 	reqV2 := reqV0
-	reqV2.Version = KafkaV2
+	reqV2.version = KafkaV2
 	reqV2.ValidateOnly = true
 
 	b, err = reqV2.Bytes()
@@ -1242,7 +1242,7 @@ func BenchmarkProduceRequestMarshal(b *testing.B) {
 
 	}
 	req := &ProduceReq{
-		RequestHeader: RequestHeader{CorrelationID: 241, ClientID: "test"},
+		RequestHeader: RequestHeader{correlationID: 241, ClientID: "test"},
 		Compression:   CompressionNone,
 		RequiredAcks:  RequiredAcksAll,
 		Timeout:       time.Second,
@@ -1298,7 +1298,7 @@ func BenchmarkProduceResponseUnmarshal(b *testing.B) {
 
 func BenchmarkFetchRequestMarshal(b *testing.B) {
 	req := &FetchReq{
-		RequestHeader: RequestHeader{CorrelationID: 241, ClientID: "test"},
+		RequestHeader: RequestHeader{correlationID: 241, ClientID: "test"},
 		MaxWaitTime:   time.Second * 2,
 		MinBytes:      12454,
 		Topics: []FetchReqTopic{

@@ -66,10 +66,9 @@ const (
 
 type Request interface {
 	Kind() int16
+	GetHeader() *RequestHeader
 	GetVersion() int16
-	SetVersion(version int16)
 	GetCorrelationID() int32
-	SetCorrelationID(corID int32)
 	GetClientID() string
 	SetClientID(cliendID string)
 	io.WriterTo
@@ -86,25 +85,30 @@ var _ Request = &ConsumerMetadataReq{}
 var _ Request = &APIVersionsReq{}
 var _ Request = &CreateTopicsReq{}
 
+func SetVersion(header *RequestHeader, version int16) {
+	header.version = version
+}
+
+func SetCorrelationID(header *RequestHeader, correlationID int32) {
+	header.correlationID = correlationID
+}
+
 type RequestHeader struct {
-	Version       int16
-	CorrelationID int32
+	version       int16
+	correlationID int32
 	ClientID      string
 }
 
-func (h *RequestHeader) GetVersion() int16 {
-	return h.Version
+func (h *RequestHeader) GetHeader() *RequestHeader {
+	return h
 }
 
-func (h *RequestHeader) SetVersion(version int16) {
-	h.Version = version
+func (h *RequestHeader) GetVersion() int16 {
+	return h.version
 }
 
 func (h *RequestHeader) GetCorrelationID() int32 {
-	return h.CorrelationID
-}
-func (h *RequestHeader) SetCorrelationID(corID int32) {
-	h.CorrelationID = corID
+	return h.correlationID
 }
 
 func (h *RequestHeader) GetClientID() string {
@@ -633,8 +637,8 @@ func decodeHeader(dec *decoder, req Request) {
 	_ = dec.DecodeInt32()
 	// api key
 	_ = dec.DecodeInt16()
-	req.SetVersion(dec.DecodeInt16())
-	req.SetCorrelationID(dec.DecodeInt32())
+	SetVersion(req.GetHeader(), dec.DecodeInt16())
+	SetCorrelationID(req.GetHeader(), dec.DecodeInt32())
 	req.SetClientID(dec.DecodeString())
 }
 
@@ -660,7 +664,7 @@ func ReadMetadataReq(r io.Reader) (*MetadataReq, error) {
 		req.Topics[i] = dec.DecodeString()
 	}
 
-	if req.Version >= KafkaV4 {
+	if req.version >= KafkaV4 {
 		req.AllowAutoTopicCreation = dec.DecodeInt8() != 0
 	}
 
@@ -681,7 +685,7 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 	encodeHeader(enc, r)
 
 	if len(r.Topics) == 0 {
-		if r.Version >= 1 {
+		if r.version >= 1 {
 			enc.EncodeArrayLen(-1)
 		} else {
 			enc.EncodeArrayLen(0)
@@ -693,7 +697,7 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 		enc.Encode(name)
 	}
 
-	if r.Version >= KafkaV4 {
+	if r.version >= KafkaV4 {
 		enc.Encode(boolToInt8(r.AllowAutoTopicCreation))
 	}
 
@@ -955,11 +959,11 @@ func ReadFetchReq(r io.Reader) (*FetchReq, error) {
 	req.MaxWaitTime = dec.DecodeDuration32()
 	req.MinBytes = dec.DecodeInt32()
 
-	if req.Version >= KafkaV3 {
+	if req.version >= KafkaV3 {
 		req.MaxBytes = dec.DecodeInt32()
 	}
 
-	if req.Version >= KafkaV4 {
+	if req.version >= KafkaV4 {
 		req.IsolationLevel = dec.DecodeInt8()
 	}
 
@@ -984,7 +988,7 @@ func ReadFetchReq(r io.Reader) (*FetchReq, error) {
 			part.ID = dec.DecodeInt32()
 			part.FetchOffset = dec.DecodeInt64()
 
-			if req.Version >= KafkaV5 {
+			if req.version >= KafkaV5 {
 				part.LogStartOffset = dec.DecodeInt64()
 			}
 
@@ -1014,11 +1018,11 @@ func (r *FetchReq) Bytes() ([]byte, error) {
 	enc.Encode(r.MaxWaitTime)
 	enc.Encode(r.MinBytes)
 
-	if r.Version >= KafkaV3 {
+	if r.version >= KafkaV3 {
 		enc.Encode(r.MaxBytes)
 	}
 
-	if r.Version >= KafkaV4 {
+	if r.version >= KafkaV4 {
 		enc.Encode(r.IsolationLevel)
 	}
 
@@ -1030,7 +1034,7 @@ func (r *FetchReq) Bytes() ([]byte, error) {
 			enc.Encode(part.ID)
 			enc.Encode(part.FetchOffset)
 
-			if r.Version >= KafkaV5 {
+			if r.version >= KafkaV5 {
 				enc.Encode(part.LogStartOffset)
 			}
 
@@ -1312,7 +1316,7 @@ func ReadConsumerMetadataReq(r io.Reader) (*ConsumerMetadataReq, error) {
 
 	req.ConsumerGroup = dec.DecodeString()
 
-	if req.Version >= KafkaV1 {
+	if req.version >= KafkaV1 {
 		req.CoordinatorType = dec.DecodeInt8()
 	}
 
@@ -1458,12 +1462,12 @@ func ReadOffsetCommitReq(r io.Reader) (*OffsetCommitReq, error) {
 
 	req.ConsumerGroup = dec.DecodeString()
 
-	if req.Version >= KafkaV1 {
+	if req.version >= KafkaV1 {
 		req.GroupGenerationID = dec.DecodeInt32()
 		req.MemberID = dec.DecodeString()
 	}
 
-	if req.Version >= KafkaV2 {
+	if req.version >= KafkaV2 {
 		req.RetentionTime = dec.DecodeInt64()
 	}
 
@@ -1488,7 +1492,7 @@ func ReadOffsetCommitReq(r io.Reader) (*OffsetCommitReq, error) {
 			part.ID = dec.DecodeInt32()
 			part.Offset = dec.DecodeInt64()
 
-			if req.Version == KafkaV1 {
+			if req.version == KafkaV1 {
 				part.TimeStamp = time.Unix(0, dec.DecodeInt64()*int64(time.Millisecond))
 			}
 
@@ -1514,12 +1518,12 @@ func (r *OffsetCommitReq) Bytes() ([]byte, error) {
 
 	enc.Encode(r.ConsumerGroup)
 
-	if r.Version >= KafkaV1 {
+	if r.version >= KafkaV1 {
 		enc.Encode(r.GroupGenerationID)
 		enc.Encode(r.MemberID)
 	}
 
-	if r.Version >= KafkaV2 {
+	if r.version >= KafkaV2 {
 		enc.Encode(r.RetentionTime)
 	}
 
@@ -1531,7 +1535,7 @@ func (r *OffsetCommitReq) Bytes() ([]byte, error) {
 			enc.Encode(part.ID)
 			enc.Encode(part.Offset)
 
-			if r.Version == KafkaV1 {
+			if r.version == KafkaV1 {
 				// TODO(husio) is this really in milliseconds?
 				enc.Encode(part.TimeStamp.UnixNano() / int64(time.Millisecond))
 			}
@@ -1879,7 +1883,7 @@ func ReadProduceReq(r io.Reader) (*ProduceReq, error) {
 
 	decodeHeader(dec, &req)
 
-	if req.Version >= KafkaV3 {
+	if req.version >= KafkaV3 {
 		req.TransactionalID = dec.DecodeString()
 	}
 
@@ -1935,7 +1939,7 @@ func (r *ProduceReq) Bytes() ([]byte, error) {
 
 	encodeHeader(enc, r)
 
-	if r.Version >= KafkaV3 {
+	if r.version >= KafkaV3 {
 		enc.EncodeString(r.TransactionalID)
 	}
 
@@ -2105,12 +2109,12 @@ func ReadOffsetReq(r io.Reader) (*OffsetReq, error) {
 	_ = dec.DecodeInt32()
 	// api key
 	_ = dec.DecodeInt16()
-	req.Version = dec.DecodeInt16()
-	req.CorrelationID = dec.DecodeInt32()
+	req.version = dec.DecodeInt16()
+	req.correlationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 	req.ReplicaID = dec.DecodeInt32()
 
-	if req.Version >= KafkaV2 {
+	if req.version >= KafkaV2 {
 		req.IsolationLevel = dec.DecodeInt8()
 	}
 
@@ -2135,7 +2139,7 @@ func ReadOffsetReq(r io.Reader) (*OffsetReq, error) {
 			part.ID = dec.DecodeInt32()
 			part.TimeMs = dec.DecodeInt64()
 
-			if req.Version == KafkaV0 {
+			if req.version == KafkaV0 {
 				part.MaxOffsets = dec.DecodeInt32()
 			}
 		}
@@ -2160,7 +2164,7 @@ func (r *OffsetReq) Bytes() ([]byte, error) {
 	//enc.Encode(r.ReplicaID)
 	enc.Encode(int32(-1))
 
-	if r.Version >= KafkaV2 {
+	if r.version >= KafkaV2 {
 		enc.Encode(r.IsolationLevel)
 	}
 
@@ -2172,7 +2176,7 @@ func (r *OffsetReq) Bytes() ([]byte, error) {
 			enc.Encode(part.ID)
 			enc.Encode(part.TimeMs)
 
-			if r.Version == KafkaV0 {
+			if r.version == KafkaV0 {
 				enc.Encode(part.MaxOffsets)
 			}
 		}
@@ -2391,7 +2395,7 @@ func ReadCreateTopicsReq(r io.Reader) (*CreateTopicsReq, error) {
 
 	req.Timeout = dec.DecodeDuration32()
 
-	if req.Version >= KafkaV1 {
+	if req.version >= KafkaV1 {
 		req.ValidateOnly = dec.DecodeInt8() != 0
 	}
 
@@ -2435,7 +2439,7 @@ func (r *CreateTopicsReq) Bytes() ([]byte, error) {
 
 	enc.Encode(r.Timeout)
 
-	if r.Version >= KafkaV1 {
+	if r.version >= KafkaV1 {
 		enc.Encode(boolToInt8(r.ValidateOnly))
 	}
 
@@ -2562,7 +2566,7 @@ func ReadAPIVersionsReq(r io.Reader) (*APIVersionsReq, error) {
 	_ = dec.DecodeInt32()
 	// api key + api version
 	_ = dec.DecodeInt32()
-	req.CorrelationID = dec.DecodeInt32()
+	req.correlationID = dec.DecodeInt32()
 	req.ClientID = dec.DecodeString()
 
 	if dec.Err() != nil {

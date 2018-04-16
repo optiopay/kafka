@@ -61,7 +61,7 @@ func (m *MetadataTester) Handler() RequestHandler {
 		}
 
 		resp := &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: m.host, Port: int32(m.port)},
 			},
@@ -209,7 +209,7 @@ func TestProducer(t *testing.T) {
 			}
 		}
 		return &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.ProduceRespTopic{
 				{
 					Name: "test",
@@ -346,7 +346,7 @@ func TestProduceWhileLeaderChange(t *testing.T) {
 			}
 			req := request.(*proto.MetadataReq)
 			resp := &proto.MetadataResp{
-				CorrelationID: req.CorrelationID,
+				CorrelationID: req.GetCorrelationID(),
 				Brokers:       brokers,
 				Topics: []proto.MetadataRespTopic{
 					{
@@ -380,7 +380,7 @@ func TestProduceWhileLeaderChange(t *testing.T) {
 		prod1Calls++
 		req := request.(*proto.ProduceReq)
 		return &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.ProduceRespTopic{
 				{
 					Name: "test",
@@ -400,7 +400,7 @@ func TestProduceWhileLeaderChange(t *testing.T) {
 		prod2Calls++
 		req := request.(*proto.ProduceReq)
 		return &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.ProduceRespTopic{
 				{
 					Name: "test",
@@ -445,7 +445,7 @@ func TestConsumer(t *testing.T) {
 		req := request.(*proto.MetadataReq)
 		host, port := srv.HostPort()
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: host, Port: int32(port)},
 			},
@@ -470,7 +470,7 @@ func TestConsumer(t *testing.T) {
 		fetchCallCount++
 		if fetchCallCount < 2 {
 			return &proto.FetchResp{
-				CorrelationID: req.CorrelationID,
+				CorrelationID: req.GetCorrelationID(),
 				Topics: []proto.FetchRespTopic{
 					{
 						Name: "test",
@@ -493,7 +493,7 @@ func TestConsumer(t *testing.T) {
 		}
 
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -557,7 +557,7 @@ func TestBatchConsumer(t *testing.T) {
 		req := request.(*proto.MetadataReq)
 		host, port := srv.HostPort()
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: host, Port: int32(port)},
 			},
@@ -582,7 +582,7 @@ func TestBatchConsumer(t *testing.T) {
 		fetchCallCount++
 		if fetchCallCount < 2 {
 			return &proto.FetchResp{
-				CorrelationID: req.CorrelationID,
+				CorrelationID: req.GetCorrelationID(),
 				Topics: []proto.FetchRespTopic{
 					{
 						Name: "test",
@@ -605,7 +605,7 @@ func TestBatchConsumer(t *testing.T) {
 		}
 
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -675,7 +675,7 @@ func TestConsumerRetry(t *testing.T) {
 		req := request.(*proto.MetadataReq)
 		host, port := srv.HostPort()
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: host, Port: int32(port)},
 			},
@@ -699,7 +699,7 @@ func TestConsumerRetry(t *testing.T) {
 		req := request.(*proto.FetchReq)
 		fetchCallCount++
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -754,7 +754,7 @@ func TestConsumeInvalidOffset(t *testing.T) {
 			{Offset: 5, Key: []byte("3"), Value: []byte("three")},
 		}
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -809,7 +809,7 @@ func TestPartitionOffset(t *testing.T) {
 			handlerErr = fmt.Errorf("expected -2 timems, got %d", req.Topics[0].Partitions[0].TimeMs)
 		}
 		return &proto.OffsetResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.OffsetRespTopic{
 				{
 					Name: "test",
@@ -883,7 +883,7 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 	srv1.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: host1, Port: int32(port1)},
 				{NodeID: 2, Host: host2, Port: int32(port2)},
@@ -918,7 +918,7 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 			handlerErr = fmt.Errorf("expected -2 timems, got %d", req.Topics[0].Partitions[0].TimeMs)
 		}
 		return &proto.OffsetResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.OffsetRespTopic{
 				{
 					Name: "test",
@@ -937,7 +937,7 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 	srv2.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: host1, Port: int32(port1)},
 				{NodeID: 2, Host: host2, Port: int32(port2)},
@@ -972,7 +972,7 @@ func TestPartitionOffsetClosedConnection(t *testing.T) {
 			handlerErr = fmt.Errorf("expected -2 timems, got %d", req.Topics[0].Partitions[0].TimeMs)
 		}
 		return &proto.OffsetResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.OffsetRespTopic{
 				{
 					Name: "test",
@@ -1036,7 +1036,7 @@ func TestLeaderConnectionFailover(t *testing.T) {
 	srv1.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{
 					NodeID: 1,
@@ -1063,7 +1063,7 @@ func TestLeaderConnectionFailover(t *testing.T) {
 	srv2.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{
 					NodeID: 2,
@@ -1157,7 +1157,7 @@ func TestProducerFailoverRequestTimeout(t *testing.T) {
 		req := request.(*proto.ProduceReq)
 		requestsCount++
 		return &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.ProduceRespTopic{
 				{
 					Name: "test",
@@ -1205,7 +1205,7 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 
 		if requestsCount > 4 {
 			return &proto.ProduceResp{
-				CorrelationID: req.CorrelationID,
+				CorrelationID: req.GetCorrelationID(),
 				Topics: []proto.ProduceRespTopic{
 					{
 						Name: "test",
@@ -1221,7 +1221,7 @@ func TestProducerFailoverLeaderNotAvailable(t *testing.T) {
 		}
 
 		return &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.ProduceRespTopic{
 				{
 					Name: "test",
@@ -1271,7 +1271,7 @@ func TestProducerNoCreateTopic(t *testing.T) {
 			// Must return something?
 			req := request.(*proto.ProduceReq)
 			return &proto.ProduceResp{
-				CorrelationID: req.CorrelationID,
+				CorrelationID: req.GetCorrelationID(),
 				Topics: []proto.ProduceRespTopic{
 					{
 						Name: "test2",
@@ -1331,7 +1331,7 @@ func TestProducerTryCreateTopic(t *testing.T) {
 			// Must return something?
 			req := request.(*proto.ProduceReq)
 			return &proto.ProduceResp{
-				CorrelationID: req.CorrelationID,
+				CorrelationID: req.GetCorrelationID(),
 				Topics: []proto.ProduceRespTopic{
 					{
 						Name: "test2",
@@ -1408,7 +1408,7 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 			}
 			req := request.(*proto.MetadataReq)
 			resp := &proto.MetadataResp{
-				CorrelationID: req.CorrelationID,
+				CorrelationID: req.GetCorrelationID(),
 				Brokers:       brokers,
 				Topics: []proto.MetadataRespTopic{
 					{
@@ -1444,7 +1444,7 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 
 		if fetch1Calls == 1 {
 			return &proto.FetchResp{
-				CorrelationID: req.CorrelationID,
+				CorrelationID: req.GetCorrelationID(),
 				Topics: []proto.FetchRespTopic{
 					{
 						Name: "test",
@@ -1466,7 +1466,7 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 			respErr = proto.ErrUnknownTopicOrPartition
 		}
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -1486,7 +1486,7 @@ func TestConsumeWhileLeaderChange(t *testing.T) {
 		fetch2Calls++
 		req := request.(*proto.FetchReq)
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -1561,7 +1561,7 @@ func TestConsumerFailover(t *testing.T) {
 
 		if respCount == 4 {
 			return &proto.FetchResp{
-				CorrelationID: req.CorrelationID,
+				CorrelationID: req.GetCorrelationID(),
 				Topics: []proto.FetchRespTopic{
 					{
 						Name: "test",
@@ -1576,7 +1576,7 @@ func TestConsumerFailover(t *testing.T) {
 			}
 		}
 		resp := &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -1646,7 +1646,7 @@ func TestProducerBrokenPipe(t *testing.T) {
 	srv1.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: host1, Port: int32(port1)},
 				{NodeID: 2, Host: host2, Port: int32(port2)},
@@ -1675,7 +1675,7 @@ func TestProducerBrokenPipe(t *testing.T) {
 	srv1.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		return &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.ProduceRespTopic{
 				{
 					Name: "test",
@@ -1694,7 +1694,7 @@ func TestProducerBrokenPipe(t *testing.T) {
 	srv2.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: host1, Port: int32(port1)},
 				{NodeID: 2, Host: host2, Port: int32(port2)},
@@ -1723,7 +1723,7 @@ func TestProducerBrokenPipe(t *testing.T) {
 	srv2.Handle(proto.ProduceReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ProduceReq)
 		return &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.ProduceRespTopic{
 				{
 					Name: "test",
@@ -1780,7 +1780,7 @@ func TestFetchOffset(t *testing.T) {
 			panic(fmt.Sprintf("expected fetch offset to be 3, got %d", off))
 		}
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -1826,7 +1826,7 @@ func TestLatestOffset(t *testing.T) {
 	srv.Handle(proto.OffsetReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.OffsetReq)
 		return &proto.OffsetResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.OffsetRespTopic{
 				{
 					Name: "test",
@@ -1895,7 +1895,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 	srv1.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: host1, Port: int32(port1)},
 				{NodeID: 2, Host: host2, Port: int32(port2)},
@@ -1924,7 +1924,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 	srv1.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -1946,7 +1946,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 	srv2.Handle(proto.MetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.MetadataReq)
 		return &proto.MetadataResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Brokers: []proto.MetadataRespBroker{
 				{NodeID: 1, Host: host1, Port: int32(port1)},
 				{NodeID: 2, Host: host2, Port: int32(port2)},
@@ -1975,7 +1975,7 @@ func TestConsumerBrokenPipe(t *testing.T) {
 	srv2.Handle(proto.FetchReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.FetchReq)
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -2029,7 +2029,7 @@ func TestOffsetCoordinator(t *testing.T) {
 		req := request.(*proto.ConsumerMetadataReq)
 		host, port := srv.HostPort()
 		return &proto.ConsumerMetadataResp{
-			CorrelationID:   req.CorrelationID,
+			CorrelationID:   req.GetCorrelationID(),
 			Err:             nil,
 			CoordinatorID:   1,
 			CoordinatorHost: host,
@@ -2040,7 +2040,7 @@ func TestOffsetCoordinator(t *testing.T) {
 		req := request.(*proto.OffsetCommitReq)
 		setOffset = req.Topics[0].Partitions[0].Offset
 		return &proto.OffsetCommitResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.OffsetCommitRespTopic{
 				{
 					Name: "first-topic",
@@ -2068,7 +2068,7 @@ func TestOffsetCoordinator(t *testing.T) {
 			}
 		}
 		return &proto.OffsetFetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.OffsetFetchRespTopic{
 				{
 					Name:       "first-topic",
@@ -2118,7 +2118,7 @@ func TestOffsetCoordinatorNoCoordinatorError(t *testing.T) {
 	srv.Handle(proto.ConsumerMetadataReqKind, func(request Serializable) Serializable {
 		req := request.(*proto.ConsumerMetadataReq)
 		return &proto.ConsumerMetadataResp{
-			CorrelationID:   req.CorrelationID,
+			CorrelationID:   req.GetCorrelationID(),
 			Err:             proto.ErrNoCoordinator,
 			CoordinatorID:   0,
 			CoordinatorHost: "",
@@ -2166,7 +2166,7 @@ func benchmarkConsumer(b *testing.B, messagesPerResp int) {
 			messages[i] = msg
 		}
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -2231,7 +2231,7 @@ func benchmarkConsumerConcurrent(b *testing.B, concurrentConsumers int) {
 			messages[i] = msg
 		}
 		return &proto.FetchResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.FetchRespTopic{
 				{
 					Name: "test",
@@ -2299,7 +2299,7 @@ func benchmarkProducer(b *testing.B, messagesPerReq int64) {
 		req := request.(*proto.ProduceReq)
 		msgOffset += messagesPerReq
 		return &proto.ProduceResp{
-			CorrelationID: req.CorrelationID,
+			CorrelationID: req.GetCorrelationID(),
 			Topics: []proto.ProduceRespTopic{
 				{
 					Name: "test",
