@@ -278,7 +278,6 @@ func (b *Broker) CreateTopic(topics []proto.TopicInfo, timeout time.Duration, va
 	defer b.mu.Unlock()
 	var resp *proto.CreateTopicsResp
 	err := b.callOnClusterController(func(c *connection) error {
-		fmt.Printf("\x1B[32;1m got connection\x1B[0m = %+v\n", c)
 		var err error
 		req := proto.CreateTopicsReq{
 			Timeout:              timeout,
@@ -286,13 +285,7 @@ func (b *Broker) CreateTopic(topics []proto.TopicInfo, timeout time.Duration, va
 			ValidateOnly:         validateOnly,
 		}
 		resp, err = c.CreateTopic(&req)
-		fmt.Println("\x1B[32;1m GOT RESP\x1B[0m")
-		fmt.Printf("\x1B[32;1m resp\x1B[0m = %+v\n", resp)
-		fmt.Printf("\x1B[32;1m err\x1B[0m = %+v\n", err)
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	})
 	return resp, err
 }
@@ -327,7 +320,6 @@ func (b *Broker) callOnClusterController(f func(c *connection) error) error {
 
 	// try all existing connections first
 	for nodeID, conn := range b.conns {
-		fmt.Println("\x1B[31;1m try existing connections\x1B[0m")
 		checkednodes[nodeID] = true
 		if nodeID == controllerID {
 			err = f(conn)
@@ -340,7 +332,6 @@ func (b *Broker) callOnClusterController(f func(c *connection) error) error {
 
 	// try all nodes that we know of that we're not connected to
 	for nodeID, addr := range b.metadata.nodes {
-		fmt.Println("try all known nodes")
 		if nodeID == controllerID {
 			conn, err = b.getConnection(addr)
 			if err != nil {
@@ -351,10 +342,7 @@ func (b *Broker) callOnClusterController(f func(c *connection) error) error {
 			// we had no active connection to this node, so most likely we don't need it
 			_ = conn.Close()
 
-			if err != nil {
-				return err
-			}
-			return nil
+			return err
 		}
 	}
 
@@ -373,7 +361,6 @@ func (b *Broker) callOnActiveConnection(f func(c *connection) error) error {
 
 	// try all existing connections first
 	for nodeID, conn := range b.conns {
-		fmt.Println("\x1B[31;1m try existing connections\x1B[0m")
 		checkednodes[nodeID] = true
 		err = f(conn)
 		if err != nil {
@@ -384,7 +371,6 @@ func (b *Broker) callOnActiveConnection(f func(c *connection) error) error {
 
 	// try all nodes that we know of that we're not connected to
 	for nodeID, addr := range b.metadata.nodes {
-		fmt.Println("try all known nodes")
 		if _, ok := checkednodes[nodeID]; ok {
 			continue
 		}
@@ -404,7 +390,6 @@ func (b *Broker) callOnActiveConnection(f func(c *connection) error) error {
 	}
 
 	for _, addr := range b.getInitialAddresses() {
-		fmt.Println("\x1B[31;1m try new connection\x1B[0m")
 		conn, err = b.getConnection(addr)
 		if err != nil {
 			b.conf.Logger.Debug("cannot connect to seed node",
