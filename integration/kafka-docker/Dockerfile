@@ -1,18 +1,27 @@
-FROM ubuntu:trusty
+FROM anapsix/alpine-java
 
-MAINTAINER Wurstmeister 
+ARG kafka_version=1.0.0
+ARG scala_version=2.12
 
-ENV KAFKA_VERSION="0.8.2.1" SCALA_VERSION="2.10"
+MAINTAINER wurstmeister
 
-RUN apt-get update && apt-get install -y unzip openjdk-6-jdk wget curl git docker.io jq
+ENV KAFKA_VERSION=$kafka_version \
+    SCALA_VERSION=$scala_version \
+    KAFKA_HOME=/opt/kafka \
+    PATH=${PATH}:${KAFKA_HOME}/bin
 
-ADD download-kafka.sh /tmp/download-kafka.sh
-RUN /tmp/download-kafka.sh
-RUN tar xf /tmp/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz -C /opt
+COPY download-kafka.sh start-kafka.sh broker-list.sh create-topics.sh /tmp/
+
+RUN apk add --update unzip wget curl docker jq coreutils \
+ && chmod a+x /tmp/*.sh \
+ && mv /tmp/start-kafka.sh /tmp/broker-list.sh /tmp/create-topics.sh /usr/bin \
+ && /tmp/download-kafka.sh \
+ && tar xfz /tmp/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz -C /opt \
+ && rm /tmp/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz \
+ && ln -s /opt/kafka_${SCALA_VERSION}-${KAFKA_VERSION} /opt/kafka \
+ && rm /tmp/*
 
 VOLUME ["/kafka"]
 
-ENV KAFKA_HOME /opt/kafka_${SCALA_VERSION}-${KAFKA_VERSION}
-ADD start-kafka.sh /usr/bin/start-kafka.sh
-ADD broker-list.sh /usr/bin/broker-list.sh
-CMD start-kafka.sh
+# Use "exec" form so that it runs as PID 1 (useful for graceful shutdown)
+CMD ["start-kafka.sh"]
