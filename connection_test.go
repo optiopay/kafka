@@ -362,7 +362,7 @@ func TestConnectionProduce(t *testing.T) {
 	}()
 
 	resp, err := conn.Produce(&proto.ProduceReq{
-		RequestHeader: proto.RequestHeader{CorrelationID: 1, ClientID: "tester"},
+		RequestHeader: proto.RequestHeader{ClientID: "tester"},
 		Compression:   proto.CompressionNone,
 		RequiredAcks:  proto.RequiredAcksAll,
 		Timeout:       time.Second,
@@ -388,7 +388,7 @@ func TestConnectionProduce(t *testing.T) {
 		t.Fatalf("expected different response %#v", resp)
 	}
 	resp, err = conn.Produce(&proto.ProduceReq{
-		RequestHeader: proto.RequestHeader{CorrelationID: 2, ClientID: "tester"},
+		RequestHeader: proto.RequestHeader{ClientID: "tester"},
 		Compression:   proto.CompressionNone,
 		RequiredAcks:  proto.RequiredAcksAll,
 		Timeout:       time.Second,
@@ -481,7 +481,7 @@ func TestConnectionFetch(t *testing.T) {
 	}()
 
 	resp, err := conn.Fetch(&proto.FetchReq{
-		RequestHeader: proto.RequestHeader{CorrelationID: 2, ClientID: "tester"},
+		RequestHeader: proto.RequestHeader{ClientID: "tester"},
 		Topics: []proto.FetchReqTopic{
 			{
 				Name: "foo",
