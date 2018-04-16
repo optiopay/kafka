@@ -2,7 +2,6 @@ package proto
 
 import (
 	"bytes"
-	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -1007,16 +1006,13 @@ func TestCreateTopics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("\x1B[31;1m b\x1B[0m = %+v\n", b)
-	fmt.Printf("\x1B[32;1m r\x1B[0m = %+v\n", reference)
-
 	if len(b) != len(reference) {
 		t.Errorf("Bytes representation wrong")
 	}
 
 	for i := range b {
 		if b[i] != reference[i] {
-			t.Fatalf("Bytes representation wrong on %s byte", i)
+			t.Fatalf("Bytes representation wrong on %d byte", i)
 		}
 	}
 
