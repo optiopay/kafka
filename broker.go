@@ -86,10 +86,11 @@ func (tp topicPartition) String() string {
 }
 
 type clusterMetadata struct {
-	created    time.Time
-	nodes      map[int32]string         // node ID to address
-	endpoints  map[topicPartition]int32 // partition to leader node ID
-	partitions map[string]int32         // topic to number of partitions
+	created      time.Time
+	nodes        map[int32]string         // node ID to address
+	endpoints    map[topicPartition]int32 // partition to leader node ID
+	partitions   map[string]int32         // topic to number of partitions
+	controllerId int32                    // ID node which run cluster controller
 }
 
 // BrokerConf represents the configuration of a broker.
@@ -271,6 +272,24 @@ func (b *Broker) Metadata() (*proto.MetadataResp, error) {
 	return b.fetchMetadata()
 }
 
+// CreateTopic request topic creation
+func (b *Broker) CreateTopic(topics []proto.TopicInfo, timeout time.Duration, validateOnly bool) (*proto.CreateTopicsResp, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var resp *proto.CreateTopicsResp
+	err := b.callOnClusterController(func(c *connection) error {
+		var err error
+		req := proto.CreateTopicsReq{
+			Timeout:              timeout,
+			CreateTopicsRequests: topics,
+			ValidateOnly:         validateOnly,
+		}
+		resp, err = c.CreateTopic(&req)
+		return err
+	})
+	return resp, err
+}
+
 // refreshMetadata is requesting metadata information from any node and refresh
 // internal cached representation.
 // Because it's changing internal state, this method requires lock protection,
@@ -288,6 +307,103 @@ func (b *Broker) muRefreshMetadata() error {
 	b.mu.Lock()
 	err := b.refreshMetadata()
 	b.mu.Unlock()
+	return err
+}
+
+func (b *Broker) callOnClusterController(f func(c *connection) error) error {
+	checkednodes := make(map[int32]bool)
+
+	var err error
+	var conn *connection
+
+	controllerID := b.metadata.controllerId
+
+	// try all existing connections first
+	for nodeID, conn := range b.conns {
+		checkednodes[nodeID] = true
+		if nodeID == controllerID {
+			err = f(conn)
+			if err != nil {
+				continue
+			}
+			return nil
+		}
+	}
+
+	// try all nodes that we know of that we're not connected to
+	for nodeID, addr := range b.metadata.nodes {
+		if nodeID == controllerID {
+			conn, err = b.getConnection(addr)
+			if err != nil {
+				return err
+			}
+			err = f(conn)
+
+			// we had no active connection to this node, so most likely we don't need it
+			_ = conn.Close()
+
+			return err
+		}
+	}
+
+	if err != nil {
+		return err
+	} else {
+		return errors.New("Cannot get connection to controller node")
+	}
+}
+
+func (b *Broker) callOnActiveConnection(f func(c *connection) error) error {
+	checkednodes := make(map[int32]bool)
+
+	var err error
+	var conn *connection
+
+	// try all existing connections first
+	for nodeID, conn := range b.conns {
+		checkednodes[nodeID] = true
+		err = f(conn)
+		if err != nil {
+			continue
+		}
+		return nil
+	}
+
+	// try all nodes that we know of that we're not connected to
+	for nodeID, addr := range b.metadata.nodes {
+		if _, ok := checkednodes[nodeID]; ok {
+			continue
+		}
+		conn, err = b.getConnection(addr)
+		if err != nil {
+			continue
+		}
+		err = f(conn)
+
+		// we had no active connection to this node, so most likely we don't need it
+		_ = conn.Close()
+
+		if err != nil {
+			continue
+		}
+		return nil
+	}
+
+	for _, addr := range b.getInitialAddresses() {
+		conn, err = b.getConnection(addr)
+		if err != nil {
+			b.conf.Logger.Debug("cannot connect to seed node",
+				"address", addr,
+				"error", err)
+			continue
+		}
+		err = f(conn)
+		_ = conn.Close()
+		if err == nil {
+			return nil
+		}
+	}
+
 	return err
 }
 
@@ -387,6 +503,7 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 		endpoints:  make(map[topicPartition]int32),
 		partitions: make(map[string]int32),
 	}
+	b.metadata.controllerId = resp.ControllerID
 	var debugmsg []interface{}
 	for _, node := range resp.Brokers {
 		addr := fmt.Sprintf("%s:%d", node.Host, node.Port)

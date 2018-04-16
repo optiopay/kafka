@@ -949,6 +949,287 @@ func TestReadEmptyMessage(t *testing.T) {
 	}
 }
 
+func TestCreateTopics(t *testing.T) {
+	reference := []byte{
+		0, 0, 0, 77, // size
+		0, 19, //kind
+		0, 0, 0, 0, // version
+		0, 3, // CorrelationID
+		0, 0, // ClientID
+		0, 0, 0, 1, // size of []TopicInfo
+		0, 5, 't', 'o', 'p', 'i', 'c', // topic
+		255, 255, 255, 255, // NumPartitions
+		255, 255, //ReplicationFactor
+		0, 0, 0, 1, // size of ReplicaAssignments
+		0, 0, 0, 0, // Partition
+		0, 0, 0, 3, // size or Replicas
+		0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, // {0, 1, 2}
+		0, 0, 0, 1, // size of ConfigEntries
+		0, 12, 'r', 'e', 't', 'e', 'n', 't', 'i', 'o', 'n', '.', 'm', 's', // "retention.ms"
+		0, 2, '-', '1', // "-1",
+		0, 0, 0, 0, // timeout
+	}
+
+	req := CreateTopicsReq{
+		Timeout:      0,
+		ValidateOnly: false,
+	}
+
+	req.CorrelationID = 3
+
+	topicInfo := TopicInfo{
+		Topic:              "topic",
+		NumPartitions:      -1,
+		ReplicationFactor:  -1,
+		ReplicaAssignments: nil,
+		ConfigEntries:      nil,
+	}
+
+	ra := ReplicaAssignment{
+		Partition: 0,
+		Replicas:  []int32{0, 1, 2},
+	}
+
+	topicInfo.ReplicaAssignments = []ReplicaAssignment{ra}
+
+	ce := ConfigEntry{
+		ConfigName:  "retention.ms",
+		ConfigValue: "-1",
+	}
+
+	topicInfo.ConfigEntries = []ConfigEntry{ce}
+
+	req.CreateTopicsRequests = []TopicInfo{topicInfo}
+
+	b, err := req.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(b) != len(reference) {
+		t.Errorf("Bytes representation wrong")
+	}
+
+	for i := range b {
+		if b[i] != reference[i] {
+			t.Fatalf("Bytes representation wrong on %d byte", i)
+		}
+	}
+
+	req1, err := ReadCreateTopicsReq(bytes.NewBuffer(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req2 := req1.CreateTopicsRequests
+
+	for i, topic := range req.CreateTopicsRequests {
+		if topic.ReplicationFactor != req2[i].ReplicationFactor {
+			t.Errorf("req1 = %+v  req2 = %+v \n", req, req2)
+		}
+		if topic.NumPartitions != req2[i].NumPartitions {
+			t.Errorf("req1 = %+v  req2 = %+v \n", req, req2)
+		}
+		if topic.Topic != req2[i].Topic {
+			t.Errorf("req1 = %+v  req2 = %+v \n", req, req2)
+		}
+		for j, ce := range topic.ConfigEntries {
+			if ce.ConfigName != req2[i].ConfigEntries[j].ConfigName {
+				t.Errorf("req1 = %+v  req2 = %+v \n", req, req2)
+			}
+			if ce.ConfigValue != req2[i].ConfigEntries[j].ConfigValue {
+				t.Errorf("req1 = %+v  req2 = %+v \n", req, req2)
+			}
+		}
+
+		for k, ra := range topic.ReplicaAssignments {
+			if ra.Partition != req2[i].ReplicaAssignments[k].Partition {
+				t.Errorf("req1 = %+v  req2 = %+v \n", req, req2)
+			}
+			for l, repl := range ra.Replicas {
+				if repl != req2[i].ReplicaAssignments[k].Replicas[l] {
+					t.Errorf("req1 = %+v  req2 = %+v \n", req, req2)
+				}
+			}
+		}
+	}
+
+	resp := CreateTopicsResp{
+		Version:       0,
+		CorrelationID: 1,
+		TopicErrors: []TopicError{TopicError{
+			ErrorCode: 0,
+			Topic:     "testtopic",
+		}},
+	}
+	b1, err := resp.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2, err := ReadCreateTopicsResp(bytes.NewBuffer(b1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.CorrelationID != resp2.CorrelationID {
+		t.Errorf("resp1 = %+v  resp2 = %+v \n", resp, resp)
+
+	}
+
+	for i, te := range resp.TopicErrors {
+		if te.ErrorCode != resp2.TopicErrors[i].ErrorCode {
+			t.Errorf("resp1 = %+v  resp2 = %+v \n", resp, resp)
+		}
+		if te.Topic != resp2.TopicErrors[i].Topic {
+			t.Errorf("resp1 = %+v  resp2 = %+v \n", resp, resp)
+		}
+
+	}
+
+}
+
+func TestVersionedCreateTopicRequest(t *testing.T) {
+	reqV0 := CreateTopicsReq{
+		Timeout:      0,
+		ValidateOnly: false,
+	}
+
+	topicInfo := TopicInfo{
+		Topic:              "topic",
+		NumPartitions:      -1,
+		ReplicationFactor:  -1,
+		ReplicaAssignments: nil,
+		ConfigEntries:      nil,
+	}
+
+	ra := ReplicaAssignment{
+		Partition: 0,
+		Replicas:  []int32{0, 1, 2},
+	}
+
+	topicInfo.ReplicaAssignments = []ReplicaAssignment{ra}
+
+	ce := ConfigEntry{
+		ConfigName:  "retention.ms",
+		ConfigValue: "-1",
+	}
+
+	topicInfo.ConfigEntries = []ConfigEntry{ce}
+
+	reqV0.CreateTopicsRequests = []TopicInfo{topicInfo}
+
+	b, err := reqV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	respV0, err := ReadCreateTopicsReq(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(reqV0, *respV0) {
+		t.Fatalf("Responses are not equal: expect \n %#+v got \n %#+v", reqV0, *respV0)
+	}
+
+	reqV1 := reqV0
+	reqV1.Version = KafkaV1
+	reqV1.ValidateOnly = true
+
+	b, err = reqV1.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	respV1, err := ReadCreateTopicsReq(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(reqV1, *respV1) {
+		t.Fatalf("Responses are not equal: expect \n %#+v got \n %#+v", reqV1, *respV1)
+	}
+
+	reqV2 := reqV0
+	reqV2.Version = KafkaV2
+	reqV2.ValidateOnly = true
+
+	b, err = reqV2.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	respV2, err := ReadCreateTopicsReq(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(reqV2, *respV2) {
+		t.Fatalf("Responses are not equal: expect \n %#+v got \n %#+v", reqV2, *respV2)
+	}
+
+}
+
+func TestVersionedCreateTopicResponse(t *testing.T) {
+	origRespV0 := CreateTopicsResp{
+		CorrelationID: 0,
+		Version:       KafkaV0,
+		TopicErrors: []TopicError{
+			TopicError{
+				ErrorCode: 1,
+				Topic:     "mytopic",
+			},
+		},
+	}
+
+	b, err := origRespV0.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	respV0, err := ReadVersionedCreateTopicsResp(bytes.NewReader(b), KafkaV0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(origRespV0, *respV0) {
+		t.Fatalf("Responses are not equal: expect \n %#+v got \n %#+v", origRespV0, *respV0)
+	}
+
+	origRespV1 := origRespV0
+	origRespV1.TopicErrors[0].ErrorMessage = "Error!"
+	origRespV1.Version = KafkaV1
+
+	b, err = origRespV1.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	respV1, err := ReadVersionedCreateTopicsResp(bytes.NewReader(b), KafkaV1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(origRespV1, *respV1) {
+		t.Fatalf("Responses are not equal: expect \n %#+v got \n %#+v", origRespV1, *respV1)
+	}
+
+	origRespV2 := origRespV1
+	origRespV2.ThrottleTime = 5 * time.Second
+	origRespV2.Version = KafkaV2
+
+	b, err = origRespV2.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	respV2, err := ReadVersionedCreateTopicsResp(bytes.NewReader(b), KafkaV2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(origRespV2, *respV2) {
+		t.Fatalf("Responses are not equal: expect \n %#+v got \n %#+v", origRespV2, *respV2)
+	}
+}
+
 func BenchmarkProduceRequestMarshal(b *testing.B) {
 	messages := make([]*Message, 100)
 	for i := range messages {
