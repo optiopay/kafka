@@ -619,6 +619,9 @@ func TestOffsetResponseWithVersions(t *testing.T) {
 	ts := time.Unix(0, (time.Now().UnixNano()/int64(time.Millisecond))*int64(time.Millisecond))
 	resp1.Topics[0].Partitions[0].TimeStamp = ts
 
+	// In kafka >= KafkaV1 there might be only one offset
+	resp1.Topics[0].Partitions[0].Offsets = []int64{92}
+
 	b1, err := resp1.Bytes()
 	if err != nil {
 		t.Fatal(err)

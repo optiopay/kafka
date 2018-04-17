@@ -2218,7 +2218,7 @@ type OffsetRespPartition struct {
 	ID        int32
 	Err       error
 	TimeStamp time.Time // >= KafkaV1 only
-	Offsets   []int64
+	Offsets   []int64   // used in KafkaV0
 }
 
 func ReadOffsetResp(r io.Reader) (*OffsetResp, error) {
@@ -2261,16 +2261,21 @@ func ReadVersionedOffsetResp(r io.Reader, version int16) (*OffsetResp, error) {
 
 			if version >= KafkaV1 {
 				p.TimeStamp = time.Unix(0, dec.DecodeInt64()*int64(time.Millisecond))
-			}
 
-			len, err = dec.DecodeArrayLen()
-			if err != nil {
-				return nil, err
-			}
-			p.Offsets = make([]int64, len)
+				// in kafka >= KafkaV1 offset can be only one number.
+				// But for compatibility we still use slice
+				offset := dec.DecodeInt64()
+				p.Offsets = []int64{offset}
+			} else {
+				len, err = dec.DecodeArrayLen()
+				if err != nil {
+					return nil, err
+				}
+				p.Offsets = make([]int64, len)
 
-			for oi := range p.Offsets {
-				p.Offsets[oi] = dec.DecodeInt64()
+				for oi := range p.Offsets {
+					p.Offsets[oi] = dec.DecodeInt64()
+				}
 			}
 		}
 	}
@@ -2303,11 +2308,19 @@ func (r *OffsetResp) Bytes() ([]byte, error) {
 
 			if r.Version >= KafkaV1 {
 				enc.Encode(part.TimeStamp.UnixNano() / int64(time.Millisecond))
-			}
 
-			enc.EncodeArrayLen(len(part.Offsets))
-			for _, off := range part.Offsets {
-				enc.Encode(off)
+				// in kafka >= KafkaV1 offset can be only one value.
+				// In this case we use first element of slice
+				var offset int64
+				if len(part.Offsets) > 0 {
+					offset = part.Offsets[0]
+				}
+				enc.Encode(offset)
+			} else {
+				enc.EncodeArrayLen(len(part.Offsets))
+				for _, off := range part.Offsets {
+					enc.Encode(off)
+				}
 			}
 		}
 	}
