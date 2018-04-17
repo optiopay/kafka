@@ -74,6 +74,25 @@ func TestProduceAndConsume(t *testing.T) {
 		}
 	}
 
+	// check if offsets are correct
+	for _, name := range topics {
+		offe, err := broker.OffsetEarliest(name, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if offe != 0 {
+			t.Fatalf("Should get OffsetEarliest == 0 Got %#v instead ", offe)
+		}
+		offl, err := broker.OffsetLatest(name, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if offl != 1 {
+			t.Fatalf("Should get OffsetLatest == 1. Got %#v instead ", offl)
+		}
+
+	}
+
 }
 
 func TestCompression(t *testing.T) {
