@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -425,6 +426,10 @@ func TestNewTopic(t *testing.T) {
 		Topic:             topic,
 		NumPartitions:     1,
 		ReplicationFactor: 1,
+		ConfigEntries: []proto.ConfigEntry{proto.ConfigEntry{
+			ConfigName:  "delete.retention.ms",
+			ConfigValue: "5000",
+		}},
 	}
 
 	resp, err := broker.CreateTopic([]proto.TopicInfo{topicInfo}, 10*time.Second, false)
@@ -453,9 +458,30 @@ func TestNewTopic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot create consumer for %q: %s", topic, err)
 	}
-	if _, err := consumer.Consume(); err != nil {
+
+	_, err = consumer.Consume()
+	if err != nil {
 		t.Errorf("cannot consume message from %q: %s", topic, err)
 	}
+
+	// Wait for kafka to delete the message based on retention
+	time.Sleep(6 * time.Second)
+	offset, err := broker.OffsetLatest(topic, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Printf("offset = %+v\n", offset)
+	//for _,t := range metadata.Topics {
+	//if t.Name == topic {
+
+	//}
+	//}
+	//metadata.Topics
+	//if msg == nil {
+	//t.Errorf("cannot consume message from %q: %s", topic, err)
+	//}
+
+	time.Sleep(1000 * time.Second)
 }
 
 type testLogger struct {
