@@ -1111,6 +1111,17 @@ func NewConsumerConf(topic string, partition int32) ConsumerConf {
 	}
 }
 
+type ConsumerError struct {
+	Topic     string
+	Partition int32
+	Offset    int64
+	Err       error
+}
+
+func (ce ConsumerError) Error() string {
+	return fmt.Sprintf("Error in consumer {topic: %s, part: %d, offset: %d: err: %s}", ce.Topic, ce.Partition, ce.Offset, ce.Err)
+}
+
 // Consumer represents a single partition reading buffer. Consumer is also
 // providing limited failure handling and message filtering.
 type consumer struct {
@@ -1185,7 +1196,7 @@ func (c *consumer) consume() ([]*proto.Message, error) {
 		var err error
 		msgbuf, err = c.fetch()
 		if err != nil {
-			return nil, err
+			return nil, ConsumerError{c.conf.Topic, c.conf.Partition, c.offset, err}
 		}
 		if len(msgbuf) == 0 {
 			if c.conf.RetryWait > 0 {
