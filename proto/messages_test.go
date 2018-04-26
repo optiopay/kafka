@@ -1175,6 +1175,7 @@ func TestVersionedCreateTopicResponse(t *testing.T) {
 			TopicError{
 				ErrorCode: 1,
 				Topic:     "mytopic",
+				Err:       ErrOffsetOutOfRange,
 			},
 		},
 	}
