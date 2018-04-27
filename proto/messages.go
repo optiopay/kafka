@@ -2480,6 +2480,7 @@ type TopicError struct {
 	Topic        string
 	ErrorCode    int16
 	ErrorMessage string // >= KafkaV1
+	Err          error
 }
 
 type CreateTopicsResp struct {
@@ -2552,6 +2553,7 @@ func ReadVersionedCreateTopicsResp(r io.Reader, version int16) (*CreateTopicsRes
 		if resp.Version >= KafkaV1 {
 			te.ErrorMessage = dec.DecodeString()
 		}
+		te.Err = errFromNo(te.ErrorCode)
 	}
 
 	if dec.Err() != nil {
