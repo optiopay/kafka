@@ -622,7 +622,7 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 func (b *Broker) getConnection(addr string) (*connection, error) {
 	var c *connection
 	var err error
-	if b.conf.TLSCa != nil && b.conf.TLSKey != nil && b.conf.TLSCert != nil {
+	if len(b.conf.TLSCa) > 0 && len(b.conf.TLSKey) > 0 && len(b.conf.TLSCert) > 0 {
 		c, err = newTLSConnection(addr, b.conf.TLSCa, b.conf.TLSCert, b.conf.TLSKey, b.conf.DialTimeout, b.conf.ReadTimeout)
 	} else {
 		c, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
