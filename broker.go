@@ -623,8 +623,10 @@ func (b *Broker) getConnection(addr string) (*connection, error) {
 	var c *connection
 	var err error
 	if len(b.conf.TLSCa) > 0 && len(b.conf.TLSKey) > 0 && len(b.conf.TLSCert) > 0 {
+		b.conf.Logger.Info("initiating a connection with client TLS authentication")
 		c, err = newTLSConnection(addr, b.conf.TLSCa, b.conf.TLSCert, b.conf.TLSKey, b.conf.DialTimeout, b.conf.ReadTimeout)
 	} else {
+		b.conf.Logger.Info("initiating a connection without client TLS authentication")
 		c, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
 	}
 
