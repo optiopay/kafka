@@ -32,8 +32,7 @@ type Container struct {
 
 func NewKafkaCluster(kafkaDockerDir string, size int) *KafkaCluster {
 	if size != 1 && size < 4 {
-		fmt.Fprintln(os.Stderr,
-			"WARNING: creating cluster smaller than 4 nodes is not sufficient for all topics")
+		fmt.Println("WARNING: creating cluster smaller than 4 nodes is not sufficient for all topics")
 	}
 	return &KafkaCluster{
 		kafkaDockerDir: kafkaDockerDir,
