@@ -3,7 +3,6 @@ package integration
 import (
 	"bytes"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
