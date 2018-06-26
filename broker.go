@@ -240,7 +240,7 @@ func Dial(nodeAddresses []string, conf BrokerConf) (*Broker, error) {
 
 		conf.Logger.Error("Got an error trying to fetch metadata", "error", err)
 	}
-	return nil, errors.New("cannot connect")
+	return nil, errors.Errorf("cannot connect to: %s. TLS authentication: %t", nodeAddresses, conf.useTLS())
 }
 
 func (b *Broker) getInitialAddresses() []string {
@@ -619,10 +619,14 @@ func (b *Broker) muLeaderConnection(topic string, partition int32) (conn *connec
 	return nil, err
 }
 
+func (b *Broker) useTLS() bool {
+	return (len(b.conf.TLSCa) > 0 && len(b.conf.TLSKey) > 0 && len(b.conf.TLSCert) > 0)
+}
+
 func (b *Broker) getConnection(addr string) (*connection, error) {
 	var c *connection
 	var err error
-	if len(b.conf.TLSCa) > 0 && len(b.conf.TLSKey) > 0 && len(b.conf.TLSCert) > 0 {
+	if b.useTLS() {
 		c, err = newTLSConnection(addr, b.conf.TLSCa, b.conf.TLSCert, b.conf.TLSKey, b.conf.DialTimeout, b.conf.ReadTimeout)
 	} else {
 		c, err = newTCPConnection(addr, b.conf.DialTimeout, b.conf.ReadTimeout)
