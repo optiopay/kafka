@@ -245,6 +245,39 @@ func TestProducer(t *testing.T) {
 	broker.Close()
 }
 
+func TestBrokerWithEmptyCertificates(t *testing.T) {
+	srv := NewServer()
+	srv.Start()
+	defer srv.Close()
+
+	srv.Handle(proto.MetadataReqKind, NewMetadataHandler(srv, false).Handler())
+
+	brokerConf := newTestBrokerConf("tester")
+	brokerConf.TLSCa = []byte{}
+	brokerConf.TLSCert = []byte{}
+	brokerConf.TLSKey = []byte{}
+	broker, err := Dial([]string{srv.Address()}, brokerConf)
+	if err != nil {
+		t.Fatalf("cannot create broker: %s", err)
+	}
+
+	prodConf := NewProducerConf()
+	prodConf.RetryWait = time.Millisecond
+	producer := broker.Producer(prodConf)
+	messages := []*proto.Message{
+		{Value: []byte("first")},
+		{Value: []byte("second")},
+	}
+	_, err = producer.Produce("does-not-exist", 42142, messages...)
+
+	// error means that we successfully connected
+	if err != proto.ErrUnknownTopicOrPartition {
+		t.Fatalf("expected '%s', got %s", proto.ErrUnknownTopicOrPartition, err)
+	}
+
+	broker.Close()
+}
+
 func TestProducerWithNoAck(t *testing.T) {
 	srv := NewServer()
 	srv.Start()
