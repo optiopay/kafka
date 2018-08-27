@@ -508,21 +508,18 @@ func (b *Broker) cacheMetadata(resp *proto.MetadataResp) {
 		partitions: make(map[string]int32),
 	}
 	b.metadata.controllerId = resp.ControllerID
-	var debugmsg []interface{}
 	for _, node := range resp.Brokers {
 		addr := fmt.Sprintf("%s:%d", node.Host, node.Port)
 		b.metadata.nodes[node.NodeID] = addr
-		debugmsg = append(debugmsg, node.NodeID, addr)
 	}
 	for _, topic := range resp.Topics {
 		for _, part := range topic.Partitions {
 			dest := topicPartition{topic.Name, part.ID}
 			b.metadata.endpoints[dest] = part.Leader
-			debugmsg = append(debugmsg, dest, part.Leader)
 		}
 		b.metadata.partitions[topic.Name] = int32(len(topic.Partitions))
 	}
-	b.conf.Logger.Debug("new metadata cached", debugmsg...)
+	b.conf.Logger.Debug("new metadata cached")
 }
 
 // PartitionCount returns how many partitions a given topic has. If a topic
