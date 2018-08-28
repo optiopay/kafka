@@ -8,7 +8,7 @@ openssl genrsa -out example.org.key 2048
 openssl req -new -key example.org.key -out example.org.csr -subj "/C=DE/ST=Berlin/L=Berlin/O=Optiopay/CN=api.optiopay.com" 
 openssl req -new -out oats.csr -config oats.cnf
 openssl genrsa -out ca.key 2048
-openssl req -new -x509 -key ca.key -out ca.crt -subj "/C=DE/ST=Berlin/L=Berlin/O=Optiopay/CN=optiopay.com"
+openssl req -new -x509 -days 3650 -key ca.key -out ca.crt -subj "/C=DE/ST=Berlin/L=Berlin/O=Optiopay/CN=optiopay.com"
 mkdir newcerts
 touch index.txt
 echo '01' > serial
