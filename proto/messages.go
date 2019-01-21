@@ -476,10 +476,7 @@ func readRecord(r io.Reader) (*Record, error) {
 	rec.Key = dec.DecodeVarBytes()
 	rec.Value = dec.DecodeVarBytes()
 
-	len, err := dec.DecodeArrayLen()
-	if err != nil {
-		return nil, err
-	}
+	len := dec.DecodeVarInt()
 
 	rec.Headers = make([]RecordHeader, len)
 	for i := range rec.Headers {
