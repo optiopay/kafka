@@ -519,6 +519,91 @@ func TestConnectionFetch(t *testing.T) {
 	}
 }
 
+func TestTrimRecordBatches(t *testing.T) {
+	resp := &proto.FetchResp{
+		CorrelationID: 2,
+		Topics: []proto.FetchRespTopic{
+			{
+				Name: "foo",
+				Partitions: []proto.FetchRespPartition{{
+					ID:             1,
+					Err:            nil,
+					TipOffset:      20,
+					MessageVersion: 2,
+					RecordBatches: []*proto.RecordBatch{{
+						FirstOffset: 4,
+						Records: []*proto.Record{{
+							OffsetDelta: 0,
+							Key:         []byte("f"),
+							Value:       []byte("first"),
+						}, {
+							OffsetDelta: 1,
+							Key:         []byte("s"),
+							Value:       []byte("second"),
+						}},
+					}, {
+						FirstOffset: 6,
+						Records: []*proto.Record{{
+							OffsetDelta: 0,
+							Key:         []byte("t"),
+							Value:       []byte("third"),
+						}},
+					}},
+				}},
+			},
+			{
+				Name: "bar",
+				Partitions: []proto.FetchRespPartition{{
+					ID:             6,
+					Err:            proto.ErrUnknownTopicOrPartition,
+					TipOffset:      -1,
+					MessageVersion: 2,
+					RecordBatches:  nil,
+				}},
+			},
+		},
+	}
+
+	req := &proto.FetchReq{
+		Topics: []proto.FetchReqTopic{
+			{
+				Name: "foo",
+				Partitions: []proto.FetchReqPartition{
+					{
+						ID:          1,
+						FetchOffset: 5,
+					},
+				},
+			},
+			{
+				Name: "bar",
+				Partitions: []proto.FetchReqPartition{
+					{
+						ID: 6,
+					},
+				},
+			},
+		},
+	}
+
+	trimLeadingMessages(req, resp)
+
+	rbs := resp.Topics[0].Partitions[0].RecordBatches
+	if got, exp := len(rbs[0].Records), 1; got != exp {
+		t.Fatalf("got %d records in the first batch but expected %d", got, exp)
+	}
+	if got, exp := string(rbs[0].Records[0].Key), "s"; got != exp {
+		t.Fatalf("got first key %q but expected %q", got, exp)
+	}
+
+	if got, exp := len(rbs[1].Records), 1; got != exp {
+		t.Fatalf("got %d records in the second batch but expected %d", got, exp)
+	}
+	if got, exp := string(rbs[1].Records[0].Key), "t"; got != exp {
+		t.Fatalf("got first key %q but expected %q", got, exp)
+	}
+}
+
 func TestConnectionOffset(t *testing.T) {
 	versionResp := &proto.APIVersionsResp{
 		CorrelationID: 1,
