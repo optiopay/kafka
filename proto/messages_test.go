@@ -674,10 +674,9 @@ func TestFetchResponseWithRecordBatchAndGZIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(resp.Topics[0].Partitions[0].RecordBatch.Records[0].Value) != "hello world" {
+	if string(resp.Topics[0].Partitions[0].RecordBatch[0].Records[0].Value) != "hello world" {
 		t.Fatal("Wrong response")
 	}
-
 }
 
 func TestFetchResponseWithRecordBatch(t *testing.T) {
@@ -714,7 +713,7 @@ func TestFetchResponseWithRecordBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(resp.Topics[0].Partitions[0].RecordBatch.Records[0].Value) != "hello world" {
+	if string(resp.Topics[0].Partitions[0].RecordBatch[0].Records[0].Value) != "hello world" {
 		t.Fatal("Wrong response")
 	}
 
@@ -754,7 +753,7 @@ func TestFetchResponseWithRecordBatch2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(resp.Topics[0].Partitions[0].RecordBatch.Records[0].Value) != "hello world" {
+	if string(resp.Topics[0].Partitions[0].RecordBatch[0].Records[0].Value) != "hello world" {
 		t.Fatal("Wrong response")
 	}
 
@@ -806,7 +805,7 @@ func TestFetchResponseWithRecordBatchWithMultipleRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	records := resp.Topics[0].Partitions[0].RecordBatch.Records
+	records := resp.Topics[0].Partitions[0].RecordBatch[0].Records
 
 	if len(records) != 2 {
 		t.Fatal("Expect 2 records")

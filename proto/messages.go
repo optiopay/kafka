@@ -1091,7 +1091,7 @@ type FetchRespPartition struct {
 	AbortedTransactions []FetchRespAbortedTransaction
 	Messages            []*Message
 	MessageVersion      MessageVersion
-	RecordBatch         *RecordBatch
+	RecordBatch         []*RecordBatch
 }
 
 type FetchRespAbortedTransaction struct {
@@ -1198,10 +1198,7 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 
 	resp.Version = version
 
-	//Have to wrap because we use Peek later
-	br := bufio.NewReader(r)
-	dec := NewDecoder(br)
-	r = nil // just to prevent later usage
+	dec := NewDecoder(r)
 
 	// total message size
 	_ = dec.DecodeInt32()
@@ -1257,10 +1254,13 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 				return nil, dec.Err()
 			}
 
-			if msgSetSize > 0 {
+			br := bufio.NewReader(io.LimitReader(r, int64(msgSetSize)))
+			for {
 				// try to figure out what is next - MessageSet or RecordBatch
-
 				b, err := br.Peek(17)
+				if err == io.EOF {
+					break
+				}
 				if err != nil {
 					return nil, err
 				}
@@ -1278,9 +1278,11 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 					}
 				} else if part.MessageVersion == MessageV2 {
 					// Response contains RecordBatch
-					if part.RecordBatch, err = readRecordBatch(br, msgSetSize); err != nil {
+					batch, err := readRecordBatch(br, msgSetSize)
+					if err != nil {
 						return nil, err
 					}
+					part.RecordBatch = append(part.RecordBatch, batch)
 				} else {
 					return nil, errors.New("Incorrect message byte")
 				}

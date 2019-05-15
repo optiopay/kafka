@@ -1337,17 +1337,19 @@ consumeRetryLoop:
 					// In order to keep API for Consumer
 					// here we repack Records to Messages
 
-					messages := make([]*proto.Message, 0, len(part.RecordBatch.Records))
-					for _, r := range part.RecordBatch.Records {
-						m := &proto.Message{
-							Key:       r.Key,
-							Value:     r.Value,
-							Offset:    part.RecordBatch.FirstOffset + r.OffsetDelta,
-							Topic:     topic.Name,
-							Partition: part.ID,
-							TipOffset: part.TipOffset,
+					var messages []*proto.Message
+					for _, rb := range part.RecordBatch {
+						for _, r := range rb.Records {
+							m := &proto.Message{
+								Key:       r.Key,
+								Value:     r.Value,
+								Offset:    rb.FirstOffset + r.OffsetDelta,
+								Topic:     topic.Name,
+								Partition: part.ID,
+								TipOffset: part.TipOffset,
+							}
+							messages = append(messages, m)
 						}
-						messages = append(messages, m)
 					}
 
 					return messages, part.Err
