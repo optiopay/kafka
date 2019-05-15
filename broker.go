@@ -1338,7 +1338,7 @@ consumeRetryLoop:
 					// here we repack Records to Messages
 
 					var messages []*proto.Message
-					for _, rb := range part.RecordBatch {
+					for _, rb := range part.RecordBatches {
 						for _, r := range rb.Records {
 							m := &proto.Message{
 								Key:       r.Key,

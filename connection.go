@@ -403,7 +403,7 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 				}
 				partition.Messages = partition.Messages[i:]
 			} else {
-				for _, rb := range partition.RecordBatch {
+				for _, rb := range partition.RecordBatches {
 					firstOffset := rb.FirstOffset
 					for _, rec := range rb.Records {
 						if firstOffset+rec.OffsetDelta >= requestedOffset {

@@ -1091,7 +1091,7 @@ type FetchRespPartition struct {
 	AbortedTransactions []FetchRespAbortedTransaction
 	Messages            []*Message
 	MessageVersion      MessageVersion
-	RecordBatch         []*RecordBatch
+	RecordBatches       []*RecordBatch
 }
 
 type FetchRespAbortedTransaction struct {
@@ -1282,7 +1282,7 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 					if err != nil {
 						return nil, err
 					}
-					part.RecordBatch = append(part.RecordBatch, batch)
+					part.RecordBatches = append(part.RecordBatches, batch)
 				} else {
 					return nil, errors.New("Incorrect message byte")
 				}
