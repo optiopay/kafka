@@ -379,9 +379,8 @@ func (w *slicewriter) Slice() []byte {
 // off part of the last message. This also means that the last message can be
 // shorter than the header is saying. In such case just ignore the last
 // malformed message from the set and returned earlier data.
-func readRecordBatch(r io.Reader, size int32) (*RecordBatch, error) {
-	rd := io.LimitReader(r, int64(size))
-	dec := NewDecoder(rd)
+func readRecordBatch(r io.Reader) (*RecordBatch, error) {
+	dec := NewDecoder(r)
 
 	rb := &RecordBatch{}
 	rb.FirstOffset = dec.DecodeInt64()
@@ -396,7 +395,7 @@ func readRecordBatch(r io.Reader, size int32) (*RecordBatch, error) {
 	rb.CRC = dec.DecodeInt32()
 
 	crc := crc32.New(crc32.MakeTable(crc32.Castagnoli))
-	r = io.TeeReader(rd, crc)
+	r = io.TeeReader(r, crc)
 	dec = NewDecoder(r)
 
 	rb.Attributes = dec.DecodeInt16()
@@ -497,21 +496,19 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 		return nil, messageSizeError(int(size))
 	}
 
-	rd := io.LimitReader(r, int64(size))
-
 	if conf.SimplifiedMessageSetParsing {
 		msgbuf, err := allocParseBuf(int(size))
 		if err != nil {
 			return nil, err
 		}
 
-		if _, err := io.ReadFull(rd, msgbuf); err != nil {
+		if _, err := io.ReadFull(r, msgbuf); err != nil {
 			return nil, err
 		}
 		return make([]*Message, 0, 0), nil
 	}
 
-	dec := NewDecoder(rd)
+	dec := NewDecoder(r)
 	set := make([]*Message, 0, 256)
 
 	for {
@@ -541,7 +538,7 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 			return nil, err
 		}
 
-		if _, err := io.ReadFull(rd, msgbuf); err != nil {
+		if _, err := io.ReadFull(r, msgbuf); err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				return set, nil
 			}
@@ -1278,7 +1275,7 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 					}
 				} else if part.MessageVersion == MessageV2 {
 					// Response contains RecordBatch
-					batch, err := readRecordBatch(br, msgSetSize)
+					batch, err := readRecordBatch(br)
 					if err != nil {
 						return nil, err
 					}
