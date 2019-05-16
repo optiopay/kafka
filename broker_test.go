@@ -3,6 +3,7 @@ package kafka
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -2168,6 +2169,162 @@ func TestOffsetCoordinatorNoCoordinatorError(t *testing.T) {
 	coordConf := NewOffsetCoordinatorConf("test-group")
 	if _, err := broker.OffsetCoordinator(coordConf); err != proto.ErrNoCoordinator {
 		t.Fatalf("expected %q error, got %v", proto.ErrNoCoordinator, err)
+	}
+}
+
+func TestExtractMessages(t *testing.T) {
+	type testCase struct {
+		resp      proto.FetchResp
+		topic     string
+		partition int32
+
+		expMsgs  []*proto.Message
+		expRetry bool
+		expError bool
+	}
+
+	for name, test := range map[string]testCase{
+		"retry": {
+			resp: proto.FetchResp{
+				Topics: []proto.FetchRespTopic{{
+					Name: "topic1",
+					Partitions: []proto.FetchRespPartition{{
+						ID:  0,
+						Err: proto.ErrLeaderNotAvailable,
+					}},
+				}},
+			},
+			topic:     "topic1",
+			partition: 0,
+
+			expMsgs:  nil,
+			expRetry: true,
+			expError: true,
+		},
+		"v1": {
+			resp: proto.FetchResp{
+				Topics: []proto.FetchRespTopic{{
+					Name: "topic1",
+					Partitions: []proto.FetchRespPartition{{
+						ID:             0,
+						MessageVersion: 1,
+						Messages: []*proto.Message{{
+							Key:   []byte("key"),
+							Value: []byte("value"),
+						}},
+					}},
+				}},
+			},
+			topic:     "topic1",
+			partition: 0,
+
+			expMsgs: []*proto.Message{{
+				Key:   []byte("key"),
+				Value: []byte("value"),
+			}},
+			expRetry: false,
+			expError: false,
+		},
+		"v2": {
+			resp: proto.FetchResp{
+				Topics: []proto.FetchRespTopic{{
+					Name: "topic1",
+					Partitions: []proto.FetchRespPartition{{
+						ID:             0,
+						MessageVersion: 2,
+						TipOffset:      532,
+						RecordBatches: []*proto.RecordBatch{{
+							FirstOffset: 3,
+							Records: []*proto.Record{{
+								OffsetDelta: 0,
+								Key:         []byte("key3"),
+								Value:       []byte("value3"),
+							}, {
+								OffsetDelta: 1,
+								Key:         []byte("key4"),
+								Value:       []byte("value4"),
+							}},
+						}, {
+							FirstOffset: 5,
+							Records: []*proto.Record{{
+								OffsetDelta: 0,
+								Key:         []byte("key5"),
+								Value:       []byte("value5"),
+							}},
+						}},
+					}},
+				}},
+			},
+			topic:     "topic1",
+			partition: 0,
+
+			expMsgs: []*proto.Message{{
+				Key:       []byte("key3"),
+				Value:     []byte("value3"),
+				Offset:    3,
+				Topic:     "topic1",
+				Partition: 0,
+				TipOffset: 532,
+			}, {
+				Key:       []byte("key4"),
+				Value:     []byte("value4"),
+				Offset:    4,
+				Topic:     "topic1",
+				Partition: 0,
+				TipOffset: 532,
+			}, {
+				Key:       []byte("key5"),
+				Value:     []byte("value5"),
+				Offset:    5,
+				Topic:     "topic1",
+				Partition: 0,
+				TipOffset: 532,
+			}},
+			expRetry: false,
+			expError: false,
+		},
+		"no data": {
+			resp: proto.FetchResp{
+				Topics: []proto.FetchRespTopic{{
+					Name: "topicX",
+					Partitions: []proto.FetchRespPartition{{
+						ID: 0,
+					}},
+				}, {
+					Name: "topicY",
+				}, {
+					Name: "topic1",
+					Partitions: []proto.FetchRespPartition{{
+						ID: 1,
+					}},
+				}},
+			},
+			topic:     "topic1",
+			partition: 0,
+
+			expMsgs:  nil,
+			expRetry: false,
+			expError: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			conf := ConsumerConf{
+				Topic:     test.topic,
+				Partition: test.partition,
+				Logger:    &nullLogger{},
+			}
+
+			gotMsgs, gotRetry, gotErr := extractMessages(&test.resp, conf)
+			if gotRetry != test.expRetry {
+				t.Fatalf("got retry: %t but expected: %t", gotRetry, test.expRetry)
+			}
+			if (gotErr != nil) != test.expError {
+				t.Fatalf("got error: [%s] but expected error: %t", gotErr, test.expError)
+			}
+			if !reflect.DeepEqual(gotMsgs, test.expMsgs) {
+				t.Fatalf("got msgs %#v but expected %#v", gotMsgs, test.expMsgs)
+			}
+		})
 	}
 }
 

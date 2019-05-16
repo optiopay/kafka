@@ -1256,7 +1256,6 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 	}
 
 	var resErr error
-consumeRetryLoop:
 	for retry := 0; retry < c.conf.RetryErrLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(c.conf.RetryErrWait)
@@ -1293,73 +1292,92 @@ consumeRetryLoop:
 			continue
 		}
 
-		for _, topic := range resp.Topics {
-			if topic.Name != c.conf.Topic {
-				c.conf.Logger.Warn("unexpected topic information received",
-					"got", topic.Name,
-					"expected", c.conf.Topic)
-				continue
+		messages, shouldRetry, err := extractMessages(resp, c.conf)
+		if shouldRetry {
+			c.conf.Logger.Debug("cannot fetch messages",
+				"retry", retry,
+				"error", err)
+			if err := c.broker.muRefreshMetadata(); err != nil {
+				c.conf.Logger.Debug("cannot refresh metadata",
+					"error", err)
 			}
-			for _, part := range topic.Partitions {
-				if part.ID != c.conf.Partition {
-					c.conf.Logger.Warn("unexpected partition information received",
-						"topic", topic.Name,
-						"expected", c.conf.Partition,
-						"got", part.ID)
-					continue
-				}
-				switch part.Err {
-				case proto.ErrLeaderNotAvailable,
-					proto.ErrNotLeaderForPartition,
-					proto.ErrBrokerNotAvailable,
-					proto.ErrUnknownTopicOrPartition:
-
-					c.conf.Logger.Debug("cannot fetch messages",
-						"retry", retry,
-						"error", part.Err)
-					if err := c.broker.muRefreshMetadata(); err != nil {
-						c.conf.Logger.Debug("cannot refresh metadata",
-							"error", err)
-					}
-					// The connection is fine, so don't close it,
-					// but we may very well need to talk to a different broker now.
-					// Set the conn to nil so that next time around the loop
-					// we'll check the metadata again to see who we're supposed to talk to.
-					c.conn = nil
-					continue consumeRetryLoop
-				}
-				if part.MessageVersion < 2 {
-					return part.Messages, part.Err
-				} else {
-					// In the kafka > 0.11 MessageSet was replaced
-					// with a new structure called RecordBatch
-					// and Message was replaced with Record
-					// In order to keep API for Consumer
-					// here we repack Records to Messages
-
-					var messages []*proto.Message
-					for _, rb := range part.RecordBatches {
-						for _, r := range rb.Records {
-							m := &proto.Message{
-								Key:       r.Key,
-								Value:     r.Value,
-								Offset:    rb.FirstOffset + r.OffsetDelta,
-								Topic:     topic.Name,
-								Partition: part.ID,
-								TipOffset: part.TipOffset,
-							}
-							messages = append(messages, m)
-						}
-					}
-
-					return messages, part.Err
-				}
-			}
+			// The connection is fine, so don't close it,
+			// but we may very well need to talk to a different broker now.
+			// Set the conn to nil so that next time around the loop
+			// we'll check the metadata again to see who we're supposed to talk to.
+			c.conn = nil
+			continue
 		}
-		return nil, errors.New("incomplete fetch response")
+		return messages, err
 	}
 
 	return nil, resErr
+}
+
+// extractMessages extracts relevant messages from a fetch response.
+//
+// The boolean response parameter will be true if a temporary error was
+// encountered, indicating that the fetch may be retried.
+func extractMessages(resp *proto.FetchResp, conf ConsumerConf) ([]*proto.Message, bool, error) {
+	for _, topic := range resp.Topics {
+		if topic.Name != conf.Topic {
+			conf.Logger.Warn("unexpected topic information received",
+				"got", topic.Name,
+				"expected", conf.Topic)
+			continue
+		}
+
+		for _, part := range topic.Partitions {
+			if part.ID != conf.Partition {
+				conf.Logger.Warn("unexpected partition information received",
+					"topic", topic.Name,
+					"expected", conf.Partition,
+					"got", part.ID)
+				continue
+			}
+
+			switch part.Err {
+			case proto.ErrLeaderNotAvailable,
+				proto.ErrNotLeaderForPartition,
+				proto.ErrBrokerNotAvailable,
+				proto.ErrUnknownTopicOrPartition:
+
+				return nil, true, part.Err
+			}
+
+			if part.MessageVersion < 2 {
+				return part.Messages, false, part.Err
+			}
+
+			// In the kafka > 0.11 MessageSet was replaced
+			// with a new structure called RecordBatch
+			// and Message was replaced with Record
+			// In order to keep API for Consumer
+			// here we repack Records to Messages
+			recordCount := 0
+			for _, rb := range part.RecordBatches {
+				recordCount += len(rb.Records)
+			}
+			messages := make([]*proto.Message, 0, recordCount)
+			for _, rb := range part.RecordBatches {
+				for _, r := range rb.Records {
+					m := &proto.Message{
+						Key:       r.Key,
+						Value:     r.Value,
+						Offset:    rb.FirstOffset + r.OffsetDelta,
+						Topic:     topic.Name,
+						Partition: part.ID,
+						TipOffset: part.TipOffset,
+					}
+					messages = append(messages, m)
+				}
+			}
+
+			return messages, false, part.Err
+		}
+	}
+
+	return nil, false, errors.New("incomplete fetch response")
 }
 
 // OffsetCoordinatorConf represents the configuration of an offset coordinator.
