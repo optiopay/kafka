@@ -383,18 +383,27 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 		return nil, err
 	}
 
-	// Compressed messages are returned in full batches for efficiency
-	// (the broker doesn't need to decompress).
-	// This means that it's possible to get some leading messages
-	// with a smaller offset than requested. Trim those.
+	trimLeadingMessages(req, resp)
+
+	return resp, nil
+}
+
+// trimLeadingMessages removes any messages from the response that are before
+// the requested offset.
+//
+// This may be sent by the server because compressed messages are returned in
+// full batches for efficiency (the broker doesn't need to decompress).  This
+// means that it's possible to get some leading messages with a smaller offset
+// than requested.
+func trimLeadingMessages(req *proto.FetchReq, resp *proto.FetchResp) {
 	for ti := range resp.Topics {
 		topic := &resp.Topics[ti]
 		reqTopic := &req.Topics[ti]
 		for pi := range topic.Partitions {
 			partition := &topic.Partitions[pi]
 			requestedOffset := reqTopic.Partitions[pi].FetchOffset
-			i := 0
 			if partition.MessageVersion < 2 {
+				i := 0
 				for _, msg := range partition.Messages {
 					if msg.Offset >= requestedOffset {
 						break
@@ -403,18 +412,20 @@ func (c *connection) Fetch(req *proto.FetchReq) (*proto.FetchResp, error) {
 				}
 				partition.Messages = partition.Messages[i:]
 			} else {
-				firstOffset := partition.RecordBatch.FirstOffset
-				for _, rec := range partition.RecordBatch.Records {
-					if firstOffset+rec.OffsetDelta >= requestedOffset {
-						break
+				for _, rb := range partition.RecordBatches {
+					i := 0
+					firstOffset := rb.FirstOffset
+					for _, rec := range rb.Records {
+						if firstOffset+rec.OffsetDelta >= requestedOffset {
+							break
+						}
+						i++
 					}
-					i++
+					rb.Records = rb.Records[i:]
 				}
-				partition.RecordBatch.Records = partition.RecordBatch.Records[i:]
 			}
 		}
 	}
-	return resp, nil
 }
 
 // Offset sends given offset request to kafka node and returns related response.
