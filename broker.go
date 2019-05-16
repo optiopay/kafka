@@ -1241,6 +1241,7 @@ func (c *consumer) fetch() ([]*proto.Message, error) {
 		RequestHeader: proto.RequestHeader{ClientID: c.broker.conf.ClientID},
 		MaxWaitTime:   c.conf.RequestTimeout,
 		MinBytes:      c.conf.MinFetchSize,
+		MaxBytes:      c.conf.MaxFetchSize,
 		Topics: []proto.FetchReqTopic{
 			{
 				Name: c.conf.Topic,
