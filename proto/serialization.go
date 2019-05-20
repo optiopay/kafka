@@ -28,6 +28,10 @@ func NewDecoder(r io.Reader) *decoder {
 	}
 }
 
+func (d *decoder) SetReader(r io.Reader) {
+	d.r = r
+}
+
 func (d *decoder) DecodeInt8() int8 {
 	if d.err != nil {
 		return 0
