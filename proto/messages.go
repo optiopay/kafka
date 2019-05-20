@@ -449,10 +449,6 @@ func readRecordBatch(r io.Reader) (*RecordBatch, error) {
 
 	for i := 0; i < slen; i++ {
 		rec, err := readRecord(r)
-		if (err == ErrNotEnoughData || err == io.EOF || err == io.ErrUnexpectedEOF) && len(rb.Records) > 0 {
-			// Think that it was partial record and we just ignore it
-			return rb, nil
-		}
 		if err != nil {
 			return nil, err
 		}
@@ -482,7 +478,7 @@ func readRecord(r io.Reader) (*Record, error) {
 		rec.Headers[i].Key = dec.DecodeVarString()
 		rec.Headers[i].Value = dec.DecodeVarBytes()
 	}
-	return rec, nil
+	return rec, dec.Err()
 }
 
 // readMessageSet reads and return messages from the stream.
@@ -1276,6 +1272,10 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 				} else if part.MessageVersion == MessageV2 {
 					// Response contains RecordBatch
 					batch, err := readRecordBatch(br)
+					if (err == ErrNotEnoughData || err == io.EOF || err == io.ErrUnexpectedEOF) && len(part.RecordBatches) > 0 {
+						// it was partial batch so we just ignore it
+						break
+					}
 					if err != nil {
 						return nil, err
 					}
