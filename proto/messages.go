@@ -1205,21 +1205,21 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 		resp.ThrottleTime = dec.DecodeDuration32()
 	}
 
-	len, err := dec.DecodeArrayLen()
+	numTopics, err := dec.DecodeArrayLen()
 	if err != nil {
 		return nil, err
 	}
-	resp.Topics = make([]FetchRespTopic, len)
+	resp.Topics = make([]FetchRespTopic, numTopics)
 
 	for ti := range resp.Topics {
 		var topic = &resp.Topics[ti]
 		topic.Name = dec.DecodeString()
 
-		len, err := dec.DecodeArrayLen()
+		numPartitions, err := dec.DecodeArrayLen()
 		if err != nil {
 			return nil, err
 		}
-		topic.Partitions = make([]FetchRespPartition, len)
+		topic.Partitions = make([]FetchRespPartition, numPartitions)
 
 		for pi := range topic.Partitions {
 			var part = &topic.Partitions[pi]
@@ -1232,11 +1232,11 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 				if resp.Version >= KafkaV5 {
 					part.LogStartOffset = dec.DecodeInt64()
 				}
-				len, err := dec.DecodeArrayLen()
+				numAbortedTransactions, err := dec.DecodeArrayLen()
 				if err != nil {
 					return nil, err
 				}
-				part.AbortedTransactions = make([]FetchRespAbortedTransaction, len)
+				part.AbortedTransactions = make([]FetchRespAbortedTransaction, numAbortedTransactions)
 				for i := range part.AbortedTransactions {
 					part.AbortedTransactions[i].ProducerID = dec.DecodeInt64()
 					part.AbortedTransactions[i].FirstOffset = dec.DecodeInt64()
