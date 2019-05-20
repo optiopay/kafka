@@ -449,10 +449,6 @@ func readRecordBatch(r io.Reader) (*RecordBatch, error) {
 
 	for i := 0; i < slen; i++ {
 		rec, err := readRecord(r)
-		if (err == ErrNotEnoughData || err == io.EOF || err == io.ErrUnexpectedEOF) && len(rb.Records) > 0 {
-			// Think that it was partial record and we just ignore it
-			return rb, nil
-		}
 		if err != nil {
 			return nil, err
 		}
@@ -482,7 +478,7 @@ func readRecord(r io.Reader) (*Record, error) {
 		rec.Headers[i].Key = dec.DecodeVarString()
 		rec.Headers[i].Value = dec.DecodeVarBytes()
 	}
-	return rec, nil
+	return rec, dec.Err()
 }
 
 // readMessageSet reads and return messages from the stream.
@@ -1205,21 +1201,21 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 		resp.ThrottleTime = dec.DecodeDuration32()
 	}
 
-	len, err := dec.DecodeArrayLen()
+	numTopics, err := dec.DecodeArrayLen()
 	if err != nil {
 		return nil, err
 	}
-	resp.Topics = make([]FetchRespTopic, len)
+	resp.Topics = make([]FetchRespTopic, numTopics)
 
 	for ti := range resp.Topics {
 		var topic = &resp.Topics[ti]
 		topic.Name = dec.DecodeString()
 
-		len, err := dec.DecodeArrayLen()
+		numPartitions, err := dec.DecodeArrayLen()
 		if err != nil {
 			return nil, err
 		}
-		topic.Partitions = make([]FetchRespPartition, len)
+		topic.Partitions = make([]FetchRespPartition, numPartitions)
 
 		for pi := range topic.Partitions {
 			var part = &topic.Partitions[pi]
@@ -1232,11 +1228,11 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 				if resp.Version >= KafkaV5 {
 					part.LogStartOffset = dec.DecodeInt64()
 				}
-				len, err := dec.DecodeArrayLen()
+				numAbortedTransactions, err := dec.DecodeArrayLen()
 				if err != nil {
 					return nil, err
 				}
-				part.AbortedTransactions = make([]FetchRespAbortedTransaction, len)
+				part.AbortedTransactions = make([]FetchRespAbortedTransaction, numAbortedTransactions)
 				for i := range part.AbortedTransactions {
 					part.AbortedTransactions[i].ProducerID = dec.DecodeInt64()
 					part.AbortedTransactions[i].FirstOffset = dec.DecodeInt64()
@@ -1276,6 +1272,10 @@ func ReadVersionedFetchResp(r io.Reader, version int16) (*FetchResp, error) {
 				} else if part.MessageVersion == MessageV2 {
 					// Response contains RecordBatch
 					batch, err := readRecordBatch(br)
+					if (err == ErrNotEnoughData || err == io.EOF || err == io.ErrUnexpectedEOF) && len(part.RecordBatches) > 0 {
+						// it was partial batch so we just ignore it
+						break
+					}
 					if err != nil {
 						return nil, err
 					}
