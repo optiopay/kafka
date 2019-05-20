@@ -24,27 +24,21 @@ func getTestEncoder() *encoder {
 
 func TestEncoder(t *testing.T) {
 	e := getTestEncoder()
-	e.Encode(int8(keyint))
+	e.EncodeInt8(int8(keyint))
 	if !bytes.Equal(b.Bytes(), bint8) {
 		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bint8)
 	}
 
 	e = getTestEncoder()
-	e.Encode(int64(keyint))
+	e.EncodeInt64(int64(keyint))
 	if !bytes.Equal(b.Bytes(), bint64) {
 		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bint64)
 	}
 
 	e = getTestEncoder()
-	e.Encode(string(keystr))
+	e.EncodeString(string(keystr))
 	if !bytes.Equal(b.Bytes(), bstr) {
 		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bstr)
-	}
-
-	e = getTestEncoder()
-	e.Encode([]byte(keystr))
-	if !bytes.Equal(b.Bytes(), bbyte) {
-		t.Fatalf("bytes are not the same % x != % x", b.Bytes(), bbyte)
 	}
 }
 
