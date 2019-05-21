@@ -396,7 +396,7 @@ func readRecordBatch(r io.Reader) (*RecordBatch, error) {
 
 	crc := crc32.New(crc32.MakeTable(crc32.Castagnoli))
 	r = io.TeeReader(r, crc)
-	dec = NewDecoder(r)
+	dec.SetReader(r)
 
 	rb.Attributes = dec.DecodeInt16()
 	rb.LastOffsetDelta = dec.DecodeInt32()
@@ -425,6 +425,7 @@ func readRecordBatch(r io.Reader) (*RecordBatch, error) {
 			return nil, err
 		}
 		r = bytes.NewReader(allUnzipped)
+		dec.SetReader(r)
 
 	case CompressionSnappy:
 		var err error
@@ -437,6 +438,7 @@ func readRecordBatch(r io.Reader) (*RecordBatch, error) {
 			return nil, err
 		}
 		r = bytes.NewReader(decoded)
+		dec.SetReader(r)
 	default:
 		return nil, errors.New("Unknown compression")
 	}
@@ -448,7 +450,7 @@ func readRecordBatch(r io.Reader) (*RecordBatch, error) {
 	rb.Records = make([]*Record, 0, slen)
 
 	for i := 0; i < slen; i++ {
-		rec, err := readRecord(r)
+		rec, err := readRecord(dec)
 		if err != nil {
 			return nil, err
 		}
@@ -460,8 +462,7 @@ func readRecordBatch(r io.Reader) (*RecordBatch, error) {
 	return rb, nil
 }
 
-func readRecord(r io.Reader) (*Record, error) {
-	dec := NewDecoder(r)
+func readRecord(dec *decoder) (*Record, error) {
 	rec := &Record{}
 	rec.Length = dec.DecodeVarInt()
 	rec.Attributes = dec.DecodeInt8()
