@@ -69,3 +69,18 @@ func TestDecoder(t *testing.T) {
 		t.Fatalf("bytes are not the same")
 	}
 }
+
+func BenchmarkReadVarint(b *testing.B) {
+	data := []byte{0x10}
+	r := bytes.NewReader(data)
+	dec := NewDecoder(r)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		r.Reset(data)
+		x := dec.DecodeVarInt()
+		if x != 8 {
+			b.Fatalf("unexpected value decoded: %d", x)
+		}
+	}
+}

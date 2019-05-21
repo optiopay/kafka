@@ -196,24 +196,19 @@ func (d *decoder) DecodeBytes() []byte {
 	return b
 }
 
-type byteReader struct {
-	r io.Reader
-}
-
-func (br byteReader) ReadByte() (byte, error) {
-	buf := make([]byte, 1)
-	_, err := io.ReadFull(br.r, buf)
-	return buf[0], err
-}
-
 func (d *decoder) DecodeVarInt() int64 {
-	// have to use wrapper because
-	// ReadVarint require ByteReader
-	res, err := binary.ReadVarint(byteReader{d.r})
+	// err already stored by ReadByte():
+	res, _ := binary.ReadVarint(d)
+	return res
+}
+
+// ReadByte implements ByteReader
+func (d *decoder) ReadByte() (byte, error) {
+	_, err := io.ReadFull(d.r, d.buf[:1])
 	if err != nil {
 		d.err = err
 	}
-	return res
+	return d.buf[0], err
 }
 
 func (d *decoder) DecodeVarBytes() []byte {
