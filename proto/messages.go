@@ -615,11 +615,11 @@ func readMessageSet(r io.Reader, size int32) ([]*Message, error) {
 
 func encodeHeader(e *encoder, r Request) {
 	// message size - for now just placeholder
-	e.Encode(int32(0))
-	e.Encode(int16(r.Kind()))
-	e.Encode(r.GetVersion())
-	e.Encode(r.GetCorrelationID())
-	e.Encode(r.GetClientID())
+	e.EncodeInt32(0)
+	e.EncodeInt16(r.Kind())
+	e.EncodeInt16(r.GetVersion())
+	e.EncodeInt32(r.GetCorrelationID())
+	e.EncodeString(r.GetClientID())
 }
 
 func decodeHeader(dec *decoder, req Request) {
@@ -684,11 +684,11 @@ func (r *MetadataReq) Bytes() ([]byte, error) {
 		enc.EncodeArrayLen(len(r.Topics))
 	}
 	for _, name := range r.Topics {
-		enc.Encode(name)
+		enc.EncodeString(name)
 	}
 
 	if r.version >= KafkaV4 {
-		enc.Encode(boolToInt8(r.AllowAutoTopicCreation))
+		enc.EncodeInt8(boolToInt8(r.AllowAutoTopicCreation))
 	}
 
 	if enc.Err() != nil {
@@ -749,50 +749,50 @@ func (r *MetadataResp) Bytes() ([]byte, error) {
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
-	enc.Encode(int32(0))
-	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(0)
+	enc.EncodeInt32(r.CorrelationID)
 
 	if r.Version >= KafkaV3 {
-		enc.Encode(r.ThrottleTime)
+		enc.EncodeDuration(r.ThrottleTime)
 	}
 
 	enc.EncodeArrayLen(len(r.Brokers))
 	for _, broker := range r.Brokers {
-		enc.Encode(broker.NodeID)
-		enc.Encode(broker.Host)
-		enc.Encode(broker.Port)
+		enc.EncodeInt32(broker.NodeID)
+		enc.EncodeString(broker.Host)
+		enc.EncodeInt32(broker.Port)
 
 		if r.Version >= KafkaV1 {
-			enc.Encode(broker.Rack)
+			enc.EncodeString(broker.Rack)
 		}
 	}
 
 	if r.Version >= KafkaV2 {
-		enc.Encode(r.ClusterID)
+		enc.EncodeString(r.ClusterID)
 	}
 
 	if r.Version >= KafkaV1 {
-		enc.Encode(r.ControllerID)
+		enc.EncodeInt32(r.ControllerID)
 	}
 
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
 		enc.EncodeError(topic.Err)
-		enc.Encode(topic.Name)
+		enc.EncodeString(topic.Name)
 
 		if r.Version >= KafkaV1 {
-			enc.Encode(boolToInt8(topic.IsInternal))
+			enc.EncodeInt8(boolToInt8(topic.IsInternal))
 		}
 
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
 			enc.EncodeError(part.Err)
-			enc.Encode(part.ID)
-			enc.Encode(part.Leader)
-			enc.Encode(part.Replicas)
-			enc.Encode(part.Isrs)
+			enc.EncodeInt32(part.ID)
+			enc.EncodeInt32(part.Leader)
+			enc.EncodeInt32s(part.Replicas)
+			enc.EncodeInt32s(part.Isrs)
 			if r.Version >= KafkaV5 {
-				enc.Encode(part.OfflineReplicas)
+				enc.EncodeInt32s(part.OfflineReplicas)
 			}
 		}
 	}
@@ -1003,32 +1003,32 @@ func (r *FetchReq) Bytes() ([]byte, error) {
 	encodeHeader(enc, r)
 
 	//enc.Encode(r.ReplicaID)
-	enc.Encode(int32(-1))
+	enc.EncodeInt32(-1)
 
-	enc.Encode(r.MaxWaitTime)
-	enc.Encode(r.MinBytes)
+	enc.EncodeDuration(r.MaxWaitTime)
+	enc.EncodeInt32(r.MinBytes)
 
 	if r.version >= KafkaV3 {
-		enc.Encode(r.MaxBytes)
+		enc.EncodeInt32(r.MaxBytes)
 	}
 
 	if r.version >= KafkaV4 {
-		enc.Encode(r.IsolationLevel)
+		enc.EncodeInt8(r.IsolationLevel)
 	}
 
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
-		enc.Encode(topic.Name)
+		enc.EncodeString(topic.Name)
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
-			enc.Encode(part.ID)
-			enc.Encode(part.FetchOffset)
+			enc.EncodeInt32(part.ID)
+			enc.EncodeInt64(part.FetchOffset)
 
 			if r.version >= KafkaV5 {
-				enc.Encode(part.LogStartOffset)
+				enc.EncodeInt64(part.LogStartOffset)
 			}
 
-			enc.Encode(part.MaxBytes)
+			enc.EncodeInt32(part.MaxBytes)
 		}
 	}
 
@@ -1131,38 +1131,38 @@ func (r *FetchResp) Bytes() ([]byte, error) {
 	var buf buffer
 	enc := NewEncoder(&buf)
 
-	enc.Encode(int32(0)) // placeholder
-	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(0) // placeholder
+	enc.EncodeInt32(r.CorrelationID)
 
 	if r.Version >= KafkaV1 {
-		enc.Encode(r.ThrottleTime)
+		enc.EncodeDuration(r.ThrottleTime)
 	}
 
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
-		enc.Encode(topic.Name)
+		enc.EncodeString(topic.Name)
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
-			enc.Encode(part.ID)
+			enc.EncodeInt32(part.ID)
 			enc.EncodeError(part.Err)
-			enc.Encode(part.TipOffset)
+			enc.EncodeInt64(part.TipOffset)
 
 			if r.Version >= KafkaV4 {
-				enc.Encode(part.LastStableOffset)
+				enc.EncodeInt64(part.LastStableOffset)
 
 				if r.Version >= KafkaV5 {
-					enc.Encode(part.LogStartOffset)
+					enc.EncodeInt64(part.LogStartOffset)
 				}
 
 				enc.EncodeArrayLen(len(part.AbortedTransactions))
 				for _, trans := range part.AbortedTransactions {
-					enc.Encode(trans.ProducerID)
-					enc.Encode(trans.FirstOffset)
+					enc.EncodeInt64(trans.ProducerID)
+					enc.EncodeInt64(trans.FirstOffset)
 				}
 			}
 
 			i := len(buf)
-			enc.Encode(int32(0)) // placeholder
+			enc.EncodeInt32(0) // placeholder
 			// NOTE(caleb): writing compressed fetch response isn't implemented
 			// for now, since that's not needed for clients.
 			n, err := writeMessageSet(&buf, part.Messages, CompressionNone)
@@ -1332,7 +1332,7 @@ func (r *ConsumerMetadataReq) Bytes() ([]byte, error) {
 
 	encodeHeader(enc, r)
 
-	enc.Encode(r.ConsumerGroup)
+	enc.EncodeString(r.ConsumerGroup)
 
 	if enc.Err() != nil {
 		return nil, enc.Err()
@@ -1401,22 +1401,22 @@ func (r *ConsumerMetadataResp) Bytes() ([]byte, error) {
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
-	enc.Encode(int32(0))
-	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(0)
+	enc.EncodeInt32(r.CorrelationID)
 
 	if r.Version >= KafkaV1 {
-		enc.Encode(r.ThrottleTime)
+		enc.EncodeDuration(r.ThrottleTime)
 	}
 
 	enc.EncodeError(r.Err)
 
 	if r.Version >= KafkaV1 {
-		enc.Encode(r.ErrMsg)
+		enc.EncodeString(r.ErrMsg)
 	}
 
-	enc.Encode(r.CoordinatorID)
-	enc.Encode(r.CoordinatorHost)
-	enc.Encode(r.CoordinatorPort)
+	enc.EncodeInt32(r.CoordinatorID)
+	enc.EncodeString(r.CoordinatorHost)
+	enc.EncodeInt32(r.CoordinatorPort)
 
 	if enc.Err() != nil {
 		return nil, enc.Err()
@@ -1512,31 +1512,31 @@ func (r *OffsetCommitReq) Bytes() ([]byte, error) {
 
 	encodeHeader(enc, r)
 
-	enc.Encode(r.ConsumerGroup)
+	enc.EncodeString(r.ConsumerGroup)
 
 	if r.version >= KafkaV1 {
-		enc.Encode(r.GroupGenerationID)
-		enc.Encode(r.MemberID)
+		enc.EncodeInt32(r.GroupGenerationID)
+		enc.EncodeString(r.MemberID)
 	}
 
 	if r.version >= KafkaV2 {
-		enc.Encode(r.RetentionTime)
+		enc.EncodeInt64(r.RetentionTime)
 	}
 
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
-		enc.Encode(topic.Name)
+		enc.EncodeString(topic.Name)
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
-			enc.Encode(part.ID)
-			enc.Encode(part.Offset)
+			enc.EncodeInt32(part.ID)
+			enc.EncodeInt64(part.Offset)
 
 			if r.version == KafkaV1 {
 				// TODO(husio) is this really in milliseconds?
-				enc.Encode(part.TimeStamp.UnixNano() / int64(time.Millisecond))
+				enc.EncodeInt64(part.TimeStamp.UnixNano() / int64(time.Millisecond))
 			}
 
-			enc.Encode(part.Metadata)
+			enc.EncodeString(part.Metadata)
 		}
 	}
 
@@ -1628,19 +1628,19 @@ func (r *OffsetCommitResp) Bytes() ([]byte, error) {
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
-	enc.Encode(int32(0))
-	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(0)
+	enc.EncodeInt32(r.CorrelationID)
 
 	if r.Version >= KafkaV3 {
-		enc.Encode(r.ThrottleTime)
+		enc.EncodeDuration(r.ThrottleTime)
 	}
 
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, t := range r.Topics {
-		enc.Encode(t.Name)
+		enc.EncodeString(t.Name)
 		enc.EncodeArrayLen(len(t.Partitions))
 		for _, p := range t.Partitions {
-			enc.Encode(p.ID)
+			enc.EncodeInt32(p.ID)
 			enc.EncodeError(p.Err)
 		}
 	}
@@ -1712,14 +1712,11 @@ func (r *OffsetFetchReq) Bytes() ([]byte, error) {
 
 	encodeHeader(enc, r)
 
-	enc.Encode(r.ConsumerGroup)
+	enc.EncodeString(r.ConsumerGroup)
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, t := range r.Topics {
-		enc.Encode(t.Name)
-		enc.EncodeArrayLen(len(t.Partitions))
-		for _, p := range t.Partitions {
-			enc.Encode(p)
-		}
+		enc.EncodeString(t.Name)
+		enc.EncodeInt32s(t.Partitions)
 	}
 
 	if enc.Err() != nil {
@@ -1820,21 +1817,21 @@ func (r *OffsetFetchResp) Bytes() ([]byte, error) {
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
-	enc.Encode(int32(0))
-	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(0)
+	enc.EncodeInt32(r.CorrelationID)
 
 	if r.Version >= KafkaV3 {
-		enc.Encode(r.ThrottleTime)
+		enc.EncodeDuration(r.ThrottleTime)
 	}
 
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
-		enc.Encode(topic.Name)
+		enc.EncodeString(topic.Name)
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
-			enc.Encode(part.ID)
-			enc.Encode(part.Offset)
-			enc.Encode(part.Metadata)
+			enc.EncodeInt32(part.ID)
+			enc.EncodeInt64(part.Offset)
+			enc.EncodeString(part.Metadata)
 			enc.EncodeError(part.Err)
 		}
 	}
@@ -1998,25 +1995,25 @@ func (r *ProduceResp) Bytes() ([]byte, error) {
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
-	enc.Encode(int32(0))
-	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(0)
+	enc.EncodeInt32(r.CorrelationID)
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
-		enc.Encode(topic.Name)
+		enc.EncodeString(topic.Name)
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
-			enc.Encode(part.ID)
+			enc.EncodeInt32(part.ID)
 			enc.EncodeError(part.Err)
-			enc.Encode(part.Offset)
+			enc.EncodeInt64(part.Offset)
 
 			if r.Version >= KafkaV2 {
-				enc.Encode(part.LogAppendTime)
+				enc.EncodeInt64(part.LogAppendTime)
 			}
 		}
 	}
 
 	if r.Version >= KafkaV1 {
-		enc.Encode(r.ThrottleTime)
+		enc.EncodeDuration(r.ThrottleTime)
 	}
 
 	if enc.Err() != nil {
@@ -2158,22 +2155,22 @@ func (r *OffsetReq) Bytes() ([]byte, error) {
 	encodeHeader(enc, r)
 
 	//enc.Encode(r.ReplicaID)
-	enc.Encode(int32(-1))
+	enc.EncodeInt32(-1)
 
 	if r.version >= KafkaV2 {
-		enc.Encode(r.IsolationLevel)
+		enc.EncodeInt8(r.IsolationLevel)
 	}
 
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
-		enc.Encode(topic.Name)
+		enc.EncodeString(topic.Name)
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
-			enc.Encode(part.ID)
-			enc.Encode(part.TimeMs)
+			enc.EncodeInt32(part.ID)
+			enc.EncodeInt64(part.TimeMs)
 
 			if r.version == KafkaV0 {
-				enc.Encode(part.MaxOffsets)
+				enc.EncodeInt32(part.MaxOffsets)
 			}
 		}
 	}
@@ -2287,23 +2284,23 @@ func (r *OffsetResp) Bytes() ([]byte, error) {
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
-	enc.Encode(int32(0))
-	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(0)
+	enc.EncodeInt32(r.CorrelationID)
 
 	if r.Version >= KafkaV2 {
-		enc.Encode(r.ThrottleTime)
+		enc.EncodeDuration(r.ThrottleTime)
 	}
 
 	enc.EncodeArrayLen(len(r.Topics))
 	for _, topic := range r.Topics {
-		enc.Encode(topic.Name)
+		enc.EncodeString(topic.Name)
 		enc.EncodeArrayLen(len(topic.Partitions))
 		for _, part := range topic.Partitions {
-			enc.Encode(part.ID)
+			enc.EncodeInt32(part.ID)
 			enc.EncodeError(part.Err)
 
 			if r.Version >= KafkaV1 {
-				enc.Encode(part.TimeStamp.UnixNano() / int64(time.Millisecond))
+				enc.EncodeInt64(part.TimeStamp.UnixNano() / int64(time.Millisecond))
 
 				// in kafka >= KafkaV1 offset can be only one value.
 				// In this case we use first element of slice
@@ -2311,12 +2308,9 @@ func (r *OffsetResp) Bytes() ([]byte, error) {
 				if len(part.Offsets) > 0 {
 					offset = part.Offsets[0]
 				}
-				enc.Encode(offset)
+				enc.EncodeInt64(offset)
 			} else {
-				enc.EncodeArrayLen(len(part.Offsets))
-				for _, off := range part.Offsets {
-					enc.Encode(off)
-				}
+				enc.EncodeInt64s(part.Offsets)
 			}
 		}
 	}
@@ -2426,30 +2420,26 @@ func (r *CreateTopicsReq) Bytes() ([]byte, error) {
 
 	enc.EncodeArrayLen(len(r.CreateTopicsRequests))
 	for _, topicInfo := range r.CreateTopicsRequests {
-		enc.Encode(topicInfo.Topic)
-		enc.Encode(topicInfo.NumPartitions)
-		enc.Encode(topicInfo.ReplicationFactor)
+		enc.EncodeString(topicInfo.Topic)
+		enc.EncodeInt32(topicInfo.NumPartitions)
+		enc.EncodeInt16(topicInfo.ReplicationFactor)
 		enc.EncodeArrayLen(len(topicInfo.ReplicaAssignments))
 		for _, replicaAssignment := range topicInfo.ReplicaAssignments {
-			enc.Encode(replicaAssignment.Partition)
-			enc.EncodeArrayLen(len(replicaAssignment.Replicas))
-			for _, replica := range replicaAssignment.Replicas {
-				enc.Encode(replica)
-			}
-
+			enc.EncodeInt32(replicaAssignment.Partition)
+			enc.EncodeInt32s(replicaAssignment.Replicas)
 		}
 
 		enc.EncodeArrayLen(len(topicInfo.ConfigEntries))
 		for _, ce := range topicInfo.ConfigEntries {
-			enc.Encode(ce.ConfigName)
-			enc.Encode(ce.ConfigValue)
+			enc.EncodeString(ce.ConfigName)
+			enc.EncodeString(ce.ConfigValue)
 		}
 	}
 
-	enc.Encode(r.Timeout)
+	enc.EncodeDuration(r.Timeout)
 
 	if r.version >= KafkaV1 {
-		enc.Encode(boolToInt8(r.ValidateOnly))
+		enc.EncodeInt8(boolToInt8(r.ValidateOnly))
 	}
 
 	if enc.Err() != nil {
@@ -2491,19 +2481,19 @@ func (r *CreateTopicsResp) Bytes() ([]byte, error) {
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
-	enc.Encode(int32(0))
-	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(0)
+	enc.EncodeInt32(r.CorrelationID)
 
 	if r.Version >= KafkaV2 {
-		enc.Encode(r.ThrottleTime)
+		enc.EncodeDuration(r.ThrottleTime)
 	}
 
 	enc.EncodeArrayLen(len(r.TopicErrors))
 	for _, te := range r.TopicErrors {
-		enc.Encode(te.Topic)
-		enc.Encode(te.ErrorCode)
+		enc.EncodeString(te.Topic)
+		enc.EncodeInt16(te.ErrorCode)
 		if r.Version >= KafkaV1 {
-			enc.Encode(te.ErrorMessage)
+			enc.EncodeString(te.ErrorMessage)
 		}
 
 	}
@@ -2634,19 +2624,19 @@ func (r *APIVersionsResp) Bytes() ([]byte, error) {
 	enc := NewEncoder(&buf)
 
 	// message size - for now just placeholder
-	enc.Encode(int32(0))
-	enc.Encode(r.CorrelationID)
+	enc.EncodeInt32(0)
+	enc.EncodeInt32(r.CorrelationID)
 	//error code
-	enc.Encode(int16(0))
+	enc.EncodeInt16(0)
 	enc.EncodeArrayLen(len(r.APIVersions))
 	for _, api := range r.APIVersions {
-		enc.Encode(api.APIKey)
-		enc.Encode(api.MinVersion)
-		enc.Encode(api.MaxVersion)
+		enc.EncodeInt16(api.APIKey)
+		enc.EncodeInt16(api.MinVersion)
+		enc.EncodeInt16(api.MaxVersion)
 	}
 
 	if r.Version >= KafkaV1 {
-		enc.Encode(r.ThrottleTime)
+		enc.EncodeDuration(r.ThrottleTime)
 	}
 
 	if enc.Err() != nil {

@@ -284,72 +284,15 @@ func NewEncoder(w io.Writer) *encoder {
 	return &encoder{w: w}
 }
 
-func (e *encoder) Encode(value interface{}) {
+func (e *encoder) EncodeDuration(val time.Duration) {
 	if e.err != nil {
 		return
 	}
-	var b []byte
 
-	switch val := value.(type) {
-	case int8:
-		_, e.err = e.w.Write([]byte{byte(val)})
-	case int16:
-		b = e.buf[:2]
-		binary.BigEndian.PutUint16(b, uint16(val))
-	case int32:
-		b = e.buf[:4]
-		binary.BigEndian.PutUint32(b, uint32(val))
-	case int64:
-		b = e.buf[:8]
-		binary.BigEndian.PutUint64(b, uint64(val))
-	case uint16:
-		b = e.buf[:2]
-		binary.BigEndian.PutUint16(b, val)
-	case uint32:
-		b = e.buf[:4]
-		binary.BigEndian.PutUint32(b, val)
-	case uint64:
-		b = e.buf[:8]
-		binary.BigEndian.PutUint64(b, val)
-	case string:
-		buf := e.buf[:2]
-		binary.BigEndian.PutUint16(buf, uint16(len(val)))
-		e.err = writeAll(e.w, buf)
-		if e.err == nil {
-			e.err = writeAll(e.w, []byte(val))
-		}
-	case []byte:
-		buf := e.buf[:4]
-
-		if val == nil {
-			no := int32(-1)
-			binary.BigEndian.PutUint32(buf, uint32(no))
-			e.err = writeAll(e.w, buf)
-			return
-		}
-
-		binary.BigEndian.PutUint32(buf, uint32(len(val)))
-		e.err = writeAll(e.w, buf)
-		if e.err == nil {
-			e.err = writeAll(e.w, val)
-		}
-	case []int32:
-		e.EncodeArrayLen(len(val))
-		for _, v := range val {
-			e.Encode(v)
-		}
-	case time.Duration:
-		intVal := uint32(val / time.Millisecond)
-		b = e.buf[:4]
-		binary.BigEndian.PutUint32(b, intVal)
-	default:
-		e.err = fmt.Errorf("cannot encode type %T", value)
-	}
-
-	if b != nil {
-		e.err = writeAll(e.w, b)
-		return
-	}
+	intVal := uint32(val / time.Millisecond)
+	b := e.buf[:4]
+	binary.BigEndian.PutUint32(b, intVal)
+	_, e.err = e.w.Write(b)
 }
 
 func (e *encoder) EncodeInt8(val int8) {
@@ -357,7 +300,9 @@ func (e *encoder) EncodeInt8(val int8) {
 		return
 	}
 
-	_, e.err = e.w.Write([]byte{byte(val)})
+	b := e.buf[:1]
+	b[0] = byte(val)
+	_, e.err = e.w.Write(b)
 }
 
 func (e *encoder) EncodeInt16(val int16) {
@@ -380,6 +325,17 @@ func (e *encoder) EncodeInt32(val int32) {
 	e.err = writeAll(e.w, b)
 }
 
+func (e *encoder) EncodeInt32s(val []int32) {
+	if e.err != nil {
+		return
+	}
+
+	e.EncodeArrayLen(len(val))
+	for _, v := range val {
+		e.EncodeInt32(v)
+	}
+}
+
 func (e *encoder) EncodeInt64(val int64) {
 	if e.err != nil {
 		return
@@ -388,6 +344,17 @@ func (e *encoder) EncodeInt64(val int64) {
 	b := e.buf[:8]
 	binary.BigEndian.PutUint64(b, uint64(val))
 	e.err = writeAll(e.w, b)
+}
+
+func (e *encoder) EncodeInt64s(val []int64) {
+	if e.err != nil {
+		return
+	}
+
+	e.EncodeArrayLen(len(val))
+	for _, v := range val {
+		e.EncodeInt64(v)
+	}
 }
 
 func (e *encoder) EncodeUint32(val uint32) {

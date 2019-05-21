@@ -1565,6 +1565,7 @@ func BenchmarkProduceRequestMarshal(b *testing.B) {
 		},
 	}
 	b.ResetTimer()
+	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
 		if _, err := req.Bytes(); err != nil {
@@ -1594,6 +1595,7 @@ func BenchmarkProduceResponseUnmarshal(b *testing.B) {
 		b.Fatalf("cannot serialize response: %s", err)
 	}
 	b.ResetTimer()
+	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
 		if _, err := ReadVersionedProduceResp(bytes.NewBuffer(raw), resp.Version); err != nil {
@@ -1618,6 +1620,7 @@ func BenchmarkFetchRequestMarshal(b *testing.B) {
 		},
 	}
 	b.ResetTimer()
+	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
 		if _, err := req.Bytes(); err != nil {
@@ -1662,6 +1665,7 @@ func BenchmarkFetchResponseUnmarshal(b *testing.B) {
 		b.Fatalf("cannot serialize response: %s", err)
 	}
 	b.ResetTimer()
+	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
 		if _, err := ReadVersionedFetchResp(bytes.NewBuffer(raw), KafkaV0); err != nil {
