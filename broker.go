@@ -1080,7 +1080,7 @@ type ConsumerConf struct {
 	// MaxFetchSize is the maximum size of data which can be sent by kafka node
 	// to consumer.
 	//
-	// Default is 2000000 bytes.
+	// Default is 4MB.
 	MaxFetchSize int32
 
 	// Consumer cursor starting point. Set to StartOffsetNewest to receive only
@@ -1106,7 +1106,7 @@ func NewConsumerConf(topic string, partition int32) ConsumerConf {
 		RetryErrLimit:  10,
 		RetryErrWait:   time.Millisecond * 500,
 		MinFetchSize:   1,
-		MaxFetchSize:   2000000,
+		MaxFetchSize:   4 * 1024 * 1024,
 		StartOffset:    StartOffsetOldest,
 		Logger:         nil,
 	}
