@@ -919,6 +919,13 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 //
 // Upon a successful call, the message's Offset field is updated.
 func (p *producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
+	if len(messages) == 0 {
+		// Newer versions of kafka get upset if we send 0 messages.
+		// Previously, it would return the latest offset, which we
+		// can no longer easily get here.
+		return 0, nil
+	}
+
 	for retry := 0; retry < p.conf.RetryLimit; retry++ {
 		if retry != 0 {
 			time.Sleep(p.conf.RetryWait)
