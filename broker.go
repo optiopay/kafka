@@ -39,6 +39,7 @@ var (
 type Client interface {
 	Producer(conf ProducerConf) Producer
 	Consumer(conf ConsumerConf) (Consumer, error)
+	BatchConsumer(conf ConsumerConf) (BatchConsumer, error)
 	OffsetCoordinator(conf OffsetCoordinatorConf) (OffsetCoordinator, error)
 	OffsetEarliest(topic string, partition int32) (offset int64, err error)
 	OffsetLatest(topic string, partition int32) (offset int64, err error)
