@@ -340,8 +340,14 @@ func TestProducerWithNoAck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %s", err)
 	}
+
 	if offset != 0 {
-		t.Fatalf("expected offset different than %d", offset)
+		t.Errorf("got offset return %d, want 0", offset)
+	}
+	for i, m := range messages {
+		if m.Offset != 0 {
+			t.Errorf("message[%d] offset set to %d, want 0", i, m.Offset)
+		}
 	}
 
 	if createdMsgs != 2 {

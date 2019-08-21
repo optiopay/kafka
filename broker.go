@@ -69,8 +69,10 @@ type BatchConsumer interface {
 // be configured with the RetryLimit and RetryWait attributes.
 type Producer interface {
 	// Produce writes the messages to the given topic and partition.
-	// It returns the offset of the first message and any error encountered.
+	// It returns the offset of the first message or any error encountered.
 	// The offset of each message is also updated accordingly.
+	// Note that ProducerConf.RequiredAcks proto.RequiredAcksNone disables
+	// offset retrieval.
 	Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error)
 }
 
@@ -933,15 +935,19 @@ func (p *producer) Produce(topic string, partition int32, messages ...*proto.Mes
 
 		switch err {
 		case nil:
-			for i, msg := range messages {
-				msg.Offset = int64(i) + offset
-			}
 			if retry != 0 {
 				p.conf.Logger.Debug("Produced message after retry",
 					"retry", retry,
 					"topic", topic)
 			}
-			return offset, err
+			if offset < 0 {
+				return 0, nil // no acknowledge (configured)
+			}
+			for i, msg := range messages {
+				msg.Offset = offset + int64(i)
+			}
+			return offset, nil
+
 		case io.EOF, syscall.EPIPE:
 			// p.produce call is closing connection when this error shows up,
 			// but it's also returning it so that retry loop can count this
@@ -1007,7 +1013,7 @@ func (p *producer) produce(topic string, partition int32, messages ...*proto.Mes
 	}
 
 	if req.RequiredAcks == proto.RequiredAcksNone {
-		return 0, err
+		return -1, err
 	}
 
 	// we expect single partition response
