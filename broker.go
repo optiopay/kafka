@@ -63,10 +63,14 @@ type BatchConsumer interface {
 
 // Producer is the interface that wraps the Produce method.
 //
-// Produce writes the messages to the given topic and partition.
-// It returns the offset of the first message and any error encountered.
-// The offset of each message is also updated accordingly.
+// Writes within the call are atomic, meaning either all or none of them
+// are written to kafka. Producer has a configurable amount of retries which
+// may be attempted when common errors are encountered. This behaviour can
+// be configured with the RetryLimit and RetryWait attributes.
 type Producer interface {
+	// Produce writes the messages to the given topic and partition.
+	// It returns the offset of the first message and any error encountered.
+	// The offset of each message is also updated accordingly.
 	Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error)
 }
 
@@ -911,13 +915,7 @@ func (b *Broker) Producer(conf ProducerConf) Producer {
 	}
 }
 
-// Produce writes messages to the given destination. Writes within the call are
-// atomic, meaning either all or none of them are written to kafka.  Produce
-// has a configurable amount of retries which may be attempted when common
-// errors are encountered.  This behaviour can be configured with the
-// RetryLimit and RetryWait attributes.
-//
-// Upon a successful call, the message's Offset field is updated.
+// Produce honors the Producer interface.
 func (p *producer) Produce(topic string, partition int32, messages ...*proto.Message) (offset int64, err error) {
 	if len(messages) == 0 {
 		// Newer versions of kafka get upset if we send 0 messages.
