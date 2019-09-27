@@ -307,6 +307,13 @@ func (s *Server) handleClient(nodeID int32, conn net.Conn) {
 					return
 				}
 				resp = s.handleConsumerMetadataRequest(nodeID, conn, req)
+			case proto.APIVersionsReqKind:
+				req, err := proto.ReadAPIVersionsReq(bytes.NewBuffer(b))
+				if err != nil {
+					log.Printf("cannot parse API version request: %s\n%s", err, b)
+					return
+				}
+				resp = s.handleAPIVersionsRequest(nodeID, conn, req)
 			default:
 				log.Printf("unknown request: %d\n%s", kind, b)
 				return
@@ -337,7 +344,7 @@ func (s *Server) handleProduceRequest(nodeID int32, conn net.Conn, req *proto.Pr
 	defer s.mu.Unlock()
 
 	resp := &proto.ProduceResp{
-		Version:       req.GetVersion(),
+		Version:       proto.KafkaV0,
 		CorrelationID: req.GetCorrelationID(),
 		Topics:        make([]proto.ProduceRespTopic, len(req.Topics)),
 	}
@@ -380,7 +387,7 @@ func (s *Server) fetchRequest(req *proto.FetchReq) (response, int) {
 	var messagesNum int
 
 	resp := &proto.FetchResp{
-		Version:       req.GetVersion(),
+		Version:       proto.KafkaV0,
 		CorrelationID: req.GetCorrelationID(),
 		Topics:        make([]proto.FetchRespTopic, len(req.Topics)),
 	}
@@ -431,7 +438,7 @@ func (s *Server) handleOffsetRequest(nodeID int32, conn net.Conn, req *proto.Off
 	defer s.mu.RUnlock()
 
 	resp := &proto.OffsetResp{
-		Version:       req.GetVersion(),
+		Version:       proto.KafkaV0,
 		CorrelationID: req.GetCorrelationID(),
 		Topics:        make([]proto.OffsetRespTopic, len(req.Topics)),
 	}
@@ -464,12 +471,32 @@ func (s *Server) handleConsumerMetadataRequest(nodeID int32, conn net.Conn, req 
 	port, _ := strconv.Atoi(addrps[1])
 
 	return &proto.ConsumerMetadataResp{
-		Version:         req.GetVersion(),
+		Version:         proto.KafkaV0,
 		CorrelationID:   req.GetCorrelationID(),
 		CoordinatorID:   0,
 		CoordinatorHost: addrps[0],
 		CoordinatorPort: int32(port),
 	}
+}
+
+func (s *Server) handleAPIVersionsRequest(nodeID int32, conn net.Conn, req *proto.APIVersionsReq) response {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return &proto.APIVersionsResp{
+		Version:       proto.KafkaV0,
+		CorrelationID: req.GetCorrelationID(),
+		APIVersions: []proto.SupportedVersion{
+			{APIKey: proto.ProduceReqKind, MinVersion: proto.KafkaV0, MaxVersion: proto.KafkaV0},
+			{APIKey: proto.FetchReqKind, MinVersion: proto.KafkaV0, MaxVersion: proto.KafkaV0},
+			{APIKey: proto.OffsetReqKind, MinVersion: proto.KafkaV0, MaxVersion: proto.KafkaV0},
+			{APIKey: proto.MetadataReqKind, MinVersion: proto.KafkaV0, MaxVersion: proto.KafkaV0},
+			{APIKey: proto.OffsetCommitReqKind, MinVersion: proto.KafkaV0, MaxVersion: proto.KafkaV0},
+			{APIKey: proto.OffsetFetchReqKind, MinVersion: proto.KafkaV0, MaxVersion: proto.KafkaV0},
+			{APIKey: proto.ConsumerMetadataReqKind, MinVersion: proto.KafkaV0, MaxVersion: proto.KafkaV0},
+			{APIKey: proto.APIVersionsReqKind, MinVersion: proto.KafkaV0, MaxVersion: proto.KafkaV0},
+		},
+	}
+
 }
 
 func (s *Server) getTopicOffset(group, topic string, partID int32) *topicOffset {
@@ -499,7 +526,7 @@ func (s *Server) handleOffsetFetchRequest(nodeID int32, conn net.Conn, req *prot
 	defer s.mu.RUnlock()
 
 	resp := &proto.OffsetFetchResp{
-		Version:       req.GetVersion(),
+		Version:       proto.KafkaV0,
 		CorrelationID: req.GetCorrelationID(),
 		Topics:        make([]proto.OffsetFetchRespTopic, len(req.Topics)),
 	}
@@ -522,7 +549,7 @@ func (s *Server) handleOffsetCommitRequest(nodeID int32, conn net.Conn, req *pro
 	defer s.mu.Unlock()
 
 	resp := &proto.OffsetCommitResp{
-		Version:       req.GetVersion(),
+		Version:       proto.KafkaV0,
 		CorrelationID: req.GetCorrelationID(),
 		Topics:        make([]proto.OffsetCommitRespTopic, len(req.Topics)),
 	}
@@ -546,6 +573,7 @@ func (s *Server) handleMetadataRequest(nodeID int32, conn net.Conn, req *proto.M
 	defer s.mu.RUnlock()
 
 	resp := &proto.MetadataResp{
+		Version:       proto.KafkaV0,
 		CorrelationID: req.GetCorrelationID(),
 		Topics:        make([]proto.MetadataRespTopic, 0, len(s.topics)),
 		Brokers:       s.brokers,
