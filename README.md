@@ -1,5 +1,5 @@
 [![Tests status](https://github.com/optiopay/kafka/workflows/Kafka/badge.svg)](https://github.com/optiopay/kafka/actions?query=workflow%3AKafka)
-[![GoDoc](https://godoc.org/github.com/optiopay/kafka?status.png)](https://godoc.org/github.com/optiopay/kafka)
+[![GoDoc](https://godoc.org/github.com/optiopay/kafka/v2?status.png)](https://godoc.org/github.com/optiopay/kafka/v2)
 
 # Kafka
 
@@ -10,8 +10,8 @@ Kafka provides minimal abstraction over wire protocol, support for transparent
 failover and easy to use blocking API.
 
 
-* [godoc](https://godoc.org/github.com/optiopay/kafka) generated documentation,
-* [code examples](https://godoc.org/github.com/optiopay/kafka#pkg-examples)
+* [godoc](https://godoc.org/github.com/optiopay/kafka/v2) generated documentation,
+* [code examples](https://godoc.org/github.com/optiopay/kafka/v2#pkg-examples)
 
 ## Example
 
