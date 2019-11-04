@@ -3,7 +3,7 @@ package kafka
 import (
 	"fmt"
 
-	"github.com/optiopay/kafka/proto"
+	"github.com/optiopay/kafka/v2/proto"
 )
 
 func ExampleConsumer() {

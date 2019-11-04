@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/optiopay/kafka"
-	"github.com/optiopay/kafka/proto"
+	"github.com/optiopay/kafka/v2"
+	"github.com/optiopay/kafka/v2/proto"
 )
 
 func TestBrokerProducer(t *testing.T) {

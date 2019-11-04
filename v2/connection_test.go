@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/optiopay/kafka/proto"
+	"github.com/optiopay/kafka/v2/proto"
 )
 
-const TLSCaFile = "./testkeys/ca.crt"
-const TLSCertFile = "./testkeys/oats.crt"
-const TLSKeyFile = "./testkeys/oats.key"
+const TLSCaFile = "../testkeys/ca.crt"
+const TLSCertFile = "../testkeys/oats.crt"
+const TLSKeyFile = "../testkeys/oats.key"
 
 type serializableMessage interface {
 	Bytes() ([]byte, error)

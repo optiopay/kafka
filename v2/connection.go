@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/optiopay/kafka/proto"
+	"github.com/optiopay/kafka/v2/proto"
 )
 
 // ErrClosed is returned as result of any request made using closed connection.
