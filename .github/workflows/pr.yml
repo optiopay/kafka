@@ -21,11 +21,10 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
 
-      - name: Run tests
-        run: go test ./...
+      - name: Run tests for v2
+        run: cd v2 && go test ./...
         env:
           GO111MODULE: on
-          GOFLAGS: "-mod=vendor"
 
   lint:
     runs-on: ubuntu-latest
