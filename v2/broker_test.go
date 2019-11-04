@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/optiopay/kafka/proto"
+	"github.com/optiopay/kafka/v2/proto"
 )
 
 // newTestBrokerConf returns BrokerConf with default configuration adjusted for
