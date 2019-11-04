@@ -1,4 +1,4 @@
-[![CircleCI](https://circleci.com/gh/optiopay/kafka.svg?style=svg)](https://circleci.com/gh/optiopay/kafka)
+[![Tests status](https://github.com/optiopay/kafka/workflows/Kafka/badge.svg)](https://github.com/optiopay/kafka/actions?query=workflow%3AKafka)
 [![GoDoc](https://godoc.org/github.com/optiopay/kafka?status.png)](https://godoc.org/github.com/optiopay/kafka)
 
 # Kafka
